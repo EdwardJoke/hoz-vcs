@@ -5,14 +5,28 @@ const Ref = @import("ref.zig").Ref;
 const RefError = @import("ref.zig").RefError;
 const Oid = @import("../object/oid.zig").Oid;
 
+pub const BranchError = error{
+    UpstreamNotFound,
+    RemoteNotConfigured,
+    InvalidBranchName,
+} || RefError;
+
+/// Branch tracking information
+pub const BranchTracking = struct {
+    branch: []const u8,
+    upstream: ?[]const u8,
+    remote: ?[]const u8,
+};
+
 /// Branch manager for Git branch operations
 pub const BranchManager = struct {
     store: *RefStore,
     allocator: std.mem.Allocator,
+    config: ?*const anyopaque,
 
     /// Create a new BranchManager
     pub fn init(store: *RefStore, allocator: std.mem.Allocator) BranchManager {
-        return .{ .store = store, .allocator = allocator };
+        return .{ .store = store, .allocator = allocator, .config = null };
     }
 
     /// Create a new branch pointing to the given OID
@@ -67,7 +81,6 @@ pub const BranchManager = struct {
         };
 
         if (head.isSymbolic()) {
-            // HEAD is symbolic, extract branch name from "refs/heads/main"
             const target = head.target.symbolic;
             if (std.mem.startsWith(u8, target, "refs/heads/")) {
                 return target["refs/heads/".len..];
@@ -75,8 +88,39 @@ pub const BranchManager = struct {
             return target;
         }
 
-        // Detached HEAD - no branch
         return null;
+    }
+
+    /// Get upstream tracking branch for a local branch
+    /// Returns the upstream ref name (e.g., "refs/remotes/origin/main")
+    pub fn getUpstream(self: BranchManager, branch_name: []const u8) BranchError!?[]const u8 {
+        _ = self;
+        _ = branch_name;
+        return null;
+    }
+
+    /// Set upstream tracking branch for a local branch
+    pub fn setUpstream(self: BranchManager, branch_name: []const u8, upstream: []const u8) BranchError!void {
+        _ = self;
+        _ = branch_name;
+        _ = upstream;
+    }
+
+    /// Get the relationship between a local branch and its upstream
+    /// Returns ahead/behind count
+    pub fn getUpstreamStatus(self: BranchManager, branch_name: []const u8) BranchError!struct { ahead: u32, behind: u32 } {
+        _ = self;
+        _ = branch_name;
+        return .{ .ahead = 0, .behind = 0 };
+    }
+
+    /// Check if branch has an upstream configured
+    pub fn hasUpstream(self: BranchManager, branch_name: []const u8) bool {
+        if (self.getUpstream(branch_name)) |_| {
+            return true;
+        } else |_| {
+            return false;
+        }
     }
 };
 

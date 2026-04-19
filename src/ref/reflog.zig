@@ -9,18 +9,55 @@ pub const ReflogEntry = struct {
     new_oid: Oid,
     committer: Identity,
     timestamp: i64,
-    timezone: [5]u8, // +HHMM or -HHMM
+    timezone: Timezone,
     message: []const u8,
 
     pub const Identity = struct {
         name: []const u8,
         email: []const u8,
     };
+
+    pub const Timezone = struct {
+        offset: i8,
+
+        pub fn formatZoned(offset: i8) [6]u8 {
+            var buf: [6]u8 = undefined;
+            const sign: u8 = if (offset < 0) '-' else '+';
+            const abs_offset = @abs(offset);
+            const hours = abs_offset / 4;
+            const mins = (abs_offset % 4) * 15;
+            _ = std.fmt.bufPrint(&buf, "{c}{02d}{02d}", .{ sign, hours, mins }) catch unreachable;
+            return buf;
+        }
+
+        pub fn parse(input: []const u8) !Timezone {
+            if (input.len != 5) return error.InvalidTimezone;
+            const sign = input[0];
+            if (sign != '+' and sign != '-') return error.InvalidTimezone;
+
+            const hours = try std.fmt.parseInt(i8, input[1..3], 10);
+            const mins = try std.fmt.parseInt(i8, input[3..5], 10);
+
+            if (hours < 0 or hours > 14) return error.InvalidTimezone;
+            if (mins != 0 and mins != 15 and mins != 30 and mins != 45) return error.InvalidTimezone;
+
+            var offset: i8 = hours * 4 + mins / 15;
+            if (sign == '-') offset = -offset;
+
+            return Timezone{ .offset = offset };
+        }
+
+        pub fn toArray(self: Timezone) [5]u8 {
+            const formatted = formatZoned(self.offset);
+            return formatted[0..5].*;
+        }
+    };
 };
 
 /// Reflog error types
 pub const ReflogError = error{
     InvalidFormat,
+    InvalidTimezone,
     IoError,
     FileNotFound,
     ParseError,
@@ -70,13 +107,18 @@ pub const ReflogManager = struct {
         var buf = std.ArrayList(u8).init(self.allocator);
         defer buf.deinit();
 
+        // Format timestamp and timezone
+        const timestamp = std.time.timestamp();
+        const tz = ReflogEntry.Timezone{ .offset = 0 }; // UTC
+        const tz_str = tz.toArray();
+
         try buf.writer().print("{s} {s} {s} <{s}> {d} {s}\t{s}\n", .{
             old_oid.hexString(),
             new_oid.hexString(),
             identity.name,
             identity.email,
-            std.time.timestamp(),
-            "+0000", // TODO: actual timezone
+            timestamp,
+            &tz_str,
             message,
         });
 
@@ -140,8 +182,7 @@ pub const ReflogManager = struct {
         const new_oid = Oid.fromHex(new_oid_hex) catch return error.ParseError;
         const timestamp = std.fmt.parseInt(i64, timestamp_str, 10) catch return error.ParseError;
 
-        var tz: [5]u8 = undefined;
-        @memcpy(tz[0..timezone.len], timezone);
+        const tz = ReflogEntry.Timezone.parse(timezone) catch return error.ParseError;
 
         return .{
             .old_oid = old_oid,

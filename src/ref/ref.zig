@@ -8,6 +8,7 @@ pub const RefError = error{
     InvalidRefName,
     InvalidHexOid,
     SymrefTargetNotFound,
+    SymrefCycleDetected,
     IoError,
 } || std.fs.File.ReadError || std.fs.File.WriteError;
 
@@ -50,7 +51,7 @@ pub const Ref = struct {
     pub fn getOid(self: Ref) ?Oid {
         switch (self.target) {
             .direct => |oid| return oid,
-            .symbolic => |_| return null,
+            .symbolic => return null,
         }
     }
 
