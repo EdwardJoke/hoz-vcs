@@ -80,6 +80,52 @@ pub const IndexExtension = struct {
     }
 };
 
+pub const WriteBufferOptions = struct {
+    enabled: bool = true,
+    size: usize = 65536,
+};
+
+pub const TreeCache = struct {
+    allocator: std.mem.Allocator,
+    entries: std.StringArrayHashMap(TreeCacheEntry),
+    enabled: bool,
+
+    pub const TreeCacheEntry = struct {
+        oid: [20]u8,
+        path: []const u8,
+        mtime: u64,
+    };
+
+    pub fn init(allocator: std.mem.Allocator) TreeCache {
+        return .{
+            .allocator = allocator,
+            .entries = std.StringArrayHashMap(TreeCacheEntry).init(allocator),
+            .enabled = true,
+        };
+    }
+
+    pub fn deinit(self: *TreeCache) void {
+        self.entries.deinit();
+    }
+
+    pub fn get(self: *TreeCache, path: []const u8) ?TreeCacheEntry {
+        return self.entries.get(path);
+    }
+
+    pub fn put(self: *TreeCache, path: []const u8, entry: TreeCacheEntry) !void {
+        try self.entries.put(path, entry);
+    }
+
+    pub fn invalidate(self: *TreeCache, path: []const u8) void {
+        _ = self;
+        _ = path;
+    }
+
+    pub fn clear(self: *TreeCache) void {
+        self.entries.clearRetainingCapacity();
+    }
+};
+
 /// Index extensions
 pub const Extensions = struct {
     tree: ?[]u8 = null,
@@ -124,6 +170,9 @@ pub const Index = struct {
     version: u32,
     split_index: SplitIndexMode,
     options: IndexOptions,
+    buffered_writes: bool = false,
+    write_buffer: ?[]u8 = null,
+    tree_cache: ?*TreeCache = null,
 
     /// Create a new empty Index with default options
     pub fn init(allocator: std.mem.Allocator) Index {
@@ -138,6 +187,9 @@ pub const Index = struct {
             .version = INDEX_VERSION,
             .split_index = SplitIndexMode{},
             .options = IndexOptions{},
+            .buffered_writes = false,
+            .write_buffer = null,
+            .tree_cache = null,
         };
     }
 
