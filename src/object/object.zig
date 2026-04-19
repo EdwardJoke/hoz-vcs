@@ -14,6 +14,53 @@ pub const Type = enum(u2) {
     tag,
 };
 
+pub const TypeIterator = struct {
+    current: Type,
+
+    pub fn next(self: *TypeIterator) ?Type {
+        const idx = @intFromEnum(self.current);
+        if (idx >= @intFromEnum(Type.tag)) return null;
+        self.current = @as(Type, @enumFromInt(idx + 1));
+        return self.current;
+    }
+};
+
+pub const ObjectType = struct {
+    obj_type: Type,
+
+    pub fn isBlob(self: ObjectType) bool {
+        return self.obj_type == .blob;
+    }
+
+    pub fn isTree(self: ObjectType) bool {
+        return self.obj_type == .tree;
+    }
+
+    pub fn isCommit(self: ObjectType) bool {
+        return self.obj_type == .commit;
+    }
+
+    pub fn isTag(self: ObjectType) bool {
+        return self.obj_type == .tag;
+    }
+
+    pub fn isCommitOrTag(self: ObjectType) bool {
+        return self.obj_type == .commit or self.obj_type == .tag;
+    }
+
+    pub fn isTreeish(self: ObjectType) bool {
+        return self.obj_type == .tree or self.obj_type == .blob;
+    }
+
+    pub fn requiresBody(self: ObjectType) bool {
+        return self.obj_type == .commit or self.obj_type == .tag;
+    }
+
+    pub fn canHaveChildren(self: ObjectType) bool {
+        return self.obj_type == .tree or self.obj_type == .commit;
+    }
+};
+
 /// Convert object type to Git type string (used in serialization)
 pub fn typeToStr(t: Type) []const u8 {
     return switch (t) {
@@ -35,6 +82,7 @@ pub fn typeFromStr(str: []const u8) !Type {
 
 /// Object header format: "<type> <size>\0"
 pub fn computeHeaderSize(t: Type, size: usize) usize {
+    _ = size;
     const type_str = typeToStr(t);
     // Format: "<type> <size>\0" -> length of type + 1 (space) + max digits of size + 1 (null)
     return type_str.len + 1 + 10 + 1; // 10 = max digits for 32-bit size

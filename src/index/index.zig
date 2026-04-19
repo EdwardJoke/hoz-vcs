@@ -4,7 +4,7 @@
 //! - 12-byte header: DIR (4 bytes) + VERSION (4 bytes) + ENTRY_COUNT (4 bytes)
 //! - Sorted array of 62-byte entries (each entry is 62 bytes)
 //! - Optional extensions
-//! - 20-byte SHA-1 checksum of the above
+//! - 20-byte SHA-1 checksum of the above (or 32-byte SHA-256)
 //!
 //! Extensions are optional and can provide additional functionality.
 //! Common extensions include TREE (for faster tree computations) and
@@ -15,12 +15,19 @@ const crypto = std.crypto;
 const Oid = @import("../object/oid.zig").Oid;
 const IndexEntry = @import("index_entry.zig").IndexEntry;
 const crc32 = @import("../compress/crc32.zig").crc32;
+const sha256_mod = @import("../crypto/sha256.zig");
 
 /// Index file signature bytes ("DIRC" = dir cache)
 const INDEX_SIGNATURE: [4]u8 = .{ 'D', 'I', 'R', 'C' };
 
+/// SHA-256 index signature ("DIRS" = dir cache SHA-256)
+const INDEX_SIGNATURE_SHA256: [4]u8 = .{ 'D', 'I', 'R', 'S' };
+
 /// Index file version
 pub const INDEX_VERSION: u32 = 2;
+
+/// SHA-256 index version (v3 with SHA-256)
+pub const INDEX_VERSION_SHA256: u32 = 4;
 
 /// Index header size (12 bytes)
 const INDEX_HEADER_SIZE: usize = 12;
@@ -44,6 +51,23 @@ pub const ExtensionSignature = enum(u8) {
     tree = 'T', // TREE extension - optimized tree storage
     reuc = 'R', // REUC extension - resolve undo conflict
     fmix = 'F', // FMIX extension - fan-out merge index
+};
+
+pub const CompressionLevel = enum(u8) {
+    none = 0,
+    fastest = 1,
+    fast = 3,
+    default = 5,
+    good = 7,
+    best = 9,
+};
+
+pub const IndexOptions = struct {
+    compression_level: CompressionLevel = .default,
+    version: u32 = INDEX_VERSION,
+    assume_unchanged: bool = false,
+    skip_worktree: bool = false,
+    hash_algorithm: sha256_mod.HashAlgorithm = .sha1,
 };
 
 /// Represents an extension in the index file
@@ -96,10 +120,12 @@ pub const Index = struct {
     entry_names: std.ArrayList([]const u8),
     extensions: Extensions,
     checksum: [20]u8,
+    checksum_sha256: [32]u8,
     version: u32,
     split_index: SplitIndexMode,
+    options: IndexOptions,
 
-    /// Create a new empty Index
+    /// Create a new empty Index with default options
     pub fn init(allocator: std.mem.Allocator) Index {
         return Index{
             .entries = std.ArrayList(IndexEntry).init(allocator),
@@ -108,9 +134,43 @@ pub const Index = struct {
                 .others = std.ArrayList(IndexExtension).init(allocator),
             },
             .checksum = [1]u8{0} ** 20,
+            .checksum_sha256 = [1]u8{0} ** 32,
             .version = INDEX_VERSION,
             .split_index = SplitIndexMode{},
+            .options = IndexOptions{},
         };
+    }
+
+    /// Create a new Index with custom options
+    pub fn initWithOptions(allocator: std.mem.Allocator, opts: IndexOptions) Index {
+        return Index{
+            .entries = std.ArrayList(IndexEntry).init(allocator),
+            .entry_names = std.ArrayList([]const u8).init(allocator),
+            .extensions = Extensions{
+                .others = std.ArrayList(IndexExtension).init(allocator),
+            },
+            .checksum = [1]u8{0} ** 20,
+            .checksum_sha256 = [1]u8{0} ** 32,
+            .version = opts.version,
+            .split_index = SplitIndexMode{},
+            .options = opts,
+        };
+    }
+
+    /// Get checksum based on hash algorithm
+    pub fn getChecksum(self: *const Index) []const u8 {
+        if (self.options.hash_algorithm == .sha256) {
+            return &self.checksum_sha256;
+        }
+        return &self.checksum;
+    }
+
+    /// Get checksum size based on hash algorithm
+    pub fn getChecksumSize(self: *const Index) usize {
+        if (self.options.hash_algorithm == .sha256) {
+            return 32;
+        }
+        return 20;
     }
 
     /// Create an Index from a file
@@ -595,6 +655,21 @@ pub const Index = struct {
             return true;
         }
         return false;
+    }
+
+    pub fn upgradeVersion(self: *Index, target_version: u32) !void {
+        if (target_version < 2 or target_version > 3) {
+            return error.UnsupportedIndexVersion;
+        }
+        if (self.version == target_version) {
+            return;
+        }
+        if (self.version == 2 and target_version == 3) {
+            self.version = 3;
+            self.options.version = 3;
+        } else if (self.version == 3 and target_version == 2) {
+            return error.CannotDowngradeIndex;
+        }
     }
 };
 
