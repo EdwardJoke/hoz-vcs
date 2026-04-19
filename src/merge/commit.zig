@@ -7,6 +7,7 @@ pub const MergeCommitOptions = struct {
     no_ff: bool = false,
     ff: bool = false,
     log: bool = true,
+    no_commit: bool = false,
 };
 
 pub const MergeCommitResult = struct {
