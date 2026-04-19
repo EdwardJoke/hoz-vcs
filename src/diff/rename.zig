@@ -91,6 +91,11 @@ pub const RenameDetection = struct {
         if (old_content.len == 0 and new_content.len == 0) return 1.0;
         if (old_content.len == 0 or new_content.len == 0) return 0.0;
 
+        const similarity = try self.computeMyersSimilarity(old_content, new_content);
+        return similarity;
+    }
+
+    fn computeMyersSimilarity(self: *RenameDetection, old_content: []const u8, new_content: []const u8) !f64 {
         const old_lines = try self.splitLines(old_content);
         defer self.allocator.free(old_lines);
         const new_lines = try self.splitLines(new_content);
@@ -98,6 +103,9 @@ pub const RenameDetection = struct {
 
         if (old_lines.len == 0 and new_lines.len == 0) return 1.0;
         if (old_lines.len == 0 or new_lines.len == 0) return 0.0;
+
+        const old_bytes = old_content.len;
+        const new_bytes = new_content.len;
 
         var matching_lines: usize = 0;
         var old_idx: usize = 0;
@@ -118,8 +126,17 @@ pub const RenameDetection = struct {
             }
         }
 
-        const max_lines = @max(old_lines.len, new_lines.len);
-        return @as(f64, @floatFromInt(matching_lines)) / @as(f64, @floatFromInt(max_lines));
+        const identical_bytes = if (matching_lines > 0) blk: {
+            var total: usize = 0;
+            for (0..matching_lines) |i| {
+                total += old_lines[i].len + 1;
+            }
+            break :blk total;
+        } else 0;
+
+        const similarity = @as(f64, @floatFromInt(2 * identical_bytes)) / @as(f64, @floatFromInt(old_bytes + new_bytes));
+
+        return @min(1.0, similarity);
     }
 
     fn splitLines(self: *RenameDetection, content: []const u8) ![]const []const u8 {

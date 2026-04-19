@@ -162,19 +162,23 @@ pub const UnifiedDiff = struct {
     }
 
     fn printHunk(
-        self: *UnifiedHunk,
+        self: *UnifiedDiff,
         writer: *Io.Writer,
+        hunk: UnifiedHunk,
         old_lines: []const []const u8,
         new_lines: []const []const u8,
     ) !void {
+        _ = self;
+        _ = old_lines;
+        _ = new_lines;
         try writer.print("@@ -{d},{d} +{d},{d} @@\n", .{
-            self.old_start,
-            self.old_count,
-            self.new_start,
-            self.new_count,
+            hunk.old_start,
+            hunk.old_count,
+            hunk.new_start,
+            hunk.new_count,
         });
 
-        for (self.lines) |line| {
+        for (hunk.lines) |line| {
             try writer.print("{s}\n", .{line});
         }
     }
