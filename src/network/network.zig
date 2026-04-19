@@ -13,6 +13,7 @@ pub usingnamespace @import("pack_recv.zig");
 pub usingnamespace @import("connectivity.zig");
 pub usingnamespace @import("shallow.zig");
 pub usingnamespace @import("prune.zig");
+pub usingnamespace @import("protocol.zig");
 
 test "network module loads" {
     try std.testing.expect(true);

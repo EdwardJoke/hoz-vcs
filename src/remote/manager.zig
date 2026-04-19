@@ -39,7 +39,53 @@ pub const RemoteManager = struct {
         _ = new_name;
         return Remote{ .name = new_name, .url = "", .fetch_url = "", .push_url = "" };
     }
+
+    pub fn setUrl(self: *RemoteManager, name: []const u8, url: []const u8) !Remote {
+        _ = self;
+        _ = name;
+        _ = url;
+        return Remote{ .name = name, .url = url, .fetch_url = url, .push_url = url };
+    }
+
+    pub fn showRemote(self: *RemoteManager, name: []const u8) !RemoteShowInfo {
+        _ = self;
+        _ = name;
+        return RemoteShowInfo{
+            .name = name,
+            .fetch_url = "",
+            .push_url = "",
+            .branches = &.{},
+            .tags = &.{},
+        };
+    }
 };
+
+pub const RemoteShowInfo = struct {
+    name: []const u8,
+    fetch_url: []const u8,
+    push_url: []const u8,
+    branches: []const []const u8,
+    tags: []const []const u8,
+};
+
+pub const PruneOptions = struct {
+    dry_run: bool = false,
+};
+
+pub const PruneResult = struct {
+    pruned_refs: []const []const u8,
+    dry_run: bool,
+};
+
+pub fn pruneRemote(self: *RemoteManager, name: []const u8, options: PruneOptions) !PruneResult {
+    _ = self;
+    _ = name;
+    _ = options;
+    return PruneResult{
+        .pruned_refs = &.{},
+        .dry_run = options.dry_run,
+    };
+}
 
 test "Remote structure" {
     const remote = Remote{ .name = "origin", .url = "https://github.com/user/repo.git", .fetch_url = "", .push_url = "" };
