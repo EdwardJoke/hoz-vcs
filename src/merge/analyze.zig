@@ -16,6 +16,101 @@ pub const AnalysisResult = struct {
     commits_behind: u32,
 };
 
+pub const MergeBaseFinder = struct {
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) MergeBaseFinder {
+        return .{ .allocator = allocator };
+    }
+
+    pub fn findMergeBase(self: *MergeBaseFinder, commit_a: OID, commit_b: OID) !?OID {
+        const ancestors_a = try self.getAncestors(commit_a);
+        defer self.allocator.free(ancestors_a);
+        const ancestors_b = try self.getAncestors(commit_b);
+        defer self.allocator.free(ancestors_b);
+
+        var visited = std.AutoHashMap(OID, void).init(self.allocator);
+        defer visited.deinit();
+
+        for (ancestors_a) |ancestor| {
+            try visited.put(ancestor, {});
+        }
+
+        for (ancestors_b) |ancestor| {
+            if (visited.contains(ancestor)) {
+                return ancestor;
+            }
+        }
+
+        return null;
+    }
+
+    pub fn findRecursiveMergeBase(self: *MergeBaseFinder, commit_x: OID, commit_y: OID, commit_z: OID) !?OID {
+        const base1 = try self.findMergeBase(commit_x, commit_y);
+        if (base1 == null) return null;
+
+        const base2 = try self.findMergeBase(base1.?, commit_z);
+        if (base2 == null) return null;
+
+        var current = base2.?;
+        var iteration: u32 = 0;
+        const max_iterations: u32 = 1000;
+
+        while (iteration < max_iterations) : (iteration += 1) {
+            const candidate1 = try self.findMergeBase(current, commit_x);
+            const candidate2 = try self.findMergeBase(current, commit_y);
+
+            if (candidate1 != null and std.mem.eql(u8, &candidate1.?.bytes, &candidate2.?.bytes)) {
+                return candidate1;
+            }
+
+            if (candidate1) |c1| {
+                current = c1;
+            } else if (candidate2) |c2| {
+                current = c2;
+            } else {
+                break;
+            }
+        }
+
+        return base2;
+    }
+
+    fn getAncestors(self: *MergeBaseFinder, commit: OID) ![]OID {
+        var ancestors = std.ArrayList(OID).init(self.allocator);
+        errdefer ancestors.deinit();
+
+        var current = commit;
+        var visited = std.AutoHashMap(OID, void).init(self.allocator);
+        defer visited.deinit();
+
+        var iteration: u32 = 0;
+        const max_iterations: u32 = 10000;
+
+        while (iteration < max_iterations) : (iteration += 1) {
+            if (visited.contains(current)) break;
+            try visited.put(current, {});
+            try ancestors.append(current);
+
+            const parent = self.getCommitParent(current) catch break;
+            if (parent == null) break;
+            current = parent.?;
+        }
+
+        return ancestors.toOwnedSlice();
+    }
+
+    fn getCommitParent(self: *MergeBaseFinder, commit: OID) !?OID {
+        _ = self;
+        _ = commit;
+        return null;
+    }
+
+    fn oidsEqual(a: OID, b: OID) bool {
+        return std.mem.eql(u8, &a.bytes, &b.bytes);
+    }
+};
+
 pub const MergeAnalyzer = struct {
     allocator: std.mem.Allocator,
 
@@ -24,19 +119,39 @@ pub const MergeAnalyzer = struct {
     }
 
     pub fn analyze(self: *MergeAnalyzer, ours: OID, theirs: OID) !AnalysisResult {
-        _ = self;
-        _ = ours;
-        _ = theirs;
+        var finder = MergeBaseFinder.init(self.allocator);
+        const merge_base = try finder.findMergeBase(ours, theirs);
+
+        if (merge_base == null) {
+            return AnalysisResult{
+                .analysis = .{
+                    .is_fast_forward = false,
+                    .is_up_to_date = false,
+                    .is_normal = true,
+                    .can_ff = false,
+                },
+                .common_ancestor = null,
+                .commits_ahead = 0,
+                .commits_behind = 0,
+            };
+        }
+
+        const ancestor = merge_base.?;
+        const is_ff = std.mem.eql(u8, &ancestor.bytes, &ours.bytes);
+
+        const ahead = try self.countAncestorsBetween(ours, ancestor);
+        const behind = try self.countAncestorsBetween(theirs, ancestor);
+
         return AnalysisResult{
             .analysis = .{
-                .is_fast_forward = false,
-                .is_up_to_date = false,
-                .is_normal = true,
-                .can_ff = false,
+                .is_fast_forward = is_ff,
+                .is_up_to_date = std.mem.eql(u8, &ours.bytes, &theirs.bytes),
+                .is_normal = !is_ff,
+                .can_ff = merge_base != null,
             },
-            .common_ancestor = null,
-            .commits_ahead = 0,
-            .commits_behind = 0,
+            .common_ancestor = merge_base,
+            .commits_ahead = ahead,
+            .commits_behind = behind,
         };
     }
 
@@ -45,6 +160,13 @@ pub const MergeAnalyzer = struct {
         _ = ours;
         _ = theirs;
         return true;
+    }
+
+    fn countAncestorsBetween(self: *MergeAnalyzer, descendant: OID, ancestor: OID) !u32 {
+        _ = self;
+        _ = descendant;
+        _ = ancestor;
+        return 0;
     }
 };
 

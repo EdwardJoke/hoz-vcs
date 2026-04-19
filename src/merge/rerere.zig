@@ -21,21 +21,110 @@ pub const RerereDB = struct {
     }
 
     pub fn findResolution(self: *RerereDB, path: []const u8, conflict: []const u8) !RerereResult {
-        _ = self;
-        _ = path;
-        _ = conflict;
+        if (!self.options.enabled) {
+            return RerereResult{ .has_resolution = false, .resolution = null };
+        }
+
+        const conflict_id = try self.generateConflictID(conflict);
+        defer self.allocator.free(conflict_id);
+
+        const resolved = self.findInDatabase(conflict_id);
+        if (resolved) |resolution| {
+            return RerereResult{ .has_resolution = true, .resolution = resolution };
+        }
+
         return RerereResult{ .has_resolution = false, .resolution = null };
     }
 
     pub fn recordResolution(self: *RerereDB, path: []const u8, resolution: []const u8) !void {
-        _ = self;
-        _ = path;
-        _ = resolution;
+        if (!self.options.enabled) return;
+
+        const conflict_id = try self.generateConflictID(resolution);
+        defer self.allocator.free(conflict_id);
+
+        try self.writeToDatabase(path, conflict_id, resolution);
     }
 
     pub fn isEnabled(self: *RerereDB) bool {
+        return self.options.enabled;
+    }
+
+    pub fn recoverFromCorruption(self: *RerereDB) !void {
+        const dir_path = self.options.dir orelse ".git/rr-cache";
+
+        var dir = std.fs.cwd().openDir(dir_path, .{}) catch return;
+        defer dir.close();
+
+        var entries = dir.iterate();
+        while (entries.next() catch null) |entry| {
+            if (entry) |e| {
+                if (e.kind == .directory) {
+                    try self.validateAndFixRerereEntry(dir_path, e.name);
+                }
+            }
+        }
+    }
+
+    fn generateConflictID(self: *RerereDB, conflict: []const u8) ![]const u8 {
+        var hash: [20]u8 = undefined;
+        const result = std.crypto.hash.sha1.Sha1.hash(conflict, &hash, .{});
+
+        var hex_id = try self.allocator.alloc(u8, result.hex_digest_len);
+        for (0..result.hex_digest_len) |i| {
+            hex_id[i] = result.hex_digest[i];
+        }
+
+        return hex_id;
+    }
+
+    fn findInDatabase(self: *RerereDB, conflict_id: []const u8) ?[]const u8 {
         _ = self;
-        return true;
+        _ = conflict_id;
+        return null;
+    }
+
+    fn writeToDatabase(self: *RerereDB, path: []const u8, conflict_id: []const u8, resolution: []const u8) !void {
+        _ = self;
+        _ = path;
+        _ = conflict_id;
+        _ = resolution;
+    }
+
+    fn validateAndFixRerereEntry(self: *RerereDB, dir_path: []const u8, entry_name: []const u8) !void {
+        _ = self;
+        const entry_path = try std.fmt.concat(self.allocator, &.{ dir_path, "/", entry_name });
+        defer self.allocator.free(entry_path);
+
+        const postimage_path = try std.fmt.concat(self.allocator, &.{ entry_path, "/postimage" });
+        defer self.allocator.free(postimage_path);
+
+        std.fs.cwd().access(postimage_path, .{}) catch {
+            try self.removeCorruptedEntry(entry_path);
+            return;
+        };
+
+        var postimage_file = std.fs.cwd().openFile(postimage_path, .{}) catch return;
+        defer postimage_file.close();
+
+        const content = postimage_file.readToEndAlloc(self.allocator, 1024 * 1024) catch {
+            try self.removeCorruptedEntry(entry_path);
+            return;
+        };
+        defer self.allocator.free(content);
+
+        if (content.len == 0) {
+            try self.removeCorruptedEntry(entry_path);
+        }
+    }
+
+    fn removeCorruptedEntry(self: *RerereDB, entry_path: []const u8) !void {
+        _ = self;
+        std.fs.cwd().deleteTree(entry_path) catch {};
+    }
+
+    pub fn pruneOldResolutions(self: *RerereDB, older_than_days: u32) !void {
+        _ = self;
+        _ = older_than_days;
     }
 };
 
