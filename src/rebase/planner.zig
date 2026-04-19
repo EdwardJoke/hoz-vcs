@@ -13,6 +13,10 @@ pub const PlannerOptions = struct {
     onto: ?OID = null,
     keep_empty: bool = false,
     allow_empty: bool = false,
+    autosquash: bool = false,
+    exec: ?[]const u8 = null,
+    root: bool = false,
+    update_refs: bool = false,
 };
 
 pub const RebasePlanner = struct {
