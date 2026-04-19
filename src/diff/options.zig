@@ -13,6 +13,9 @@ pub const DiffOptions = struct {
     ignore_options: IgnoreOptions = .{},
     binary_detection: bool = true,
     algorithm: DiffAlgorithm = .myers,
+    submodule_config: ?SubmoduleConfig = null,
+    color_moved: ColorMovedOption = .no,
+    word_diff: WordDiffOption = .{},
 };
 
 pub const IgnoreOptions = struct {
@@ -26,6 +29,34 @@ pub const DiffAlgorithm = enum {
     myers,
     patience,
     histogram,
+};
+
+pub const SubmoduleOption = struct {
+    name: []const u8,
+    path: []const u8,
+    url: ?[]const u8 = null,
+    branch: ?[]const u8 = null,
+};
+
+pub const SubmoduleConfig = struct {
+    diff: bool = true,
+    log: bool = true,
+    short: bool = false,
+};
+
+pub const ColorMovedOption = enum {
+    no,
+    default,
+    plain,
+    blocks,
+    zebra,
+    dimmed_zebra,
+};
+
+pub const WordDiffOption = struct {
+    enabled: bool = false,
+    separator: []const u8 = " ",
+    internal_ignore_whitespace: bool = false,
 };
 
 pub const ColorOption = enum {

@@ -10,6 +10,9 @@ pub const BlameOptions = struct {
     mailmap: bool = true,
     show_email: bool = false,
     contents_path: ?[]const u8 = null,
+    copy_detection_M: bool = false,
+    copy_detection_C: bool = false,
+    find_copies_harder: bool = false,
 };
 
 pub const BlameLine = struct {
