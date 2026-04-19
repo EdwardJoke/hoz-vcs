@@ -1,0 +1,125 @@
+name: Update Homebrew Tap
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to update (e.g. 0.1.1)"
+        required: true
+
+jobs:
+  update-tap:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout hoz repo
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          gh release download "v${VERSION}" \
+            --repo Edward/hoz \
+            --pattern "*.tar.gz" \
+            --dir ./assets
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          if [ -f "./assets/hoz-${VERSION}-macos-x86_64.tar.gz" ]; then
+            MACOS_X86_64_SHA=$(shasum -a 256 "./assets/hoz-${VERSION}-macos-x86_64.tar.gz" | cut -d' ' -f1)
+          else
+            MACOS_X86_64_SHA="0"
+          fi
+
+          if [ -f "./assets/hoz-${VERSION}-macos-aarch64.tar.gz" ]; then
+            MACOS_AARCH64_SHA=$(shasum -a 256 "./assets/hoz-${VERSION}-macos-aarch64.tar.gz" | cut -d' ' -f1)
+          else
+            MACOS_AARCH64_SHA="0"
+          fi
+
+          if [ -f "./assets/hoz-${VERSION}-linux-x86_64.tar.gz" ]; then
+            LINUX_X86_64_SHA=$(shasum -a 256 "./assets/hoz-${VERSION}-linux-x86_64.tar.gz" | cut -d' ' -f1)
+          else
+            LINUX_X86_64_SHA="0"
+          fi
+
+          echo "macos_x86_64=${MACOS_X86_64_SHA}" >> $GITHUB_OUTPUT
+          echo "macos_aarch64=${MACOS_AARCH64_SHA}" >> $GITHUB_OUTPUT
+          echo "linux_x86_64=${LINUX_X86_64_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: Edward/homebrew-tap
+          token: ${{ secrets.TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          MACOS_X86_64_SHA="${{ steps.sha.outputs.macos_x86_64 }}"
+          MACOS_AARCH64_SHA="${{ steps.sha.outputs.macos_aarch64 }}"
+          LINUX_X86_64_SHA="${{ steps.sha.outputs.linux_x86_64 }}"
+
+          cat > homebrew-tap/Formula/hoz.rb <<FORMULA
+          class Hoz < Formula
+            desc "Git-compatible version control system written in Zig"
+            homepage "https://github.com/Edward/hoz"
+            url "https://github.com/Edward/hoz/releases/download/v${VERSION}/hoz-${VERSION}-macos-x86_64.tar.gz"
+            sha256 "${MACOS_X86_64_SHA}"
+            license "MIT"
+            version "${VERSION}"
+
+            livecheck do
+              url :stable
+              strategy :github_latest
+            end
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/Edward/hoz/releases/download/v${VERSION}/hoz-${VERSION}-macos-aarch64.tar.gz"
+                sha256 "${MACOS_AARCH64_SHA}"
+              end
+            end
+
+            on_linux do
+              url "https://github.com/Edward/hoz/releases/download/v${VERSION}/hoz-${VERSION}-linux-x86_64.tar.gz"
+              sha256 "${LINUX_X86_64_SHA}"
+            end
+
+            def install
+              bin.install "hoz"
+            end
+
+            test do
+              system "\#{bin}/hoz", "--version"
+            end
+          end
+          FORMULA
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/hoz.rb
+          git diff --cached --quiet || git commit -m "hoz ${{ steps.version.outputs.VERSION }}"
+          git push
