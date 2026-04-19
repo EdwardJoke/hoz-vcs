@@ -12,6 +12,10 @@ pub usingnamespace @import("commit.zig");
 pub usingnamespace @import("log.zig");
 pub usingnamespace @import("diff.zig");
 pub usingnamespace @import("show.zig");
+pub usingnamespace @import("revert.zig");
+pub usingnamespace @import("cherry_pick.zig");
+pub usingnamespace @import("bundle.zig");
+pub usingnamespace @import("notes.zig");
 
 test "cli module loads" {
     try std.testing.expect(true);
