@@ -1,0 +1,18 @@
+# Oh-My-Opencode
+.sisyphus/
+
+# Zig
+.zig-cache/
+zig-out/
+
+# Roadmap
+roadmaps/
+
+# Develop Remains
+test
+tests/
+.idea/
+.trae/
+
+# Mac
+.DS_Store
