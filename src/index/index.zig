@@ -64,12 +64,40 @@ pub const Extensions = struct {
     others: std.ArrayList(IndexExtension),
 };
 
+pub const SplitIndexMode = struct {
+    enabled: bool = false,
+    shared_index_sha: ?[20]u8 = null,
+
+    pub fn isEnabled(self: *const SplitIndexMode) bool {
+        return self.enabled;
+    }
+
+    pub fn getSharedIndexSha(self: *const SplitIndexMode) ?[20]u8 {
+        return self.shared_index_sha;
+    }
+
+    pub fn setEnabled(self: *SplitIndexMode, enabled: bool) void {
+        self.enabled = enabled;
+    }
+
+    pub fn setSharedIndexSha(self: *SplitIndexMode, sha: [20]u8) void {
+        self.shared_index_sha = sha;
+    }
+
+    pub fn clear(self: *SplitIndexMode) void {
+        self.enabled = false;
+        self.shared_index_sha = null;
+    }
+};
+
 /// Index represents the Git staging area
 pub const Index = struct {
     entries: std.ArrayList(IndexEntry),
     entry_names: std.ArrayList([]const u8),
     extensions: Extensions,
     checksum: [20]u8,
+    version: u32,
+    split_index: SplitIndexMode,
 
     /// Create a new empty Index
     pub fn init(allocator: std.mem.Allocator) Index {
@@ -80,6 +108,8 @@ pub const Index = struct {
                 .others = std.ArrayList(IndexExtension).init(allocator),
             },
             .checksum = [1]u8{0} ** 20,
+            .version = INDEX_VERSION,
+            .split_index = SplitIndexMode{},
         };
     }
 
@@ -129,7 +159,7 @@ pub const Index = struct {
                 return error.IndexCorrupt;
             }
 
-            const entry = try parseEntry(data, offset);
+            const entry = try parseEntry(data, offset, version);
             offset += INDEX_ENTRY_FIXED_SIZE;
 
             const name_len = entry.nameLength();
@@ -198,11 +228,15 @@ pub const Index = struct {
             .entry_names = entry_names,
             .extensions = extensions,
             .checksum = checksum,
+            .version = version,
+            .split_index = SplitIndexMode{},
         };
     }
 
     /// Parse a single index entry from data at offset
-    fn parseEntry(data: []const u8, offset: usize) !IndexEntry {
+    /// Handles both v2 and v3 index formats
+    fn parseEntry(data: []const u8, offset: usize, version: u32) !IndexEntry {
+        _ = version;
         const ctime_sec = std.mem.readInt(u32, data[offset .. offset + 4], .big);
         const ctime_nsec = std.mem.readInt(u32, data[offset + 4 .. offset + 8], .big);
         const mtime_sec = std.mem.readInt(u32, data[offset + 8 .. offset + 12], .big);
@@ -253,7 +287,9 @@ pub const Index = struct {
 
         // Write header
         try list.appendSlice(&INDEX_SIGNATURE);
-        try list.appendSlice(&[4]u8{ 0, 0, 0, INDEX_VERSION });
+        var version_bytes: [4]u8 = undefined;
+        std.mem.writeInt(u32, &version_bytes, self.version, .big);
+        try list.appendSlice(&version_bytes);
         try list.appendSlice(&[4]u8{ 0, 0, 0, 0 }); // Placeholder for entry count
 
         const count_offset = list.items.len - 4;
@@ -365,6 +401,104 @@ pub const Index = struct {
         self.entry_names.clearRetainingCapacity();
     }
 
+    pub const SortOrder = enum {
+        ascending,
+        descending,
+    };
+
+    pub fn sort(self: *Index, order: SortOrder) void {
+        const len = self.entries.items.len;
+        if (len <= 1) return;
+
+        var indices = std.ArrayList(usize).init(std.heap.page_allocator);
+        defer indices.deinit();
+        try indices.appendSlice(&[1]usize{0} ** len);
+        for (0..len) |i| indices.items[i] = i;
+
+        const cmp = if (order == .ascending) sortCompareAsc else sortCompareDesc;
+        std.sort.sort(usize, indices.items, self, cmp);
+
+        var new_entries = std.ArrayList(IndexEntry).init(std.heap.page_allocator);
+        var new_names = std.ArrayList([]const u8).init(std.heap.page_allocator);
+        defer {
+            new_entries.deinit();
+            for (new_names.items) |n| std.heap.page_allocator.free(n);
+            new_names.deinit();
+        }
+
+        for (indices.items) |old_idx| {
+            new_entries.appendAssumeCapacity(self.entries.items[old_idx]);
+            new_names.appendAssumeCapacity(self.entry_names.items[old_idx]);
+        }
+
+        self.entries = new_entries;
+        self.entry_names = new_names;
+    }
+
+    fn sortCompareAsc(_: *Index, a: usize, b: usize) bool {
+        return a < b;
+    }
+
+    fn sortCompareDesc(_: *Index, a: usize, b: usize) bool {
+        return a > b;
+    }
+
+    pub fn sortByPath(self: *Index, order: SortOrder) void {
+        const len = self.entries.items.len;
+        if (len <= 1) return;
+
+        var indices = std.ArrayList(usize).init(std.heap.page_allocator);
+        defer indices.deinit();
+        try indices.appendSlice(&[1]usize{0} ** len);
+        for (0..len) |i| indices.items[i] = i;
+
+        const cmp: *const fn (*Index, usize, usize) bool = if (order == .ascending) sortPathAsc else sortPathDesc;
+        std.sort.sort(usize, indices.items, self, cmp);
+
+        var new_entries = std.ArrayList(IndexEntry).init(std.heap.page_allocator);
+        var new_names = std.ArrayList([]const u8).init(std.heap.page_allocator);
+        defer {
+            new_entries.deinit();
+            for (new_names.items) |n| std.heap.page_allocator.free(n);
+            new_names.deinit();
+        }
+
+        for (indices.items) |old_idx| {
+            new_entries.appendAssumeCapacity(self.entries.items[old_idx]);
+            new_names.appendAssumeCapacity(self.entry_names.items[old_idx]);
+        }
+
+        self.entries = new_entries;
+        self.entry_names = new_names;
+    }
+
+    fn sortPathAsc(self: *Index, a: usize, b: usize) bool {
+        const name_a = self.entry_names.items[a] orelse return false;
+        const name_b = self.entry_names.items[b] orelse return true;
+        return std.mem.lessThan(u8, name_a, name_b);
+    }
+
+    fn sortPathDesc(self: *Index, a: usize, b: usize) bool {
+        const name_a = self.entry_names.items[a] orelse return true;
+        const name_b = self.entry_names.items[b] orelse return false;
+        return std.mem.lessThan(u8, name_b, name_a);
+    }
+
+    pub fn isSorted(self: *Index) bool {
+        for (1..self.entries.items.len) |i| {
+            const prev_name = self.entry_names.items[i - 1] orelse continue;
+            const curr_name = self.entry_names.items[i] orelse continue;
+            if (std.mem.compare(u8, prev_name, curr_name) == .gt) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    pub fn verifySort(self: *Index) bool {
+        return self.isSorted();
+    }
+
     /// Release resources
     pub fn deinit(self: *Index) void {
         for (self.entry_names.items) |name| {
@@ -373,6 +507,94 @@ pub const Index = struct {
         self.entries.deinit();
         self.entry_names.deinit();
         self.extensions.others.deinit();
+    }
+
+    pub fn getUnmergedEntries(self: *Index) []IndexEntry {
+        var result = std.ArrayList(IndexEntry).init(std.heap.page_allocator);
+        for (self.entries.items) |entry| {
+            if (entry.isStage1to3()) {
+                result.append(entry) catch {};
+            }
+        }
+        return result.toOwnedSlice() catch &.{};
+    }
+
+    pub fn hasUnmergedEntries(self: *Index) bool {
+        for (self.entries.items) |entry| {
+            if (entry.isStage1to3()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn getConflictEntries(self: *Index, path: []const u8) [3]?IndexEntry {
+        var results: [3]?IndexEntry = .{ null, null, null };
+        for (self.entries.items, 0..) |entry, i| {
+            if (self.entry_names.items[i]) |name| {
+                if (std.mem.eql(u8, name, path)) {
+                    const stage = entry.stage();
+                    if (stage >= 1 and stage <= 3) {
+                        results[stage - 1] = entry;
+                    }
+                }
+            }
+        }
+        return results;
+    }
+
+    pub fn removeUnmergedEntries(self: *Index, path: []const u8) void {
+        var i: usize = 0;
+        while (i < self.entries.items.len) {
+            if (self.entry_names.items[i]) |name| {
+                if (std.mem.eql(u8, name, path)) {
+                    const entry = self.entries.items[i];
+                    if (entry.isStage1to3()) {
+                        _ = self.entries.orderedRemove(i);
+                        const removed_name = self.entry_names.orderedRemove(i);
+                        std.heap.page_allocator.free(removed_name);
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+
+    pub fn getSplitIndex(self: *Index) *SplitIndexMode {
+        return &self.split_index;
+    }
+
+    pub fn isSplitIndexEnabled(self: *Index) bool {
+        return self.split_index.isEnabled();
+    }
+
+    pub fn enableSplitIndex(self: *Index, shared_sha: ?[20]u8) void {
+        self.split_index.setEnabled(true);
+        if (shared_sha) |sha| {
+            self.split_index.setSharedIndexSha(sha);
+        }
+    }
+
+    pub fn disableSplitIndex(self: *Index) void {
+        self.split_index.clear();
+    }
+
+    pub fn syncSplitIndex(self: *Index) void {
+        if (self.split_index.isEnabled() and self.split_index.getSharedIndexSha()) |_| {
+            return;
+        }
+        self.split_index.clear();
+    }
+
+    pub fn verifySplitIndex(self: *Index) bool {
+        if (!self.split_index.isEnabled()) {
+            return true;
+        }
+        if (self.split_index.getSharedIndexSha()) |_| {
+            return true;
+        }
+        return false;
     }
 };
 
