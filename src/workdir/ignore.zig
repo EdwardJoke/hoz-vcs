@@ -122,7 +122,7 @@ pub fn loadGitIgnore(
     const file = dir.openFile(io, path, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => return &.{},
-            else => return error.IoError,
+            else => return err,
         }
     };
     defer file.close(io);
@@ -133,10 +133,7 @@ pub fn loadGitIgnore(
     const buffer = try allocator.alloc(u8, size);
     defer allocator.free(buffer);
 
-    const bytes_read = try file.readAllAlloc(io, buffer, size);
-    if (bytes_read != size) {
-        return error.IoError;
-    }
+    try file.readAllFill(io, buffer, size);
 
     var patterns = std.ArrayList(Pattern).init(allocator);
     errdefer patterns.deinit();
@@ -158,15 +155,65 @@ pub fn isIgnored(
     path: []const u8,
     is_dir: bool,
 ) bool {
-    var result = false;
+    var ignored = false;
 
     for (patterns) |pattern| {
+        if (pattern.raw_pattern.len == 0 or std.mem.startsWith(u8, pattern.raw_pattern, "#")) {
+            continue;
+        }
+
         if (matchesPattern(pattern, path, is_dir)) {
-            result = !pattern.is_negated;
+            ignored = !pattern.is_negated;
         }
     }
 
-    return result;
+    return ignored;
+}
+
+pub fn isIgnoredWithPrecedence(
+    alloc: std.mem.Allocator,
+    dir_path: []const u8,
+    path: []const u8,
+    is_dir: bool,
+) !bool {
+    var patterns = std.ArrayList(Pattern).init(alloc);
+    defer patterns.deinit();
+
+    var current_dir = try alloc.dupe(u8, dir_path);
+    defer alloc.free(current_dir);
+
+    while (true) {
+        const gitignore_path = if (current_dir.len == 0)
+            try std.fmt.concat(alloc, &.{".gitignore"})
+        else
+            try std.fmt.concat(alloc, &.{ current_dir, "/.gitignore" });
+
+        if (std.fs.cwd().openFile(gitignore_path, .{})) |file| {
+            defer file.close();
+            var reader = file.reader();
+            var buf: [4096]u8 = undefined;
+            while (reader.readUntilDelimiter(&buf, '\n')) |line| {
+                const trimmed = std.mem.trim(u8, line, "\r");
+                if (trimmed.len > 0) {
+                    const pattern = try parsePattern(trimmed);
+                    try patterns.append(pattern);
+                }
+            } else |_| {}
+        } else |_| {}
+
+        const last_sep = std.mem.lastIndexOfScalar(u8, current_dir, '/');
+        if (last_sep == null) break;
+        const parent = current_dir[0..last_sep.?];
+        alloc.free(current_dir);
+        current_dir = try alloc.dupe(u8, parent);
+    }
+
+    const workdir_relative = if (std.mem.startsWith(u8, path, dir_path))
+        path[dir_path.len + 1 ..]
+    else
+        path;
+
+    return isIgnored(patterns.items, workdir_relative, is_dir);
 }
 
 test "parsePattern parses regular pattern" {

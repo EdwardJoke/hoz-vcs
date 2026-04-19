@@ -65,35 +65,28 @@ pub fn isPathInSparseCone(
     }
 
     for (config.patterns.items) |pattern| {
-        if (std.mem.startsWith(u8, path, pattern)) {
-            return true;
-        }
+        const needs_sep = !std.mem.endsWith(u8, pattern, "/");
 
-        const path_parts_count = std.mem.count(u8, path, "/") + 1;
-        const pattern_parts_count = std.mem.count(u8, pattern, "/") + 1;
-
-        if (path_parts_count < pattern_parts_count) {
-            continue;
-        }
-
-        var all_match = true;
-        for (0..pattern_parts_count) |i| {
-            const path_part = splitNth(path, '/', i);
-            const pattern_part = splitNth(pattern, '/', i);
-
-            if (path_part == null or pattern_part == null) {
-                all_match = false;
-                break;
+        if (needs_sep) {
+            const prefix = std.mem.concat(std.heap.page_allocator, u8, &.{ pattern, "/" }) catch continue;
+            if (std.mem.startsWith(u8, path, prefix)) {
+                return true;
             }
-
-            if (!std.mem.eql(u8, path_part.?, pattern_part.?)) {
-                all_match = false;
-                break;
+        } else {
+            if (std.mem.startsWith(u8, path, pattern)) {
+                return true;
             }
         }
 
-        if (all_match) {
+        if (std.mem.eql(u8, path, pattern)) {
             return true;
+        }
+
+        if (is_dir) {
+            const deep_pattern = std.mem.concat(std.heap.page_allocator, u8, &.{ pattern, "/**" }) catch continue;
+            if (std.mem.startsWith(u8, path, deep_pattern)) {
+                return true;
+            }
         }
     }
 
