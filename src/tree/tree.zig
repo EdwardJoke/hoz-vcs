@@ -16,6 +16,9 @@ pub const parser = @import("parser.zig");
 pub const diff = @import("diff.zig");
 pub const sort = @import("sort.zig");
 pub const ls_tree = @import("ls_tree.zig");
+pub const cache = @import("cache.zig");
+pub const compare_cache = @import("compare_cache.zig");
+pub const lazy = @import("lazy.zig");
 
 pub usingnamespace tree_object;
 
