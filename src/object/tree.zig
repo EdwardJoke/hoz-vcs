@@ -5,37 +5,62 @@ const oid_mod = @import("oid.zig");
 
 /// File mode constants for tree entries
 pub const Mode = enum(u16) {
-    /// 0644 - regular file
     file = 0o100644,
-    /// 0755 - executable file
     executable = 0o100755,
-    /// 040000 - directory
     directory = 0o040000,
-    /// 0160000 - symlink
     symlink = 0o120000,
-    /// 0120000 - gitlink (submodule)
     gitlink = 0o160000,
 };
 
-/// Convert mode to string representation
-pub fn modeToStr(m: Mode) []const u8 {
+pub const ModeError = error{
+    InvalidModeFormat,
+    UnsupportedMode,
+};
+
+fn modeToInt(m: Mode) u16 {
+    return @as(u16, @intFromEnum(m));
+}
+
+fn intToMode(val: u16) Mode {
+    return @as(Mode, @enumFromInt(val));
+}
+
+pub fn modeToStr(m: Mode) [6]u8 {
     return switch (m) {
-        .file => "100644",
-        .executable => "100755",
-        .directory => "040000",
-        .symlink => "120000",
-        .gitlink => "160000",
+        .file => .{ '1', '0', '0', '6', '4', '4' },
+        .executable => .{ '1', '0', '0', '7', '5', '5' },
+        .directory => .{ '0', '4', '0', '0', '0', '0' },
+        .symlink => .{ '1', '2', '0', '0', '0', '0' },
+        .gitlink => .{ '1', '6', '0', '0', '0', '0' },
     };
 }
 
-/// Parse mode from string
 pub fn modeFromStr(str: []const u8) !Mode {
-    if (std.mem.eql(u8, str, "100644")) return .file;
-    if (std.mem.eql(u8, str, "100755")) return .executable;
-    if (std.mem.eql(u8, str, "040000")) return .directory;
-    if (std.mem.eql(u8, str, "120000")) return .symlink;
-    if (std.mem.eql(u8, str, "160000")) return .gitlink;
-    return error.InvalidMode;
+    if (str.len != 6) return error.InvalidModeFormat;
+
+    var mode_val: u16 = 0;
+    for (str) |c| {
+        if (c < '0' or c > '7') return error.InvalidModeFormat;
+        mode_val = (mode_val << 3) | @as(u16, c - '0');
+    }
+
+    if (mode_val == 0o100644) return .file;
+    if (mode_val == 0o100755) return .executable;
+    if (mode_val == 0o040000) return .directory;
+    if (mode_val == 0o120000) return .symlink;
+    if (mode_val == 0o160000) return .gitlink;
+
+    return error.UnsupportedMode;
+}
+
+pub fn modeFromInt(val: u16) Mode {
+    if (val == 0o100644) return .file;
+    if (val == 0o100755) return .executable;
+    if (val == 0o040000) return .directory;
+    if (val == 0o120000) return .symlink;
+    if (val == 0o160000) return .gitlink;
+    if (val & 0o170000 == 0o100000) return .file;
+    return .file;
 }
 
 /// A single entry in a tree (file or directory)
@@ -72,7 +97,7 @@ pub const Tree = struct {
         // Build entries
         for (self.entries) |entry| {
             // Write mode and name
-            try buffer.appendSlice(modeToStr(entry.mode));
+            try buffer.appendSlice(&modeToStr(entry.mode));
             try buffer.append(' ');
             try buffer.appendSlice(entry.name);
             try buffer.append(0);
@@ -139,9 +164,9 @@ pub const Tree = struct {
 };
 
 test "mode to string" {
-    try std.testing.expectEqualSlices(u8, "100644", modeToStr(.file));
-    try std.testing.expectEqualSlices(u8, "100755", modeToStr(.executable));
-    try std.testing.expectEqualSlices(u8, "040000", modeToStr(.directory));
+    try std.testing.expectEqualSlices(u8, "100644", &modeToStr(.file));
+    try std.testing.expectEqualSlices(u8, "100755", &modeToStr(.executable));
+    try std.testing.expectEqualSlices(u8, "040000", &modeToStr(.directory));
 }
 
 test "mode from string" {
@@ -184,8 +209,8 @@ test "tree serialize and parse roundtrip" {
 test "tree symlink and gitlink modes" {
     try std.testing.expectEqual(Mode.symlink, try modeFromStr("120000"));
     try std.testing.expectEqual(Mode.gitlink, try modeFromStr("160000"));
-    try std.testing.expectEqualSlices(u8, "120000", modeToStr(.symlink));
-    try std.testing.expectEqualSlices(u8, "160000", modeToStr(.gitlink));
+    try std.testing.expectEqualSlices(u8, "120000", &modeToStr(.symlink));
+    try std.testing.expectEqualSlices(u8, "160000", &modeToStr(.gitlink));
 }
 
 test "tree parse rejects non-tree" {
@@ -198,4 +223,24 @@ test "tree empty entries" {
     const tree = Tree.create(entries);
     try std.testing.expectEqual(0, tree.entries.len);
     try std.testing.expectEqual(object_mod.Type.tree, tree.objectType());
+}
+
+test "mode from int" {
+    try std.testing.expectEqual(Mode.file, modeFromInt(0o100644));
+    try std.testing.expectEqual(Mode.executable, modeFromInt(0o100755));
+    try std.testing.expectEqual(Mode.directory, modeFromInt(0o040000));
+    try std.testing.expectEqual(Mode.symlink, modeFromInt(0o120000));
+    try std.testing.expectEqual(Mode.gitlink, modeFromInt(0o160000));
+}
+
+test "mode invalid format" {
+    try std.testing.expectError(error.InvalidModeFormat, modeFromStr(""));
+    try std.testing.expectError(error.InvalidModeFormat, modeFromStr("10064"));
+    try std.testing.expectError(error.InvalidModeFormat, modeFromStr("1006444"));
+    try std.testing.expectError(error.InvalidModeFormat, modeFromStr("abcdef"));
+}
+
+test "mode unsupported mode" {
+    try std.testing.expectError(error.UnsupportedMode, modeFromStr("100000"));
+    try std.testing.expectError(error.UnsupportedMode, modeFromStr("000000"));
 }
