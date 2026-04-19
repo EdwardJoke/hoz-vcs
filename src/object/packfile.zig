@@ -1,5 +1,82 @@
 //! Packfile format - Git's packed object storage
 const std = @import("std");
+const os = std.os;
+
+pub const PackfileMmapOptions = struct {
+    readonly: bool = true,
+    population: bool = false,
+};
+
+pub const PackfileReuseOptimization = struct {
+    enabled: bool = true,
+    reuse_offsets: bool = true,
+    checksum_cache: bool = true,
+};
+
+pub const ThinPackDetection = struct {
+    enabled: bool = true,
+    missing_base_check: bool = true,
+};
+
+pub const CompressionLevel = enum(u8) {
+    none = 0,
+    fastest = 1,
+    fast = 3,
+    default = 5,
+    best = 9,
+};
+
+pub const PackfileCompressionOptions = struct {
+    level: CompressionLevel = .default,
+    memory_level: u8 = 8,
+};
+
+pub const PackfileMemoryMapping = struct {
+    data: []const u8,
+    size: usize,
+    mmapped: bool,
+
+    pub fn init(path: []const u8, options: PackfileMmapOptions) !PackfileMemoryMapping {
+        const file = try os.open(path, .{ .ACCMODE = os.O.RDONLY }, 0);
+        defer os.close(file);
+        const stat = try os.fstat(file);
+        const size = @as(usize, @intCast(stat.size));
+        const data = if (options.readonly)
+            try os.mmap(null, size, os.PROT.READ, os.MAP.PRIVATE, file, 0)
+        else
+            try os.mmap(null, size, os.PROT.READ | os.PROT.WRITE, os.MAP.SHARED, file, 0);
+        return PackfileMemoryMapping{
+            .data = data,
+            .size = size,
+            .mmapped = true,
+        };
+    }
+
+    pub fn deinit(self: *PackfileMemoryMapping) void {
+        if (self.mmapped) {
+            os.munmap(self.data);
+        }
+        self.mmapped = false;
+    }
+};
+
+pub fn isThinPack(data: []const u8) bool {
+    if (data.len < 12) return false;
+    const header = std.mem.readIntBig(u32, data[4..8]);
+    _ = header;
+    return false;
+}
+
+pub fn getReuseOffsets(data: []const u8) []const u32 {
+    _ = data;
+    return &.{};
+}
+
+pub fn detectThinPack(data: []const u8, options: ThinPackDetection) !bool {
+    _ = data;
+    _ = options;
+    return false;
+}
 
 /// Packfile signature: "PACK"
 const PACK_SIGNATURE: [4]u8 = .{ 'P', 'A', 'C', 'K' };
