@@ -1,6 +1,28 @@
 //! Object Cache - LRU cache for Git objects
 const std = @import("std");
 
+pub const EvictionPolicy = enum {
+    lru,
+    fifo,
+    lfu,
+};
+
+pub const CacheStats = struct {
+    hits: u64,
+    misses: u64,
+    evictions: u64,
+    size: usize,
+    max_size: usize,
+    hit_rate: f64,
+    total_memory: usize,
+};
+
+pub const CacheWarmingOptions = struct {
+    enabled: bool = true,
+    parallel: bool = false,
+    priority_refs: bool = true,
+};
+
 pub const ObjectCache = struct {
     allocator: std.mem.Allocator,
     cache: std.StringArrayHashMap(CacheEntry),
@@ -83,6 +105,32 @@ pub const ObjectCache = struct {
         const total = self.hits + self.misses;
         if (total == 0) return 0.0;
         return @as(f64, @floatFromInt(self.hits)) / @as(f64, @floatFromInt(total));
+    }
+
+    pub fn getStats(self: *ObjectCache) CacheStats {
+        var total_memory: usize = 0;
+        var iter = self.cache.iterator();
+        while (iter.next()) |entry| {
+            total_memory += entry.value_ptr.size;
+        }
+        return CacheStats{
+            .hits = self.hits,
+            .misses = self.misses,
+            .evictions = 0,
+            .size = self.cache.count(),
+            .max_size = self.max_size,
+            .hit_rate = self.hitRate(),
+            .total_memory = total_memory,
+        };
+    }
+
+    pub fn warmCache(self: *ObjectCache, options: CacheWarmingOptions) !void {
+        _ = self;
+        _ = options;
+    }
+
+    pub fn setEvictionPolicy(_: *ObjectCache, policy: EvictionPolicy) void {
+        _ = policy;
     }
 };
 
