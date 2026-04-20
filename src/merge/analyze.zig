@@ -1,6 +1,7 @@
 //! Merge Analyze - Analyze branches for merge readiness
 const std = @import("std");
 const OID = @import("../object/oid.zig").OID;
+const commit_mod = @import("../commit/commit.zig");
 
 pub const MergeAnalysis = struct {
     is_fast_forward: bool,
@@ -18,9 +19,10 @@ pub const AnalysisResult = struct {
 
 pub const MergeBaseFinder = struct {
     allocator: std.mem.Allocator,
+    getCommit: *const fn (oid: OID) ?*const commit_mod.Commit,
 
-    pub fn init(allocator: std.mem.Allocator) MergeBaseFinder {
-        return .{ .allocator = allocator };
+    pub fn init(allocator: std.mem.Allocator, getCommit: *const fn (oid: OID) ?*const commit_mod.Commit) MergeBaseFinder {
+        return .{ .allocator = allocator, .getCommit = getCommit };
     }
 
     pub fn findMergeBase(self: *MergeBaseFinder, commit_a: OID, commit_b: OID) !?OID {
@@ -60,7 +62,7 @@ pub const MergeBaseFinder = struct {
             const candidate1 = try self.findMergeBase(current, commit_x);
             const candidate2 = try self.findMergeBase(current, commit_y);
 
-            if (candidate1 != null and std.mem.eql(u8, &candidate1.?.bytes, &candidate2.?.bytes)) {
+            if (candidate1 != null and self.oidsEqual(candidate1.?, candidate2.?)) {
                 return candidate1;
             }
 
@@ -92,7 +94,7 @@ pub const MergeBaseFinder = struct {
             try visited.put(current, {});
             try ancestors.append(current);
 
-            const parent = self.getCommitParent(current) catch break;
+            const parent = self.getCommitParent(current);
             if (parent == null) break;
             current = parent.?;
         }
@@ -100,9 +102,12 @@ pub const MergeBaseFinder = struct {
         return ancestors.toOwnedSlice();
     }
 
-    fn getCommitParent(self: *MergeBaseFinder, commit: OID) !?OID {
-        _ = self;
-        _ = commit;
+    fn getCommitParent(self: *MergeBaseFinder, commit: OID) ?OID {
+        if (self.getCommit(commit)) |c| {
+            if (c.parents.len > 0) {
+                return c.parents[0];
+            }
+        }
         return null;
     }
 
@@ -113,13 +118,14 @@ pub const MergeBaseFinder = struct {
 
 pub const MergeAnalyzer = struct {
     allocator: std.mem.Allocator,
+    getCommit: *const fn (oid: OID) ?*const commit_mod.Commit,
 
-    pub fn init(allocator: std.mem.Allocator) MergeAnalyzer {
-        return .{ .allocator = allocator };
+    pub fn init(allocator: std.mem.Allocator, getCommit: *const fn (oid: OID) ?*const commit_mod.Commit) MergeAnalyzer {
+        return .{ .allocator = allocator, .getCommit = getCommit };
     }
 
     pub fn analyze(self: *MergeAnalyzer, ours: OID, theirs: OID) !AnalysisResult {
-        var finder = MergeBaseFinder.init(self.allocator);
+        var finder = MergeBaseFinder.init(self.allocator, self.getCommit);
         const merge_base = try finder.findMergeBase(ours, theirs);
 
         if (merge_base == null) {
@@ -137,15 +143,15 @@ pub const MergeAnalyzer = struct {
         }
 
         const ancestor = merge_base.?;
-        const is_ff = std.mem.eql(u8, &ancestor.bytes, &ours.bytes);
+        const is_ff = self.oidsEqual(ancestor, ours);
 
-        const ahead = try self.countAncestorsBetween(ours, ancestor);
-        const behind = try self.countAncestorsBetween(theirs, ancestor);
+        const ahead = self.countAncestorsBetween(ours, ancestor);
+        const behind = self.countAncestorsBetween(theirs, ancestor);
 
         return AnalysisResult{
             .analysis = .{
                 .is_fast_forward = is_ff,
-                .is_up_to_date = std.mem.eql(u8, &ours.bytes, &theirs.bytes),
+                .is_up_to_date = self.oidsEqual(ours, theirs),
                 .is_normal = !is_ff,
                 .can_ff = merge_base != null,
             },
@@ -155,18 +161,31 @@ pub const MergeAnalyzer = struct {
         };
     }
 
-    pub fn canMerge(self: *MergeAnalyzer, ours: OID, theirs: OID) !bool {
-        _ = self;
-        _ = ours;
-        _ = theirs;
-        return true;
+    pub fn canMerge(self: *MergeAnalyzer, ours: OID, theirs: OID) bool {
+        var finder = MergeBaseFinder.init(self.allocator, self.getCommit);
+        const merge_base = finder.findMergeBase(ours, theirs) catch return false;
+        return merge_base != null;
     }
 
-    fn countAncestorsBetween(self: *MergeAnalyzer, descendant: OID, ancestor: OID) !u32 {
-        _ = self;
-        _ = descendant;
-        _ = ancestor;
-        return 0;
+    fn countAncestorsBetween(self: *MergeAnalyzer, descendant: OID, ancestor: OID) u32 {
+        var count: u32 = 0;
+        var current = descendant;
+
+        while (!self.oidsEqual(current, ancestor)) {
+            if (self.getCommit(current)) |c| {
+                count += 1;
+                if (c.parents.len == 0) break;
+                current = c.parents[0];
+            } else {
+                break;
+            }
+        }
+
+        return count;
+    }
+
+    fn oidsEqual(a: OID, b: OID) bool {
+        return std.mem.eql(u8, &a.bytes, &b.bytes);
     }
 };
 
@@ -199,19 +218,34 @@ test "AnalysisResult structure" {
 }
 
 test "MergeAnalyzer init" {
-    const analyzer = MergeAnalyzer.init(std.testing.allocator);
+    const dummyGetCommit: *const fn (OID) ?*const commit_mod.Commit = struct {
+        fn get(_: OID) ?*const commit_mod.Commit {
+            return null;
+        }
+    }.get;
+    const analyzer = MergeAnalyzer.init(std.testing.allocator, dummyGetCommit);
     try std.testing.expect(analyzer.allocator == std.testing.allocator);
 }
 
 test "MergeAnalyzer analyze method exists" {
-    var analyzer = MergeAnalyzer.init(std.testing.allocator);
+    const dummyGetCommit: *const fn (OID) ?*const commit_mod.Commit = struct {
+        fn get(_: OID) ?*const commit_mod.Commit {
+            return null;
+        }
+    }.get;
+    var analyzer = MergeAnalyzer.init(std.testing.allocator, dummyGetCommit);
     const result = try analyzer.analyze(undefined, undefined);
     try std.testing.expect(result.analysis.is_normal == true);
 }
 
 test "MergeAnalyzer canMerge method exists" {
-    var analyzer = MergeAnalyzer.init(std.testing.allocator);
-    const can = try analyzer.canMerge(undefined, undefined);
+    const dummyGetCommit: *const fn (OID) ?*const commit_mod.Commit = struct {
+        fn get(_: OID) ?*const commit_mod.Commit {
+            return null;
+        }
+    }.get;
+    var analyzer = MergeAnalyzer.init(std.testing.allocator, dummyGetCommit);
+    const can = analyzer.canMerge(undefined, undefined);
     _ = can;
     try std.testing.expect(analyzer.allocator != undefined);
 }

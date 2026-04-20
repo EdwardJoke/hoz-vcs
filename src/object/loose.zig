@@ -135,8 +135,42 @@ pub const LooseObjectIterator = struct {
     /// Get the next object OID (hex string)
     /// Returns null when iteration is complete
     pub fn next(self: *LooseObjectIterator) !?[]const u8 {
-        _ = self;
-        return null; // Simplified for now
+        while (true) {
+            const dir = self.current_dir orelse return null;
+            const iter = self.dir_iterator orelse return null;
+
+            if (iter.next()) |entry_opt| {
+                const entry = entry_opt orelse continue;
+                switch (entry.kind) {
+                    .directory => {
+                        const name = entry.name;
+                        if (name.len != 2) continue;
+                        for (name) |c| {
+                            if (!std.ascii.isHex(c)) continue;
+                        }
+                        const subdir = try dir.openDir(name, .{});
+                        var sub_iter = subdir.iterate();
+                        defer subdir.close();
+
+                        while (try sub_iter.next()) |sub_entry| {
+                            if (sub_entry.kind != .file) continue;
+                            const filename = sub_entry.name;
+                            if (filename.len != 38) continue;
+                            for (filename) |c| {
+                                if (!std.ascii.isHex(c)) break;
+                            } else {
+                                const oid = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ name, filename });
+                                return oid;
+                            }
+                        }
+                        continue;
+                    },
+                    else => continue,
+                }
+            } else {
+                return null;
+            }
+        }
     }
 };
 

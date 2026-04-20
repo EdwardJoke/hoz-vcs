@@ -104,15 +104,15 @@ pub const ReflogManager = struct {
         defer log_file.close();
 
         // Format: old_oid new_oid committer_name <email> timestamp timezone\tmessage\n
-        var buf = std.ArrayList(u8).init(self.allocator);
-        defer buf.deinit();
+        var buf = std.ArrayList(u8).empty;
+        defer buf.deinit(self.allocator);
 
         // Format timestamp and timezone
         const timestamp = std.time.timestamp();
         const tz = ReflogEntry.Timezone{ .offset = 0 }; // UTC
         const tz_str = tz.toArray();
 
-        try buf.writer().print("{s} {s} {s} <{s}> {d} {s}\t{s}\n", .{
+        try buf.print(self.allocator, "{s} {s} {s} <{s}> {d} {s}\t{s}\n", .{
             old_oid.hexString(),
             new_oid.hexString(),
             identity.name,
@@ -138,13 +138,14 @@ pub const ReflogManager = struct {
         const content = try log_file.readToEndAlloc(self.allocator, std.math.maxInt(usize));
         defer self.allocator.free(content);
 
-        var entries = std.ArrayList(ReflogEntry).init(self.allocator);
+        var entries = std.ArrayList(ReflogEntry).empty;
+        defer entries.deinit(self.allocator);
         var lines = std.mem.tokenize(u8, content, "\n");
 
         while (lines.next()) |line| {
             if (line.len == 0) continue;
             const entry = try self.parseEntry(line);
-            entries.append(entry) catch continue;
+            entries.append(self.allocator, entry) catch continue;
         }
 
         return entries.toOwnedSlice();

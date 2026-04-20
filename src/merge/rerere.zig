@@ -78,24 +78,56 @@ pub const RerereDB = struct {
     }
 
     fn findInDatabase(self: *RerereDB, conflict_id: []const u8) ?[]const u8 {
-        _ = self;
-        _ = conflict_id;
-        return null;
+        const dir_path = self.options.dir orelse ".git/rr-cache";
+        const postimage_path = std.fmt.concat(self.allocator, &.{ dir_path, "/", conflict_id, "/postimage" }) catch return null;
+        defer self.allocator.free(postimage_path);
+
+        const file = std.fs.cwd().openFile(postimage_path, .{}) catch return null;
+        defer file.close();
+
+        const content = file.readToEndAlloc(self.allocator, 1024 * 1024) catch return null;
+        return content;
     }
 
     fn writeToDatabase(self: *RerereDB, path: []const u8, conflict_id: []const u8, resolution: []const u8) !void {
-        _ = self;
-        _ = path;
-        _ = conflict_id;
-        _ = resolution;
+        const dir_path = self.options.dir orelse ".git/rr-cache";
+
+        const entry_path = std.fmt.concat(self.allocator, &.{ dir_path, "/", conflict_id }) catch return error.OutOfMemory;
+        defer self.allocator.free(entry_path);
+
+        std.fs.cwd().makeDir(entry_path) catch |err| {
+            if (err != error.PathAlreadyExists) return err;
+        };
+
+        const postimage_path = std.fmt.concat(self.allocator, &.{ entry_path, "/postimage" }) catch return error.OutOfMemory;
+        defer self.allocator.free(postimage_path);
+
+        var file = try std.fs.cwd().createFile(postimage_path, .{});
+        defer file.close();
+
+        try file.writeAll(resolution);
+
+        const this_dir_path = std.fmt.concat(self.allocator, &.{ entry_path, "/this" }) catch return error.OutOfMemory;
+        defer self.allocator.free(this_dir_path);
+
+        std.fs.cwd().makeDir(this_dir_path) catch |err| {
+            if (err != error.PathAlreadyExists) return err;
+        };
+
+        const preimage_path = std.fmt.concat(self.allocator, &.{ this_dir_path, "/", path }) catch return error.OutOfMemory;
+        defer self.allocator.free(preimage_path);
+
+        var preimage_file = try std.fs.cwd().createFile(preimage_path, .{});
+        defer preimage_file.close();
+
+        try preimage_file.writeAll(resolution);
     }
 
     fn validateAndFixRerereEntry(self: *RerereDB, dir_path: []const u8, entry_name: []const u8) !void {
-        _ = self;
-        const entry_path = try std.fmt.concat(self.allocator, &.{ dir_path, "/", entry_name });
+        const entry_path = std.fmt.concat(self.allocator, &.{ dir_path, "/", entry_name }) catch return;
         defer self.allocator.free(entry_path);
 
-        const postimage_path = try std.fmt.concat(self.allocator, &.{ entry_path, "/postimage" });
+        const postimage_path = std.fmt.concat(self.allocator, &.{ entry_path, "/postimage" }) catch return;
         defer self.allocator.free(postimage_path);
 
         std.fs.cwd().access(postimage_path, .{}) catch {
@@ -118,13 +150,37 @@ pub const RerereDB = struct {
     }
 
     fn removeCorruptedEntry(self: *RerereDB, entry_path: []const u8) !void {
-        _ = self;
         std.fs.cwd().deleteTree(entry_path) catch {};
     }
 
     pub fn pruneOldResolutions(self: *RerereDB, older_than_days: u32) !void {
-        _ = self;
-        _ = older_than_days;
+        const dir_path = self.options.dir orelse ".git/rr-cache";
+
+        const dir = std.fs.cwd().openDir(dir_path, .{}) catch return;
+        defer dir.close();
+
+        var entries = dir.iterate();
+        while (entries.next() catch null) |entry| {
+            if (entry) |e| {
+                if (e.kind == .directory) {
+                    try self.pruneEntryIfOld(dir_path, e.name, older_than_days);
+                }
+            }
+        }
+    }
+
+    fn pruneEntryIfOld(self: *RerereDB, dir_path: []const u8, entry_name: []const u8, older_than_days: u32) !void {
+        const entry_path = std.fmt.concat(self.allocator, &.{ dir_path, "/", entry_name }) catch return;
+        defer self.allocator.free(entry_path);
+
+        const stat = std.fs.cwd().stat(entry_path) catch return;
+        const age_in_days = @divTrunc(stat.mtime, 24 * 60 * 60);
+
+        const now: i128 = @intCast(std.time.timestamp());
+        const cutoff: i128 = @intCast(@as(i64, @intCast(older_than_days)));
+        if (now - stat.mtime > cutoff * 24 * 60 * 60) {
+            try self.removeCorruptedEntry(entry_path);
+        }
     }
 };
 

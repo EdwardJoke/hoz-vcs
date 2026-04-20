@@ -15,8 +15,8 @@ const PackedRefsManager = struct {
     /// Read all packed refs with proper locking
     /// Format: "<OID> <refname>\n" or "<OID> <refname>^\n" (peeled tag)
     pub fn readAll(self: PackedRefsManager) RefError![]Ref {
-        var refs = std.ArrayList(Ref).init(self.allocator);
-        errdefer refs.deinit();
+        var refs = std.ArrayList(Ref).empty;
+        errdefer refs.deinit(self.allocator);
 
         // Acquire shared lock on packed-refs
         const lock = try self.acquireLock(.shared);
@@ -49,7 +49,7 @@ const PackedRefsManager = struct {
 
             const oid = Oid.fromHex(oid_hex) catch continue;
             const ref = Ref.directRef(ref_name, oid);
-            refs.append(ref) catch continue;
+            refs.append(self.allocator, ref) catch continue;
         }
 
         return refs.toOwnedSlice();
@@ -240,8 +240,8 @@ pub const RefStore = struct {
 
     /// List all refs matching a prefix
     pub fn list(self: RefStore, prefix: []const u8) RefError![]const Ref {
-        var refs = std.ArrayList(Ref).init(self.allocator);
-        defer refs.deinit();
+        var refs = std.ArrayList(Ref).empty;
+        defer refs.deinit(self.allocator);
 
         const refs_dir = try self.git_dir.openDir("refs", .{});
         var walker = try refs_dir.walk(self.allocator);
@@ -262,7 +262,7 @@ pub const RefStore = struct {
                 continue;
 
             const ref = self.read(full_name) catch continue;
-            try refs.append(ref);
+            try refs.append(self.allocator, ref);
         }
 
         return refs.toOwnedSlice();

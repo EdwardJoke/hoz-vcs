@@ -45,8 +45,16 @@ pub fn computeWordDiff(
     var insertions: u32 = 0;
     var deletions: u32 = 0;
 
-    const old_words = splitIntoWords(old_text, options.separator);
-    const new_words = splitIntoWords(new_text, options.separator);
+    const old_words = try splitIntoWords(allocator, old_text, options.separator);
+    defer {
+        for (old_words) |w| allocator.free(w);
+        allocator.free(old_words);
+    }
+    const new_words = try splitIntoWords(allocator, new_text, options.separator);
+    defer {
+        for (new_words) |w| allocator.free(w);
+        allocator.free(new_words);
+    }
 
     var old_idx: usize = 0;
     var new_idx: usize = 0;
@@ -90,26 +98,26 @@ pub fn computeWordDiff(
     };
 }
 
-fn splitIntoWords(text: []const u8, separator: []const u8) [][]const u8 {
-    var words = std.ArrayList([]const u8).init(std.heap.page_allocator);
-    defer words.deinit();
+fn splitIntoWords(allocator: std.mem.Allocator, text: []const u8, separator: []const u8) ![][]const u8 {
+    var words = std.ArrayList([]const u8).initCapacity(allocator, 16);
+    errdefer words.deinit(allocator);
 
     var remaining = text;
     while (remaining.len > 0) {
         const sep_idx = findSeparator(remaining, separator);
         if (sep_idx == 0) {
-            words.appendAssumeCapacity("");
+            try words.append(allocator, "");
             remaining = remaining[separator.len..];
         } else if (sep_idx == null) {
-            words.appendAssumeCapacity(remaining);
+            try words.append(allocator, remaining);
             break;
         } else {
-            words.appendAssumeCapacity(remaining[0..sep_idx.?]);
+            try words.append(allocator, remaining[0..sep_idx.?]);
             remaining = remaining[sep_idx.? + separator.len ..];
         }
     }
 
-    return words.toOwnedSlice() catch &.{};
+    return try words.toOwnedSlice(allocator);
 }
 
 fn findSeparator(text: []const u8, separator: []const u8) ?usize {

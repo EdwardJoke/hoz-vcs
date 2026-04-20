@@ -31,9 +31,77 @@ pub const ParentResolver = struct {
         oid1: OID,
         oid2: OID,
     ) !?OID {
-        _ = self;
-        _ = oid1;
-        _ = oid2;
+        if (self.odb == null) {
+            return null;
+        }
+
+        var ancestors1 = std.AutoArrayHashMap(OID, void).init(self.allocator);
+        defer ancestors1.deinit();
+
+        var queue = std.ArrayList(OID).init(self.allocator);
+        defer queue.deinit();
+        try queue.append(oid1);
+
+        while (queue.pop()) |current| {
+            if (ancestors1.contains(current)) {
+                continue;
+            }
+            try ancestors1.put(current, {});
+
+            if (current.eql(oid2)) {
+                return oid2;
+            }
+
+            if (self.odb) |odb| {
+                if (odb.getObject(current)) |obj| {
+                    if (obj.data.len > 0) {
+                        const tree_end = std.mem.indexOfScalar(u8, obj.data, '\n') orelse obj.data.len;
+                        const tree_line = obj.data[0..tree_end];
+                        if (std.mem.startsWith(u8, tree_line, "tree ")) {
+                            const parent_line = obj.data[tree_end + 1 ..];
+                            var parent_iter = std.mem.splitScalar(u8, parent_line, '\n');
+                            while (parent_iter.next()) |line| {
+                                if (std.mem.startsWith(u8, line, "parent ")) {
+                                    const parent_hex = line[7..47];
+                                    if (OID.fromHex(parent_hex)) |parent_oid| {
+                                        try queue.append(parent_oid);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        queue.clearRetainingCapacity();
+        try queue.append(oid2);
+
+        while (queue.pop()) |current| {
+            if (ancestors1.contains(current)) {
+                return current;
+            }
+            try ancestors1.put(current, {});
+
+            if (self.odb) |odb| {
+                if (odb.getObject(current)) |obj| {
+                    if (obj.data.len > 0) {
+                        const tree_end = std.mem.indexOfScalar(u8, obj.data, '\n') orelse obj.data.len;
+                        const parent_line = obj.data[tree_end + 1 ..];
+                        var parent_iter = std.mem.splitScalar(u8, parent_line, '\n');
+                        while (parent_iter.next()) |line| {
+                            if (std.mem.startsWith(u8, line, "parent ")) {
+                                const parent_hex = line[7..47];
+                                if (OID.fromHex(parent_hex)) |parent_oid| {
+                                    try queue.append(parent_oid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         return null;
     }
 };

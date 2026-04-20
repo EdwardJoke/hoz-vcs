@@ -407,21 +407,20 @@ pub const Index = struct {
 
     /// Serialize index to bytes
     pub fn serialize(self: *Index) ![]u8 {
-        var list = std.ArrayList(u8).init(std.heap.page_allocator);
-        errdefer list.deinit();
+        var list = std.ArrayList(u8).empty;
+        errdefer list.deinit(self.allocator);
 
-        // Write header
-        try list.appendSlice(&INDEX_SIGNATURE);
+        try list.appendSlice(self.allocator, &INDEX_SIGNATURE);
         var version_bytes: [4]u8 = undefined;
         std.mem.writeInt(u32, &version_bytes, self.version, .big);
-        try list.appendSlice(&version_bytes);
-        try list.appendSlice(&[4]u8{ 0, 0, 0, 0 }); // Placeholder for entry count
+        try list.appendSlice(self.allocator, &version_bytes);
+        try list.appendSlice(self.allocator, &[4]u8{ 0, 0, 0, 0 });
 
         const count_offset = list.items.len - 4;
 
         // Write entries
         for (self.entries.items, self.entry_names.items) |entry, name| {
-            try self.writeEntry(&list, entry, name);
+            try writeEntry(self.allocator, &list, entry, name);
         }
 
         // Write extensions (placeholder - extensions not implemented for now)
@@ -429,7 +428,7 @@ pub const Index = struct {
 
         // Write checksum placeholder
         const checksum_offset = list.items.len;
-        try list.appendSlice(&[1]u8{0} ** 20);
+        try list.appendSlice(self.allocator, &[1]u8{0} ** 20);
 
         // Calculate and write checksum
         const checksum = crypto.hash.sha1.Sha1.hash(list.items[0..checksum_offset], .{});
@@ -438,15 +437,13 @@ pub const Index = struct {
         // Update entry count
         std.mem.writeInt(u32, list.items[count_offset .. count_offset + 4], @intCast(self.entries.items.len), .big);
 
-        return try list.toOwnedSlice();
+        return try list.toOwnedSlice(self.allocator);
     }
 
     /// Write a single entry to the list
-    fn writeEntry(self: *Index, list: *std.ArrayList(u8), entry: IndexEntry, name: []const u8) !void {
-        _ = self;
-
+    fn writeEntry(allocator: std.mem.Allocator, list: *std.ArrayList(u8), entry: IndexEntry, name: []const u8) !void {
         const offset = list.items.len;
-        try list.appendSlice(&[1]u8{0} ** INDEX_ENTRY_FIXED_SIZE);
+        try list.appendSlice(allocator, &[1]u8{0} ** INDEX_ENTRY_FIXED_SIZE);
 
         std.mem.writeInt(u32, list.items[offset .. offset + 4], entry.ctime_sec, .big);
         std.mem.writeInt(u32, list.items[offset + 4 .. offset + 8], entry.ctime_nsec, .big);
@@ -465,16 +462,16 @@ pub const Index = struct {
         const name_len = @as(u16, @intCast(name.len));
         const path_size = entryPathSize(name_len);
 
-        try list.appendSlice(name);
+        try list.appendSlice(allocator, name);
         if (name.len < path_size) {
-            try list.appendSlice(&[1]u8{0} ** (path_size - name.len));
+            try list.appendSlice(allocator, &[1]u8{0} ** (path_size - name.len));
         }
     }
 
     /// Add or update an entry in the index
     pub fn addEntry(self: *Index, entry: IndexEntry, name: []const u8) !void {
-        try self.entries.append(entry);
-        try self.entry_names.append(name);
+        try self.entries.append(self.allocator, entry);
+        try self.entry_names.append(self.allocator, name);
     }
 
     /// Remove an entry by name
@@ -483,7 +480,7 @@ pub const Index = struct {
             if (std.mem.eql(u8, n, name)) {
                 _ = self.entries.orderedRemove(i);
                 const removed_name = self.entry_names.orderedRemove(i);
-                std.heap.page_allocator.free(removed_name);
+                self.allocator.free(removed_name);
                 return;
             }
         }
@@ -535,22 +532,24 @@ pub const Index = struct {
         const len = self.entries.items.len;
         if (len <= 1) return;
 
-        var indices = std.ArrayList(usize).init(std.heap.page_allocator);
-        defer indices.deinit();
-        try indices.appendSlice(&[1]usize{0} ** len);
+        var indices = std.ArrayList(usize).empty;
+        defer indices.deinit(self.allocator);
+        try indices.appendSlice(self.allocator, &[1]usize{0} ** len);
         for (0..len) |i| indices.items[i] = i;
 
         const cmp = if (order == .ascending) sortCompareAsc else sortCompareDesc;
         std.sort.sort(usize, indices.items, self, cmp);
 
-        var new_entries = std.ArrayList(IndexEntry).init(std.heap.page_allocator);
-        var new_names = std.ArrayList([]const u8).init(std.heap.page_allocator);
+        var new_entries = std.ArrayList(IndexEntry).empty;
+        defer new_entries.deinit(self.allocator);
+        var new_names = std.ArrayList([]const u8).empty;
         defer {
-            new_entries.deinit();
-            for (new_names.items) |n| std.heap.page_allocator.free(n);
-            new_names.deinit();
+            for (new_names.items) |n| self.allocator.free(n);
+            new_names.deinit(self.allocator);
         }
 
+        try new_entries.ensureTotalCapacity(self.allocator, len);
+        try new_names.ensureTotalCapacity(self.allocator, len);
         for (indices.items) |old_idx| {
             new_entries.appendAssumeCapacity(self.entries.items[old_idx]);
             new_names.appendAssumeCapacity(self.entry_names.items[old_idx]);
@@ -572,22 +571,24 @@ pub const Index = struct {
         const len = self.entries.items.len;
         if (len <= 1) return;
 
-        var indices = std.ArrayList(usize).init(std.heap.page_allocator);
-        defer indices.deinit();
-        try indices.appendSlice(&[1]usize{0} ** len);
+        var indices = std.ArrayList(usize).empty;
+        defer indices.deinit(self.allocator);
+        try indices.appendSlice(self.allocator, &[1]usize{0} ** len);
         for (0..len) |i| indices.items[i] = i;
 
         const cmp: *const fn (*Index, usize, usize) bool = if (order == .ascending) sortPathAsc else sortPathDesc;
         std.sort.sort(usize, indices.items, self, cmp);
 
-        var new_entries = std.ArrayList(IndexEntry).init(std.heap.page_allocator);
-        var new_names = std.ArrayList([]const u8).init(std.heap.page_allocator);
+        var new_entries = std.ArrayList(IndexEntry).empty;
+        defer new_entries.deinit(self.allocator);
+        var new_names = std.ArrayList([]const u8).empty;
         defer {
-            new_entries.deinit();
-            for (new_names.items) |n| std.heap.page_allocator.free(n);
-            new_names.deinit();
+            for (new_names.items) |n| self.allocator.free(n);
+            new_names.deinit(self.allocator);
         }
 
+        try new_entries.ensureTotalCapacity(self.allocator, len);
+        try new_names.ensureTotalCapacity(self.allocator, len);
         for (indices.items) |old_idx| {
             new_entries.appendAssumeCapacity(self.entries.items[old_idx]);
             new_names.appendAssumeCapacity(self.entry_names.items[old_idx]);

@@ -28,6 +28,12 @@ pub fn addSparsePattern(config: *SparseConfig, pattern: []const u8) !void {
         return SparseError.InvalidPattern;
     }
 
+    for (config.patterns.items) |existing| {
+        if (std.mem.eql(u8, existing, pattern)) {
+            return;
+        }
+    }
+
     try config.patterns.append(pattern);
 }
 
@@ -35,27 +41,8 @@ pub fn clearSparsePatterns(config: *SparseConfig) void {
     config.patterns.clearRetainingCapacity();
 }
 
-fn splitNth(text: []const u8, delimiter: u8, n: usize) ?[]const u8 {
-    var count: usize = 0;
-    var start: usize = 0;
-
-    for (text, 0..) |c, i| {
-        if (c == delimiter) {
-            if (count == n) {
-                return text[start..i];
-            }
-            count += 1;
-            start = i + 1;
-        }
-    }
-
-    if (count == n) {
-        return text[start..];
-    }
-    return null;
-}
-
 pub fn isPathInSparseCone(
+    allocator: std.mem.Allocator,
     config: SparseConfig,
     path: []const u8,
     is_dir: bool,
@@ -65,25 +52,21 @@ pub fn isPathInSparseCone(
     }
 
     for (config.patterns.items) |pattern| {
-        const needs_sep = !std.mem.endsWith(u8, pattern, "/");
-
-        if (needs_sep) {
-            const prefix = std.mem.concat(std.heap.page_allocator, u8, &.{ pattern, "/" }) catch continue;
-            if (std.mem.startsWith(u8, path, prefix)) {
-                return true;
-            }
-        } else {
-            if (std.mem.startsWith(u8, path, pattern)) {
-                return true;
-            }
-        }
-
         if (std.mem.eql(u8, path, pattern)) {
             return true;
         }
 
         if (is_dir) {
-            const deep_pattern = std.mem.concat(std.heap.page_allocator, u8, &.{ pattern, "/**" }) catch continue;
+            const dir_with_sep = std.mem.concat(allocator, u8, &.{ pattern, "/" }) catch continue;
+            defer allocator.free(dir_with_sep);
+
+            if (std.mem.startsWith(u8, path, dir_with_sep)) {
+                return true;
+            }
+
+            const deep_pattern = std.mem.concat(allocator, u8, &.{ pattern, "/**" }) catch continue;
+            defer allocator.free(deep_pattern);
+
             if (std.mem.startsWith(u8, path, deep_pattern)) {
                 return true;
             }
@@ -99,8 +82,13 @@ fn isPathInSparsePattern(patterns: [][]const u8, path: []const u8, is_dir: bool)
             return true;
         }
 
-        if (is_dir and std.mem.startsWith(u8, path, pattern)) {
-            return true;
+        if (is_dir) {
+            const pattern_with_sep = std.mem.concat(std.heap.page_allocator, u8, &.{ pattern, "/" }) catch continue;
+            defer std.heap.page_allocator.free(pattern_with_sep);
+
+            if (std.mem.startsWith(u8, path, pattern_with_sep)) {
+                return true;
+            }
         }
 
         if (std.mem.indexOf(u8, pattern, "**") != null) {
@@ -157,6 +145,18 @@ test "addSparsePattern returns error for empty pattern" {
     try std.testing.expectError(SparseError.InvalidPattern, result);
 }
 
+test "addSparsePattern deduplicates patterns" {
+    const gpa = std.heap.DebugAllocator(.{}).init;
+    defer _ = gpa.deinit();
+
+    var config = initSparseConfig(gpa.allocator());
+    defer deinit(&config);
+
+    try addSparsePattern(&config, "src");
+    try addSparsePattern(&config, "src");
+    try std.testing.expectEqual(@as(usize, 1), config.patterns.items.len);
+}
+
 test "clearSparsePatterns clears all patterns" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
@@ -179,8 +179,8 @@ test "isPathInSparseCone matches exact path" {
     defer deinit(&config);
 
     try addSparsePattern(&config, "src");
-    try std.testing.expect(isPathInSparseCone(config, "src", true));
-    try std.testing.expect(!isPathInSparseCone(config, "lib", true));
+    try std.testing.expect(isPathInSparseCone(gpa.allocator(), config, "src", true));
+    try std.testing.expect(!isPathInSparseCone(gpa.allocator(), config, "lib", true));
 }
 
 test "isPathInSparseCone matches subdirectories in cone mode" {
@@ -191,8 +191,8 @@ test "isPathInSparseCone matches subdirectories in cone mode" {
     defer deinit(&config);
 
     try addSparsePattern(&config, "src");
-    try std.testing.expect(isPathInSparseCone(config, "src/utils", true));
-    try std.testing.expect(isPathInSparseCone(config, "src/utils/io", true));
+    try std.testing.expect(isPathInSparseCone(gpa.allocator(), config, "src/utils", true));
+    try std.testing.expect(isPathInSparseCone(gpa.allocator(), config, "src/utils/io", true));
 }
 
 test "setConeMode enables and disables cone mode" {
@@ -234,19 +234,6 @@ test "deinit properly cleans up" {
     try std.testing.expectEqual(@as(usize, 0), config.patterns.items.len);
 }
 
-test "addSparsePattern rejects duplicate patterns" {
-    const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
-
-    var config = initSparseConfig(gpa.allocator());
-    defer deinit(&config);
-
-    try addSparsePattern(&config, "src");
-    try addSparsePattern(&config, "src");
-
-    try std.testing.expectEqual(@as(usize, 2), config.patterns.items.len);
-}
-
 test "isPathInSparseCone returns false for non-matching paths" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
@@ -255,8 +242,8 @@ test "isPathInSparseCone returns false for non-matching paths" {
     defer deinit(&config);
 
     try addSparsePattern(&config, "src");
-    try std.testing.expect(!isPathInSparseCone(config, "other", true));
-    try std.testing.expect(!isPathInSparseCone(config, "src2", true));
+    try std.testing.expect(!isPathInSparseCone(gpa.allocator(), config, "other", true));
+    try std.testing.expect(!isPathInSparseCone(gpa.allocator(), config, "src2", true));
 }
 
 test "sparse config maintains cone mode after adding patterns" {
