@@ -7,6 +7,8 @@ const Io = std.Io;
 
 const log_mod = @import("util/log.zig");
 const format = @import("util/format.zig").Formatter;
+const StatusScanner = @import("workdir/scanner.zig").StatusScanner;
+const WorkDir = @import("workdir/workdir.zig");
 
 pub const Command = enum {
     init,
@@ -204,8 +206,7 @@ fn printUnknown(writer: *Io.Writer, cmd: []const u8, use_color: bool) !void {
     try writer.writeAll("' for available commands.\n");
 }
 
-fn runCommand(cmd: Command, args: []const []const u8, writer: *Io.Writer, use_color: bool) !void {
-    _ = args;
+fn runCommand(cmd: Command, args: []const []const u8, writer: *Io.Writer, use_color: bool, io: *Io, allocator: std.mem.Allocator) !void {
     var fmt = format.init(writer, use_color);
 
     switch (cmd) {
@@ -230,8 +231,73 @@ fn runCommand(cmd: Command, args: []const []const u8, writer: *Io.Writer, use_co
             try writer.writeAll(" to view history\n");
         },
         .status => {
-            try fmt.info("Working tree clean");
-            try writer.writeAll("  Nothing to commit, working tree clean\n");
+            // Get current working directory
+            var cwd_buffer: [4096]u8 = undefined;
+            const cwd_len = try std.process.currentPath(io.*, &cwd_buffer);
+            const cwd = cwd_buffer[0..cwd_len];
+
+            const repo_root = WorkDir.findRepositoryRoot(allocator, io.*, cwd) catch |err| {
+                switch (err) {
+                    error.NotARepository => {
+                        try fmt.err("Not a git repository");
+                        try writer.writeAll("  Run 'hoz init' to initialize a repository\n");
+                        return;
+                    },
+                    error.PermissionDenied => {
+                        try fmt.err("Permission denied");
+                        try writer.writeAll("  Cannot access directory. Check your permissions.\n");
+                        return;
+                    },
+                    error.DirectoryNotFound => {
+                        try fmt.err("Directory not found");
+                        try writer.writeAll("  The specified directory does not exist.\n");
+                        return;
+                    },
+                    else => {
+                        try fmt.err("Failed to find repository");
+                        try writer.writeAll("  An unexpected error occurred while searching for the repository.\n");
+                        return;
+                    },
+                }
+            };
+            defer {
+                allocator.free(repo_root.git_dir);
+                allocator.free(repo_root.working_dir);
+                allocator.free(repo_root.work_tree);
+            }
+
+            var show_ignored = false;
+            var use_short = false;
+            var show_untracked_all = false;
+            for (args) |arg| {
+                if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--short")) {
+                    use_short = true;
+                } else if (std.mem.eql(u8, arg, "--ignored")) {
+                    show_ignored = true;
+                } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--untracked-files=all")) {
+                    show_untracked_all = true;
+                }
+            }
+
+            var scanner = StatusScanner.init(allocator, io, repo_root.working_dir, cwd, .{ .show_untracked = true, .show_ignored = show_ignored, .show_untracked_all = show_untracked_all, .porcelain = false });
+            defer scanner.deinit();
+
+            scanner.loadIndex();
+
+            const result = try scanner.scan();
+
+            if (!result.has_changes and result.entries.len == 0) {
+                try fmt.info("Working tree clean");
+                try writer.writeAll("  Nothing to commit, working tree clean\n");
+            } else if (use_short) {
+                const output = try scanner.formatPorcelain(result);
+                defer allocator.free(output);
+                try writer.writeAll(output);
+            } else {
+                const output = try scanner.formatLong(result);
+                defer allocator.free(output);
+                try writer.writeAll(output);
+            }
         },
         .log => {
             try fmt.header("Commit History");
@@ -313,7 +379,7 @@ pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
 
-    const io = init.io;
+    var io = init.io;
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
@@ -355,7 +421,7 @@ pub fn main(init: std.process.Init) !void {
     const cmd = findCommand(cmd_str);
 
     if (cmd) |c| {
-        try runCommand(c, remaining[arg_offset..], stdout_writer, use_color);
+        try runCommand(c, remaining[arg_offset..], stdout_writer, use_color, &io, arena);
         try stdout_writer.flush();
     } else {
         try printUnknown(stdout_writer, cmd_str, use_color);

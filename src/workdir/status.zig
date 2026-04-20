@@ -74,16 +74,16 @@ pub fn detectStatus(
     const dir = Io.Dir.cwd();
 
     if (index_entry == null) {
-        const exists = dir.openFile(io, path, .{}) catch return .untracked;
-        exists.close(io);
+        const exists = dir.openFile(io.*, path, .{}) catch return .untracked;
+        exists.close(io.*);
         return .added;
     }
 
     const entry = index_entry.?;
-    const file = dir.openFile(io, path, .{}) catch return .deleted;
-    defer file.close(io);
+    const file = dir.openFile(io.*, path, .{}) catch return .deleted;
+    defer file.close(io.*);
 
-    const stat = try file.stat(io);
+    const stat = try file.stat(io.*);
 
     const entry_size = @as(u64, entry.file_size);
     if (@as(u64, @intCast(stat.size)) != entry_size) {
@@ -92,10 +92,11 @@ pub fn detectStatus(
 
     const entry_mtime_sec = @as(i64, @intCast(entry.mtime_sec));
     const entry_mtime_nsec = @as(i64, @intCast(entry.mtime_nsec));
-    const stat_mtime_sec = @as(i64, @intCast(stat.mtime.seconds));
-    const stat_mtime_nsec = @as(i64, @intCast(stat.mtime.nanos));
+    const stat_mtime_ns = stat.mtime.nanoseconds;
+    const stat_mtime_sec = @as(i64, @intCast(@divTrunc(stat_mtime_ns, std.time.ns_per_s)));
+    const stat_mtime_nsec = @as(i64, @intCast(@mod(stat_mtime_ns, std.time.ns_per_s)));
 
-    const mtime_diff = (stat_mtime_sec - entry_mtime_sec) * 1000 + (stat_mtime_nsec - entry_mtime_nsec) / 1000000;
+    const mtime_diff = (stat_mtime_sec - entry_mtime_sec) * 1000 + @divTrunc((stat_mtime_nsec - entry_mtime_nsec), 1000000);
     if (mtime_diff > 1 or mtime_diff < -1) {
         return .modified;
     }
@@ -122,7 +123,7 @@ pub fn getFileSystemCaseSensitivity(io: *Io, path: []const u8) CaseSensitivity {
     dir.createFile(io, test_lower, .{}) catch return .case_sensitive;
     defer dir.deleteFile(io, test_lower) catch {};
 
-    const exists_upper = dir.openFile(io, test_upper, .{});
+    const exists_upper = dir.openFile(io.*, test_upper, .{});
     if (exists_upper) |_| {
         dir.deleteFile(io, test_upper) catch {};
         return .case_insensitive;
@@ -184,13 +185,13 @@ pub fn detectStatusNfsFriendly(
     const dir = Io.Dir.cwd();
 
     if (index_entry == null) {
-        const exists = dir.openFile(io, path, .{}) catch return .untracked;
+        const exists = dir.openFile(io.*, path, .{}) catch return .untracked;
         exists.close(io);
         return .added;
     }
 
     const entry = index_entry.?;
-    const file = dir.openFile(io, path, .{}) catch return .deleted;
+    const file = dir.openFile(io.*, path, .{}) catch return .deleted;
     defer file.close(io);
 
     const stat = try file.stat(io);
@@ -347,7 +348,7 @@ test "detectStatus returns modified when size differs" {
     const oid: [20]u8 = [_]u8{0} ** 20;
     const entry = IndexEntry.fromStat(stat, oid, test_path, 0);
 
-    const file2 = try dir.openFile(io, test_path, .{});
+    const file2 = try dir.openFile(io.*, test_path, .{});
     try file2.writeAll(io, "longer content that changes size");
     try file2.sync(io);
     file2.close(io);

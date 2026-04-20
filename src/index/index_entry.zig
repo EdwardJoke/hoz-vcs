@@ -1,6 +1,6 @@
 //! Index Entry - represents a single file in the Git index/staging area
 const std = @import("std");
-const Oid = @import("../object/oid.zig").Oid;
+const OID = @import("../object/oid.zig").OID;
 
 pub const INDEX_ENTRY_FLAGS_NAME_MASK: u16 = 0xFFF;
 pub const INDEX_ENTRY_FLAGS_STAGE_MASK: u16 = 0x3000;
@@ -24,17 +24,17 @@ pub const IndexEntry = struct {
     uid: u32,
     gid: u32,
     file_size: u32,
-    oid: Oid,
+    oid: OID,
     flags: u16,
 
-    pub fn fromStat(stat: std.fs.File.Stats, oid: Oid, name: []const u8, stage_val: u8) IndexEntry {
+    pub fn fromStat(stat: std.fs.File.Stats, oid: OID, name: []const u8, stage_val: u8) IndexEntry {
         var name_len: u16 = @intCast(name.len);
         if (name_len >= 0xFFF) {
             name_len = 0xFFF;
         }
 
         var flags: u16 = name_len;
-        flags |= (@intCast(stage_val) & 0x3) << 12;
+        flags |= (@as(u16, stage_val) & 0x3) << 12;
 
         return .{
             .ctime_sec = @intCast(stat.ctime.seconds),
@@ -68,7 +68,7 @@ pub const IndexEntry = struct {
         return self.stage() > 0;
     }
 
-    pub fn updateFromStat(self: *IndexEntry, stat: std.fs.File.Stats, oid: Oid) void {
+    pub fn updateFromStat(self: *IndexEntry, stat: std.fs.File.Stats, oid: OID) void {
         self.ctime_sec = @intCast(stat.ctime.seconds);
         self.ctime_nsec = @intCast(stat.ctime.nanos);
         self.mtime_sec = @intCast(stat.mtime.seconds);
@@ -82,8 +82,8 @@ pub const IndexEntry = struct {
         self.oid = oid;
     }
 
-    pub fn setStage(self: *IndexEntry, stage: u8) void {
-        self.flags = (self.flags & 0xCFFF) | ((stage & 0x3) << 12);
+    pub fn setStage(self: *IndexEntry, stage_val: u8) void {
+        self.flags = (self.flags & 0xCFFF) | ((stage_val & 0x3) << 12);
     }
 
     pub fn ceSec(self: IndexEntry) u32 {
@@ -158,7 +158,7 @@ test "IndexEntry fromStat" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -192,7 +192,7 @@ test "IndexEntry stage bits" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     var entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -229,7 +229,7 @@ test "IndexEntry setStage" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     var entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -266,7 +266,7 @@ test "timestampMatchesCached" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -296,7 +296,7 @@ test "shouldUpdateEntry" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);

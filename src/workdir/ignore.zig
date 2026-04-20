@@ -119,35 +119,36 @@ pub fn loadGitIgnore(
     path: []const u8,
 ) ![]Pattern {
     const dir = Io.Dir.cwd();
-    const file = dir.openFile(io, path, .{}) catch |err| {
+    const file = dir.openFile(io.*, path, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => return &.{},
             else => return err,
         }
     };
-    defer file.close(io);
+    defer file.close(io.*);
 
-    const stat = try file.stat(io);
+    const stat = try file.stat(io.*);
     const size = @as(usize, @intCast(stat.size));
 
     const buffer = try allocator.alloc(u8, size);
     defer allocator.free(buffer);
 
-    try file.readAllFill(io, buffer, size);
+    var file_reader = file.reader(io.*, buffer);
+    try file_reader.interface.readSliceAll(buffer);
 
-    var patterns = std.ArrayList(Pattern).init(allocator);
-    errdefer patterns.deinit();
+    var patterns = std.ArrayList(Pattern).empty;
+    errdefer patterns.deinit(allocator);
 
     var lines = std.mem.splitScalar(u8, buffer, '\n');
     while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, "\r");
         if (trimmed.len > 0) {
             const pattern = try parsePattern(trimmed);
-            try patterns.append(pattern);
+            try patterns.append(allocator, pattern);
         }
     }
 
-    return try patterns.toOwnedSlice();
+    return try patterns.toOwnedSlice(allocator);
 }
 
 pub fn isIgnored(
