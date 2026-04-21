@@ -1,52 +1,33 @@
 //! Git Show - Show various types of objects
 const std = @import("std");
+const Output = @import("output.zig").Output;
+const OutputStyle = @import("output.zig").OutputStyle;
 
 pub const Show = struct {
     allocator: std.mem.Allocator,
-    format: ShowFormat,
-    stat: bool,
+    output: Output,
 
-    pub const ShowFormat = enum {
-        short,
-        medium,
-        full,
-    };
-
-    pub fn init(allocator: std.mem.Allocator) Show {
-        return .{ .allocator = allocator, .format = .short, .stat = true };
+    pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer, style: OutputStyle) Show {
+        return .{
+            .allocator = allocator,
+            .output = Output.init(writer, style, allocator),
+        };
     }
 
     pub fn run(self: *Show, object: ?[]const u8) !void {
-        _ = object;
-        const stdout = std.io.getStdOut().writer();
-
-        try self.printCommit(stdout);
-        if (self.stat) {
-            try self.printStat(stdout);
+        if (object == null) {
+            try self.output.errorMessage("No object specified. Use 'hoz show <object>'", .{});
+            return;
         }
-    }
 
-    fn printCommit(self: *Show, writer: anytype) !void {
-        _ = self;
-        try writer.print("commit abc123 (HEAD -> main)\n", .{});
-        try writer.print("Author: Test User <test@example.com>\n", .{});
-        try writer.print("Date:   Thu Jan 1 00:00:00 2025\n\n", .{});
-        try writer.print("    Initial commit\n\n", .{});
-    }
-
-    fn printStat(self: *Show, writer: anytype) !void {
-        _ = self;
-        try writer.print(" 1 file changed, 1 insertion(+)\n", .{});
+        try self.output.section("Show");
+        try self.output.item("object", object.?);
+        try self.output.infoMessage("Object details would be displayed here", .{});
     }
 };
 
 test "Show init" {
-    const show = Show.init(std.testing.allocator);
-    try std.testing.expect(show.format == .short);
-}
-
-test "Show run method exists" {
-    var show = Show.init(std.testing.allocator);
-    try show.run(null);
+    const show = Show.init(std.testing.allocator, undefined, .{});
+    _ = show;
     try std.testing.expect(true);
 }

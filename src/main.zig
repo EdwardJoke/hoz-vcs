@@ -1,14 +1,17 @@
 //! Hoz - Git-compatible VCS in Zig
 //!
-//! A streamlined CLI designed for simplicity and usability.
+//! A streamlined CLI designed for simplicity, usability, and AI-friendliness.
+//! All output follows standardized formats: human-readable, JSON, or porcelain.
 
 const std = @import("std");
 const Io = std.Io;
 
+const cli = @import("cli/cli.zig");
+const Output = cli.Output;
+const OutputStyle = cli.OutputStyle;
+const CommandDispatcher = cli.CommandDispatcher;
+
 const log_mod = @import("util/log.zig");
-const format = @import("util/format.zig").Formatter;
-const StatusScanner = @import("workdir/scanner.zig").StatusScanner;
-const WorkDir = @import("workdir/workdir.zig");
 
 pub const Command = enum {
     init,
@@ -45,10 +48,31 @@ const CommandInfo = struct {
     aliases: []const []const u8 = &.{},
 };
 
-const ALL_COMMANDS = [_][]const u8{
-    "init",  "add",   "commit", "status", "log",     "diff",  "branch",   "checkout",
-    "clone", "fetch", "push",   "pull",   "remote",  "stash", "tag",      "rebase",
-    "merge", "reset", "clean",  "reflog", "ls-tree", "show",  "cat-file", "hash-object",
+const ALL_COMMANDS = [_]CommandInfo{
+    .{ .name = "init", .description = "Initialize a new repository" },
+    .{ .name = "add", .description = "Add file contents to the index" },
+    .{ .name = "commit", .description = "Record changes to the repository", .aliases = &.{"ci"} },
+    .{ .name = "status", .description = "Show working tree status", .aliases = &.{"st"} },
+    .{ .name = "log", .description = "Show commit logs" },
+    .{ .name = "diff", .description = "Show changes between commits" },
+    .{ .name = "branch", .description = "List, create, or delete branches", .aliases = &.{"br"} },
+    .{ .name = "checkout", .description = "Switch branches or restore files", .aliases = &.{"co"} },
+    .{ .name = "clone", .description = "Clone a repository" },
+    .{ .name = "fetch", .description = "Download objects and refs from remote" },
+    .{ .name = "push", .description = "Update remote refs" },
+    .{ .name = "pull", .description = "Fetch and merge from remote" },
+    .{ .name = "remote", .description = "Manage remote repositories" },
+    .{ .name = "stash", .description = "Stash changes" },
+    .{ .name = "tag", .description = "Create, list, or delete tags" },
+    .{ .name = "rebase", .description = "Reapply commits on top of another base" },
+    .{ .name = "merge", .description = "Join two or more development histories" },
+    .{ .name = "reset", .description = "Reset current HEAD to specified state" },
+    .{ .name = "clean", .description = "Remove untracked files" },
+    .{ .name = "reflog", .description = "Manage reflog information" },
+    .{ .name = "ls-tree", .description = "List the contents of a tree object" },
+    .{ .name = "show", .description = "Show various types of objects" },
+    .{ .name = "cat-file", .description = "Provide content or type information" },
+    .{ .name = "hash-object", .description = "Compute object ID" },
 };
 
 fn findCommand(name: []const u8) ?Command {
@@ -123,254 +147,80 @@ fn suggestSimilarCommand(input: []const u8) ?[]const u8 {
     var best_dist: usize = 3;
 
     for (ALL_COMMANDS) |cmd| {
-        const dist = editDistanceSimple(input, cmd);
+        const dist = editDistanceSimple(input, cmd.name);
         if (dist < best_dist) {
             best_dist = dist;
-            best_cmd = cmd;
+            best_cmd = cmd.name;
         }
-    }
-    const aliases = [_][]const u8{ "ci", "st", "br", "co" };
-    for (aliases) |alias| {
-        const alias_dist = editDistanceSimple(input, alias);
-        if (alias_dist < best_dist) {
-            best_dist = alias_dist;
-            best_cmd = alias;
+        for (cmd.aliases) |alias| {
+            const alias_dist = editDistanceSimple(input, alias);
+            if (alias_dist < best_dist) {
+                best_dist = alias_dist;
+                best_cmd = alias;
+            }
         }
     }
 
     return best_cmd;
 }
 
-fn printHelp(writer: *Io.Writer, use_color: bool) !void {
-    var fmt = format.init(writer, use_color);
+fn printHelp(writer: *Io.Writer, style: OutputStyle) !void {
+    var out = Output.init(writer, style, std.heap.page_allocator);
 
-    try writer.writeAll("Usage: ");
-    try fmt.colored("hoz <command> [options]", format.Color.bold);
-    try writer.writeAll("\n\n");
+    try out.section("Hoz - Git-compatible VCS");
+    try writer.writeAll("Usage: hoz <command> [options]\n\n");
 
-    try fmt.colored("Commands:\n", format.Color.cyan);
+    try out.section("Commands");
+    for (ALL_COMMANDS) |cmd| {
+        var buf: [64]u8 = undefined;
+        const name = if (cmd.aliases.len > 0)
+            std.fmt.bufPrint(&buf, "{s} ({s})", .{ cmd.name, cmd.aliases[0] }) catch cmd.name
+        else
+            cmd.name;
 
-    inline for (ALL_COMMANDS) |cmd| {
-        try writer.writeAll("  ");
-        try fmt.colored(cmd, format.Color.green);
-        try writer.writeAll("\n");
+        try writer.print("  {s:20} {s}\n", .{ name, cmd.description });
     }
 
     try writer.writeAll("\n");
-    try fmt.colored("Options:\n", format.Color.cyan);
-    try writer.writeAll("  ");
-    try fmt.colored("--help, -h", format.Color.dim);
-    try writer.writeAll("  Show this help\n");
-    try writer.writeAll("  ");
-    try fmt.colored("--version, -v", format.Color.dim);
-    try writer.writeAll("  Show version\n");
-    try writer.writeAll("  ");
-    try fmt.colored("--no-color", format.Color.dim);
-    try writer.writeAll("   Disable colors\n");
+    try out.section("Global Options");
+    try writer.print("  {s:20} {s}\n", .{ "--help, -h", "Show this help message" });
+    try writer.print("  {s:20} {s}\n", .{ "--version, -v", "Show version information" });
+    try writer.print("  {s:20} {s}\n", .{ "--no-color", "Disable colored output" });
+    try writer.print("  {s:20} {s}\n", .{ "--json", "Output in JSON format" });
+    try writer.print("  {s:20} {s}\n", .{ "--porcelain", "Output in porcelain format" });
+    try writer.print("  {s:20} {s}\n", .{ "--quiet, -q", "Suppress non-error output" });
+
     try writer.writeAll("\n");
-    try fmt.colored("Get started: ", format.Color.yellow);
-    try fmt.colored("hoz init", format.Color.bold);
-    try writer.writeAll("\n");
-    try writer.writeAll("\n");
-    try fmt.colored("Aliases:\n", format.Color.cyan);
-    try writer.writeAll("  ");
-    try fmt.colored("ci", format.Color.yellow);
-    try writer.writeAll(" = commit, ");
-    try fmt.colored("st", format.Color.yellow);
-    try writer.writeAll(" = status, ");
-    try fmt.colored("br", format.Color.yellow);
-    try writer.writeAll(" = branch, ");
-    try fmt.colored("co", format.Color.yellow);
-    try writer.writeAll(" = checkout\n");
+    try out.hint("Get started: hoz init", .{});
 }
 
-fn printVersion(writer: *Io.Writer) !void {
-    try writer.writeAll("hoz version 0.1.0\n");
+fn printVersion(writer: *Io.Writer, style: OutputStyle) !void {
+    var out = Output.init(writer, style, std.heap.page_allocator);
+    try out.result(.{ .success = true, .code = 0, .message = "hoz version 0.1.0" });
 }
 
-fn printUnknown(writer: *Io.Writer, cmd: []const u8, use_color: bool) !void {
-    var fmt = format.init(writer, use_color);
-    try fmt.err("Unknown command");
-    try writer.print("  '{s}' is not a hoz command.\n", .{cmd});
+fn printUnknown(writer: *Io.Writer, cmd: []const u8, style: OutputStyle) !void {
+    var out = Output.init(writer, style, std.heap.page_allocator);
+    try out.errorMessage("'{s}' is not a hoz command.", .{cmd});
 
     if (suggestSimilarCommand(cmd)) |suggestion| {
         try writer.writeAll("\n");
-        try writer.writeAll("  Did you mean '");
-        try fmt.colored(suggestion, format.Color.green);
-        try writer.writeAll("'?\n");
+        try out.hint("Did you mean '{s}'?", .{suggestion});
     }
 
     try writer.writeAll("\n");
-    try writer.writeAll("  Run '");
-    try fmt.colored("hoz help", format.Color.bold);
-    try writer.writeAll("' for available commands.\n");
+    try out.hint("Run 'hoz help' for available commands.", .{});
 }
 
-fn runCommand(cmd: Command, args: []const []const u8, writer: *Io.Writer, use_color: bool, io: *Io, allocator: std.mem.Allocator) !void {
-    var fmt = format.init(writer, use_color);
+fn runCommand(cmd: Command, args: []const []const u8, io: Io, writer: *Io.Writer, style: OutputStyle, allocator: std.mem.Allocator) !void {
+    var dispatcher = CommandDispatcher.init(allocator, io, writer, style);
 
     switch (cmd) {
-        .help => try printHelp(writer, use_color),
-        .version => try printVersion(writer),
-        .init => {
-            try fmt.success("Initialized empty repository");
-            try writer.writeAll("  Start with ");
-            try fmt.colored("hoz add .", format.Color.bold);
-            try writer.writeAll(" to stage files\n");
-        },
-        .add => {
-            try fmt.success("Files staged");
-            try writer.writeAll("  Run ");
-            try fmt.colored("hoz commit", format.Color.bold);
-            try writer.writeAll(" to record changes\n");
-        },
-        .commit => {
-            try fmt.success("Changes committed");
-            try writer.writeAll("  Use ");
-            try fmt.colored("hoz log", format.Color.bold);
-            try writer.writeAll(" to view history\n");
-        },
-        .status => {
-            // Get current working directory
-            var cwd_buffer: [4096]u8 = undefined;
-            const cwd_len = try std.process.currentPath(io.*, &cwd_buffer);
-            const cwd = cwd_buffer[0..cwd_len];
-
-            const repo_root = WorkDir.findRepositoryRoot(allocator, io.*, cwd) catch |err| {
-                switch (err) {
-                    error.NotARepository => {
-                        try fmt.err("Not a git repository");
-                        try writer.writeAll("  Run 'hoz init' to initialize a repository\n");
-                        return;
-                    },
-                    error.PermissionDenied => {
-                        try fmt.err("Permission denied");
-                        try writer.writeAll("  Cannot access directory. Check your permissions.\n");
-                        return;
-                    },
-                    error.DirectoryNotFound => {
-                        try fmt.err("Directory not found");
-                        try writer.writeAll("  The specified directory does not exist.\n");
-                        return;
-                    },
-                    else => {
-                        try fmt.err("Failed to find repository");
-                        try writer.writeAll("  An unexpected error occurred while searching for the repository.\n");
-                        return;
-                    },
-                }
-            };
-            defer {
-                allocator.free(repo_root.git_dir);
-                allocator.free(repo_root.working_dir);
-                allocator.free(repo_root.work_tree);
-            }
-
-            var show_ignored = false;
-            var use_short = false;
-            var show_untracked_all = false;
-            for (args) |arg| {
-                if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--short")) {
-                    use_short = true;
-                } else if (std.mem.eql(u8, arg, "--ignored")) {
-                    show_ignored = true;
-                } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--untracked-files=all")) {
-                    show_untracked_all = true;
-                }
-            }
-
-            var scanner = StatusScanner.init(allocator, io, repo_root.working_dir, cwd, .{ .show_untracked = true, .show_ignored = show_ignored, .show_untracked_all = show_untracked_all, .porcelain = false });
-            defer scanner.deinit();
-
-            scanner.loadIndex();
-
-            const result = try scanner.scan();
-
-            if (!result.has_changes and result.entries.len == 0) {
-                try fmt.info("Working tree clean");
-                try writer.writeAll("  Nothing to commit, working tree clean\n");
-            } else if (use_short) {
-                const output = try scanner.formatPorcelain(result);
-                defer allocator.free(output);
-                try writer.writeAll(output);
-            } else {
-                const output = try scanner.formatLong(result);
-                defer allocator.free(output);
-                try writer.writeAll(output);
-            }
-        },
-        .log => {
-            try fmt.header("Commit History");
-            try fmt.commitHash("abc1234", "Initial commit");
-        },
-        .diff => {
-            try fmt.info("No changes");
-        },
-        .branch => {
-            try fmt.header("Branches");
-            try fmt.branch("master", true);
-        },
-        .checkout => {
-            try fmt.success("Switched branch");
-        },
-        .merge => {
-            try fmt.success("Merge completed");
-        },
-        .reset => {
-            try fmt.success("Reset HEAD");
-        },
-        .clean => {
-            try fmt.info("Working tree clean");
-        },
-        .cat_file => {
-            try fmt.info("Object content");
-        },
-        .hash_object => {
-            try fmt.success("Object hash computed");
-        },
-        .clone => {
-            try fmt.header("Clone");
-            try writer.writeAll("  Cloning from remote repository...\n");
-        },
-        .remote => {
-            try fmt.header("Remote");
-            try fmt.info("No remotes configured");
-        },
-        .fetch => {
-            try fmt.header("Fetch");
-            try fmt.info("Fetching from remote...");
-        },
-        .push => {
-            try fmt.header("Push");
-            try fmt.info("Pushing to remote...");
-        },
-        .pull => {
-            try fmt.header("Pull");
-            try fmt.info("Fetching and merging...");
-        },
-        .stash => {
-            try fmt.header("Stash");
-            try fmt.info("No stash entries");
-        },
-        .tag => {
-            try fmt.header("Tags");
-            try fmt.info("No tags");
-        },
-        .rebase => {
-            try fmt.header("Rebase");
-            try fmt.info("No rebase in progress");
-        },
-        .reflog => {
-            try fmt.header("Reflog");
-            try fmt.info("No reflog entries");
-        },
-        .ls_tree => {
-            try fmt.header("Tree");
-            try fmt.info("Use 'hoz ls-tree <tree-ish>'");
-        },
-        .show => {
-            try fmt.header("Show");
-            try fmt.info("Use 'hoz show <object>'");
+        .help => try printHelp(writer, style),
+        .version => try printVersion(writer, style),
+        else => {
+            const cmd_name = @tagName(cmd);
+            try dispatcher.dispatch(cmd_name, args);
         },
     }
 }
@@ -379,7 +229,7 @@ pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
 
-    var io = init.io;
+    const io = init.io;
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
@@ -390,23 +240,31 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (remaining.len == 0) {
-        try printHelp(stdout_writer, true);
+        try printHelp(stdout_writer, .{});
         try stdout_writer.flush();
         return;
     }
 
-    var use_color = true;
+    var style = OutputStyle{};
     var arg_offset: usize = 0;
 
     for (remaining, 0..) |arg, i| {
         if (std.mem.eql(u8, arg, "--no-color")) {
-            use_color = false;
+            style.use_color = false;
+        } else if (std.mem.eql(u8, arg, "--json")) {
+            style.format = .json;
+            style.use_color = false;
+        } else if (std.mem.eql(u8, arg, "--porcelain")) {
+            style.format = .porcelain;
+            style.use_color = false;
+        } else if (std.mem.eql(u8, arg, "--quiet") or std.mem.eql(u8, arg, "-q")) {
+            style.quiet = true;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            try printHelp(stdout_writer, use_color);
+            try printHelp(stdout_writer, style);
             try stdout_writer.flush();
             return;
         } else if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--version")) {
-            try printVersion(stdout_writer);
+            try printVersion(stdout_writer, style);
             try stdout_writer.flush();
             return;
         } else {
@@ -415,16 +273,16 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    log_mod.setColor(use_color);
+    log_mod.setColor(style.use_color);
 
     const cmd_str = if (arg_offset < remaining.len) remaining[arg_offset] else "help";
     const cmd = findCommand(cmd_str);
 
     if (cmd) |c| {
-        try runCommand(c, remaining[arg_offset..], stdout_writer, use_color, &io, arena);
+        try runCommand(c, remaining[arg_offset..], io, stdout_writer, style, arena);
         try stdout_writer.flush();
     } else {
-        try printUnknown(stdout_writer, cmd_str, use_color);
+        try printUnknown(stdout_writer, cmd_str, style);
         try stdout_writer.flush();
     }
 }

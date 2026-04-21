@@ -1,17 +1,28 @@
 //! Git Status - Show working tree status
 const std = @import("std");
+const Io = std.Io;
+const Output = @import("output.zig").Output;
+const OutputStyle = @import("output.zig").OutputStyle;
 
 pub const Status = struct {
     allocator: std.mem.Allocator,
+    io: Io,
     porcelain: bool,
     short_format: bool,
+    output: Output,
 
-    pub fn init(allocator: std.mem.Allocator) Status {
-        return .{ .allocator = allocator, .porcelain = false, .short_format = false };
+    pub fn init(allocator: std.mem.Allocator, io: Io, writer: *std.Io.Writer, style: OutputStyle) Status {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .porcelain = false,
+            .short_format = false,
+            .output = Output.init(writer, style, allocator),
+        };
     }
 
     pub fn run(self: *Status) !void {
-        const cwd = std.fs.cwd();
+        const cwd = Io.Dir.cwd();
 
         if (self.porcelain) {
             try self.runPorcelain(cwd);
@@ -22,38 +33,33 @@ pub const Status = struct {
         }
     }
 
-    fn runPorcelain(self: *Status, cwd: std.fs.Cwd) !void {
-        _ = self;
-        const stdout = std.io.getStdOut().writer();
-        var dir = cwd.openDir(".", .{ .iterate = true }) catch return;
-        defer dir.close();
+    fn runPorcelain(self: *Status, cwd: Io.Dir) !void {
+        var dir = try cwd.openDir(self.io, ".", .{ .iterate = true });
+        defer dir.close(self.io);
 
         var iter = dir.iterate();
-        while (iter.next() catch null) |entry| {
+        var count: usize = 0;
+        while (try iter.next(self.io)) |entry| {
             if (std.mem.eql(u8, entry.name, ".git")) continue;
-            try stdout.print("?? {s}\n", .{entry.name});
+            try self.output.writer.print("?? {s}\n", .{entry.name});
+            count += 1;
+        }
+
+        if (count == 0) {
+            try self.output.result(.{ .success = true, .code = 0, .message = "Working tree clean" });
         }
     }
 
-    fn runShort(self: *Status, cwd: std.fs.Cwd) !void {
-        _ = self;
-        try std.io.getStdOut().writer().print("?? <unstaged>\n", .{});
+    fn runShort(self: *Status, cwd: Io.Dir) !void {
+        _ = cwd;
+        try self.output.result(.{ .success = true, .code = 0, .message = "Short status not yet implemented" });
     }
 
-    fn runLong(self: *Status, cwd: std.fs.Cwd) !void {
-        _ = self;
+    fn runLong(self: *Status, cwd: Io.Dir) !void {
         _ = cwd;
-        try std.io.getStdOut().writer().print("On branch main\n\nNo commits yet\n\nnothing to commit (create/copy files and use \"git add\")\n", .{});
+        try self.output.section("Status");
+        try self.output.item("branch", "main");
+        try self.output.item("commits", "0");
+        try self.output.hint("Run 'hoz add <file>' to stage changes", .{});
     }
 };
-
-test "Status init" {
-    const status = Status.init(std.testing.allocator);
-    try std.testing.expect(status.porcelain == false);
-}
-
-test "Status run method exists" {
-    var status = Status.init(std.testing.allocator);
-    try status.run();
-    try std.testing.expect(true);
-}

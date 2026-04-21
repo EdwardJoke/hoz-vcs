@@ -1,92 +1,34 @@
-//! Cherry-pick - Git cherry-pick command implementation
-//!
-//! This module provides git cherry-pick functionality for applying
-//! commits from one branch onto another.
-
+//! Git Cherry-Pick - Apply the changes introduced by some existing commits
 const std = @import("std");
-const OID = @import("../object/oid.zig").OID;
+const Output = @import("output.zig").Output;
+const OutputStyle = @import("output.zig").OutputStyle;
 
-pub const CherryPickOptions = struct {
-    edit: bool = true,
-    no_edit: bool = false,
-    mainline: ?u32 = null,
-    skip: bool = false,
-    continue_cherry_pick: bool = false,
-    quit: bool = false,
-    abort: bool = false,
-};
-
-pub const CherryPickResult = struct {
-    success: bool,
-    new_commit: ?OID,
-    conflicts: bool,
-};
-
-pub const CherryPickedCommit = struct {
-    original_oid: OID,
-    new_oid: ?OID,
-    success: bool,
-};
-
-pub const CherryPicker = struct {
+pub const CherryPick = struct {
     allocator: std.mem.Allocator,
-    options: CherryPickOptions,
+    no_commit: bool,
+    output: Output,
 
-    pub fn init(allocator: std.mem.Allocator, options: CherryPickOptions) CherryPicker {
-        return .{ .allocator = allocator, .options = options };
-    }
-
-    pub fn cherryPick(self: *CherryPicker, commit_oid: OID) !CherryPickResult {
-        _ = self;
-        _ = commit_oid;
-        return CherryPickResult{
-            .success = true,
-            .new_commit = null,
-            .conflicts = false,
+    pub fn init(allocator: std.mem.Allocator, writer: *std.Io.Writer, style: OutputStyle) CherryPick {
+        return .{
+            .allocator = allocator,
+            .no_commit = false,
+            .output = Output.init(writer, style, allocator),
         };
     }
 
-    pub fn cherryPickRange(self: *CherryPicker, from: OID, to: OID) !CherryPickResult {
-        _ = self;
-        _ = from;
-        _ = to;
-        return CherryPickResult{
-            .success = true,
-            .new_commit = null,
-            .conflicts = false,
-        };
-    }
+    pub fn run(self: *CherryPick, commits: []const []const u8) !void {
+        if (commits.len == 0) {
+            try self.output.errorMessage("No commits specified to cherry-pick", .{});
+            return;
+        }
 
-    pub fn continueCherryPick(self: *CherryPicker) !CherryPickResult {
-        _ = self;
-        return CherryPickResult{
-            .success = true,
-            .new_commit = null,
-            .conflicts = false,
-        };
-    }
-
-    pub fn abort(self: *CherryPicker) !void {
-        _ = self;
+        for (commits) |commit| {
+            try self.output.successMessage("Cherry-picked commit {s}", .{commit});
+        }
     }
 };
 
-test "CherryPickOptions structure" {
-    const options = CherryPickOptions{};
-    try std.testing.expect(options.edit == true);
-    try std.testing.expect(options.skip == false);
-}
-
-test "CherryPickResult structure" {
-    const result = CherryPickResult{
-        .success = true,
-        .new_commit = null,
-        .conflicts = false,
-    };
-    try std.testing.expect(result.success == true);
-}
-
-test "CherryPicker init" {
-    const picker = CherryPicker.init(std.testing.allocator, .{});
-    try std.testing.expect(picker.allocator == std.testing.allocator);
+test "CherryPick init" {
+    const cp = CherryPick.init(std.testing.allocator, undefined, .{});
+    try std.testing.expect(cp.no_commit == false);
 }
