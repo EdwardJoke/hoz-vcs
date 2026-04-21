@@ -30,36 +30,36 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Build release
-        run: zig build -Drelease-safe -Dtarget=native
+        run: zig build -Doptimize=ReleaseSafe -Dtarget=native
 
       - name: Build Linux x86_64
         if: matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64'
         run: |
-          zig build -Drelease-safe -Dtarget=x86_64-linux-gnu
+          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-gnu
           tar -czvf hoz-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz zig-out/bin/hoz
 
       - name: Build Linux aarch64
         if: matrix.os == 'ubuntu-latest' && matrix.arch == 'aarch64'
         run: |
-          zig build -Drelease-safe -Dtarget=aarch64-linux-gnu
+          zig build -Doptimize=ReleaseSafe -Dtarget=aarch64-linux-gnu
           tar -czvf hoz-${{ steps.version.outputs.VERSION }}-linux-aarch64.tar.gz zig-out/bin/hoz
 
       - name: Build macOS x86_64
         if: matrix.os == 'macos-latest' && matrix.arch == 'x86_64'
         run: |
-          zig build -Drelease-safe -Dtarget=x86_64-macos-gnu
+          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-macos-gnu
           tar -czvf hoz-${{ steps.version.outputs.VERSION }}-macos-x86_64.tar.gz zig-out/bin/hoz
 
       - name: Build macOS aarch64
         if: matrix.os == 'macos-latest' && matrix.arch == 'aarch64'
         run: |
-          zig build -Drelease-safe -Dtarget=aarch64-macos-gnu
+          zig build -Doptimize=ReleaseSafe -Dtarget=aarch64-macos-gnu
           tar -czvf hoz-${{ steps.version.outputs.VERSION }}-macos-aarch64.tar.gz zig-out/bin/hoz
 
       - name: Build Windows x86_64
         if: matrix.os == 'windows-latest'
         run: |
-          zig build -Drelease-safe -Dtarget=x86_64-windows-gnu
+          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-windows-gnu
           Compress-Archive -Path zig-out/bin/hoz.exe -DestinationPath hoz-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip
 
       - name: Upload artifacts
