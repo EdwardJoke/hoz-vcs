@@ -8,7 +8,7 @@ pub const ProgressPhase = enum {
     indexing,
     verifying,
     complete,
-    error,
+    err,
 };
 
 pub const ProgressInfo = struct {
@@ -79,7 +79,7 @@ pub const PackReceiver = struct {
         };
     }
 
-    pub fn verifyPack(self: *PackReceiver, pack_data: []const u8) !bool {
+    pub fn verifyPack(_: *PackReceiver, pack_data: []const u8) !bool {
         if (pack_data.len < 8) return false;
 
         const magic = pack_data[0..4];

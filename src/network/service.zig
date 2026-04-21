@@ -1,5 +1,6 @@
 //! Git Protocol Service - Service handler for Git network protocol
 const std = @import("std");
+const packet = @import("packet.zig");
 
 pub const ServiceType = enum {
     upload_pack,
@@ -26,6 +27,61 @@ pub const ServiceHandler = struct {
     pub fn isRunning(self: *ServiceHandler) bool {
         _ = self;
         return false;
+    }
+};
+
+pub const V2ServiceCommand = enum {
+    ls_refs,
+    fetch,
+    push,
+};
+
+pub const V2ProtocolHandler = struct {
+    allocator: std.mem.Allocator,
+    command: V2ServiceCommand,
+    refs: std.array_hash_map.String([]const u8),
+    caps: std.array_hash_map.String(void),
+
+    pub fn init(allocator: std.mem.Allocator) V2ProtocolHandler {
+        return .{
+            .allocator = allocator,
+            .command = .ls_refs,
+            .refs = std.array_hash_map.String([]const u8).empty,
+            .caps = std.array_hash_map.String(void).empty,
+        };
+    }
+
+    pub fn deinit(self: *V2ProtocolHandler) void {
+        self.refs.deinit(self.allocator);
+        self.caps.deinit(self.allocator);
+    }
+
+    pub fn parseCommand(self: *V2ProtocolHandler, data: []const u8) !void {
+        if (std.mem.eql(u8, data, "ls-refs")) {
+            self.command = .ls_refs;
+        } else if (std.mem.eql(u8, data, "fetch")) {
+            self.command = .fetch;
+        } else if (std.mem.eql(u8, data, "push")) {
+            self.command = .push;
+        } else {
+            return error.UnknownCommand;
+        }
+    }
+
+    pub fn parseRefLine(self: *V2ProtocolHandler, line: []const u8) !void {
+        var iter = std.mem.splitScalar(u8, line, ' ');
+        const oid = iter.next() orelse return error.MalformedRefLine;
+        const ref_name = iter.rest();
+        if (ref_name.len > 0 and ref_name[0] == ' ') {
+            try self.refs.put(self.allocator, ref_name[1..], oid);
+        }
+    }
+
+    pub fn parseRefsResponse(self: *V2ProtocolHandler, lines: []const packet.PacketLine) !void {
+        for (lines) |line| {
+            if (line.flush) continue;
+            try self.parseRefLine(line.data);
+        }
     }
 };
 
@@ -60,4 +116,33 @@ test "ServiceHandler isRunning method exists" {
     var handler = ServiceHandler.init(std.testing.allocator, .upload_pack);
     const running = handler.isRunning();
     try std.testing.expect(running == false);
+}
+
+test "V2ProtocolHandler init" {
+    var handler = V2ProtocolHandler.init(std.testing.allocator);
+    defer handler.deinit();
+    try std.testing.expect(handler.command == .ls_refs);
+}
+
+test "V2ProtocolHandler parseCommand ls-refs" {
+    var handler = V2ProtocolHandler.init(std.testing.allocator);
+    defer handler.deinit();
+    try handler.parseCommand("ls-refs");
+    try std.testing.expect(handler.command == .ls_refs);
+}
+
+test "V2ProtocolHandler parseCommand fetch" {
+    var handler = V2ProtocolHandler.init(std.testing.allocator);
+    defer handler.deinit();
+    try handler.parseCommand("fetch");
+    try std.testing.expect(handler.command == .fetch);
+}
+
+test "V2ProtocolHandler parseRefLine" {
+    var handler = V2ProtocolHandler.init(std.testing.allocator);
+    defer handler.deinit();
+    try handler.parseRefLine("abc123def456789012345678901234567890abcd refs/heads/main");
+    const oid = handler.refs.get("refs/heads/main");
+    try std.testing.expect(oid != null);
+    try std.testing.expectEqualStrings("abc123def456789012345678901234567890abcd", oid.?);
 }
