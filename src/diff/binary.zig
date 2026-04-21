@@ -20,6 +20,14 @@ pub const BinaryDetection = struct {
             return .{ .is_binary = false, .confidence = 0.0, .suggested_prefix = "empty" };
         }
 
+        if (self.hasUtf16Bom(content)) {
+            return .{
+                .is_binary = false,
+                .confidence = 1.0,
+                .suggested_prefix = "text",
+            };
+        }
+
         const null_count = self.countNullBytes(content);
         const null_ratio = @as(f64, @floatFromInt(null_count)) / @as(f64, @floatFromInt(content.len));
 
@@ -63,6 +71,15 @@ pub const BinaryDetection = struct {
         return count;
     }
 
+    fn hasUtf16Bom(self: *BinaryDetection, content: []const u8) bool {
+        _ = self;
+        if (content.len >= 2) {
+            if (content[0] == 0xFF and content[1] == 0xFE) return true;
+            if (content[0] == 0xFE and content[1] == 0xFF) return true;
+        }
+        return false;
+    }
+
     fn hasHighNonPrintableRatio(self: *BinaryDetection, content: []const u8) bool {
         _ = self;
         var non_printable: usize = 0;
@@ -104,12 +121,12 @@ pub const BinaryDetection = struct {
 };
 
 pub const KNOWN_BINARY_EXTENSIONS = [_][]const u8{
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp",
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-    ".zip", ".tar", ".gz", ".bz2", ".xz", ".rar", ".7z",
-    ".mp3", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".wav",
-    ".exe", ".dll", ".so", ".dylib", ".o", ".a", ".lib",
-    ".class", ".pyc", ".o", ".obj", ".bin",
+    ".png",   ".jpg", ".jpeg", ".gif",   ".bmp",  ".ico", ".webp",
+    ".pdf",   ".doc", ".docx", ".xls",   ".xlsx", ".ppt", ".pptx",
+    ".zip",   ".tar", ".gz",   ".bz2",   ".xz",   ".rar", ".7z",
+    ".mp3",   ".mp4", ".avi",  ".mov",   ".wmv",  ".flv", ".wav",
+    ".exe",   ".dll", ".so",   ".dylib", ".o",    ".a",   ".lib",
+    ".class", ".pyc", ".o",    ".obj",   ".bin",
 };
 
 pub fn isKnownBinaryExtension(ext: []const u8) bool {

@@ -51,6 +51,8 @@ pub fn isPathInSparseCone(
         return isPathInSparsePattern(config.patterns.items, path, is_dir);
     }
 
+    if (path.len == 0) return false;
+
     for (config.patterns.items) |pattern| {
         if (std.mem.eql(u8, path, pattern)) {
             return true;
@@ -68,6 +70,25 @@ pub fn isPathInSparseCone(
             defer allocator.free(deep_pattern);
 
             if (std.mem.startsWith(u8, path, deep_pattern)) {
+                return true;
+            }
+        }
+    }
+
+    var path_copy = path;
+    while (path_copy.len > 0) {
+        if (path_copy[path_copy.len - 1] == '/') {
+            path_copy = path_copy[0 .. path_copy.len - 1];
+        }
+        const last_sep = std.mem.lastIndexOfScalar(u8, path_copy, '/');
+        if (last_sep) |idx| {
+            path_copy = path_copy[0..idx];
+        } else {
+            break;
+        }
+
+        for (config.patterns.items) |pattern| {
+            if (std.mem.eql(u8, path_copy, pattern)) {
                 return true;
             }
         }

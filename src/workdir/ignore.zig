@@ -44,8 +44,12 @@ pub fn parsePattern(line: []const u8) !Pattern {
     }
 
     var is_directory_only = false;
-    if (std.mem.endsWith(u8, pattern, "/")) {
+    if (pattern.len > 0 and pattern[pattern.len - 1] == '/') {
         is_directory_only = true;
+        pattern = pattern[0 .. pattern.len - 1];
+    }
+
+    while (pattern.len > 0 and (pattern[pattern.len - 1] == ' ' or pattern[pattern.len - 1] == '\t')) {
         pattern = pattern[0 .. pattern.len - 1];
     }
 

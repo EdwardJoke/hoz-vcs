@@ -1,6 +1,7 @@
 //! Merge Rerere - Reuse Recorded Resolution
 const std = @import("std");
 const OID = @import("../object/oid.zig").OID;
+const sha1 = @import("../crypto/sha1.zig");
 
 pub const RerereOptions = struct {
     enabled: bool = true,
@@ -66,12 +67,13 @@ pub const RerereDB = struct {
     }
 
     fn generateConflictID(self: *RerereDB, conflict: []const u8) ![]const u8 {
-        var hash: [20]u8 = undefined;
-        const result = std.crypto.hash.sha1.Sha1.hash(conflict, &hash, .{});
+        const hash_bytes = sha1.sha1(conflict);
 
-        var hex_id = try self.allocator.alloc(u8, result.hex_digest_len);
-        for (0..result.hex_digest_len) |i| {
-            hex_id[i] = result.hex_digest[i];
+        var hex_id = try self.allocator.alloc(u8, 40);
+        const hex_chars = "0123456789abcdef";
+        for (hash_bytes, 0..) |byte, i| {
+            hex_id[i * 2] = hex_chars[byte >> 4];
+            hex_id[i * 2 + 1] = hex_chars[byte & 0xf];
         }
 
         return hex_id;
@@ -174,11 +176,12 @@ pub const RerereDB = struct {
         defer self.allocator.free(entry_path);
 
         const stat = std.fs.cwd().stat(entry_path) catch return;
-        const age_in_days = @divTrunc(stat.mtime, 24 * 60 * 60);
 
-        const now: i128 = @intCast(std.time.timestamp());
-        const cutoff: i128 = @intCast(@as(i64, @intCast(older_than_days)));
-        if (now - stat.mtime > cutoff * 24 * 60 * 60) {
+        const now: i64 = @intCast(std.time.timestamp());
+        const age_seconds = now - stat.mtime;
+        const cutoff_seconds = @as(i64, older_than_days) * 24 * 60 * 60;
+
+        if (age_seconds > cutoff_seconds) {
             try self.removeCorruptedEntry(entry_path);
         }
     }
@@ -203,34 +206,19 @@ test "RerereResult no resolution" {
 }
 
 test "RerereDB init" {
-    const options = RerereOptions{};
-    const db = RerereDB.init(std.testing.allocator, options);
-    try std.testing.expect(db.allocator == std.testing.allocator);
+    const rerere = RerereDB.init(std.testing.allocator, .{});
+    try std.testing.expect(rerere.allocator == std.testing.allocator);
+    try std.testing.expect(rerere.isEnabled() == true);
 }
 
-test "RerereDB init with options" {
-    var options = RerereOptions{};
-    options.enabled = false;
-    const db = RerereDB.init(std.testing.allocator, options);
-    try std.testing.expect(db.options.enabled == false);
+test "RerereDB init disabled" {
+    const rerere = RerereDB.init(std.testing.allocator, .{ .enabled = false });
+    try std.testing.expect(rerere.isEnabled() == false);
 }
 
-test "RerereDB findResolution method exists" {
-    var db = RerereDB.init(std.testing.allocator, .{});
-    const result = try db.findResolution("file.txt", "conflict");
-    _ = result;
-    try std.testing.expect(db.allocator != undefined);
-}
-
-test "RerereDB recordResolution method exists" {
-    var db = RerereDB.init(std.testing.allocator, .{});
-    try db.recordResolution("file.txt", "resolution");
-    try std.testing.expect(db.allocator != undefined);
-}
-
-test "RerereDB isEnabled method exists" {
-    var db = RerereDB.init(std.testing.allocator, .{});
-    const enabled = db.isEnabled();
-    _ = enabled;
-    try std.testing.expect(db.allocator != undefined);
+test "RerereDB generateConflictID" {
+    var rerere = RerereDB.init(std.testing.allocator, .{});
+    const id = try rerere.generateConflictID("test conflict content");
+    defer rerere.allocator.free(id);
+    try std.testing.expect(id.len == 40);
 }

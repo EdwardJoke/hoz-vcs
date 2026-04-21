@@ -56,10 +56,10 @@ pub const MarkerGenerator = struct {
     }
 
     pub fn formatBinaryConflict(self: *MarkerGenerator, path: []const u8, oid_ours: ?[]const u8, oid_theirs: ?[]const u8, size_ours: usize, size_theirs: usize) ![]const u8 {
-        var buf: [512]u8 = undefined;
-        var fbs = std.io.FixedBufferStream.init(&buf);
-        try self.generateBinaryConflict(path, oid_ours, oid_theirs, size_ours, size_theirs, &fbs.writer().interface);
-        return fbs.getWritten();
+        var result = std.ArrayList(u8).initCapacity(self.allocator, 512);
+        errdefer result.deinit(self.allocator);
+        try self.generateBinaryConflict(path, oid_ours, oid_theirs, size_ours, size_theirs, &result.writer().interface);
+        return result.toOwnedSlice(self.allocator);
     }
 
     pub fn generateMarkers(self: *MarkerGenerator, path: []const u8, ancestor: []const u8, ours: []const u8, theirs: []const u8, writer: anytype) !void {

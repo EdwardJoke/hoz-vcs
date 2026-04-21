@@ -23,12 +23,15 @@ pub const LooseObjectStore = struct {
     /// Compute the path for an object: .git/objects/ab/cdef12...
     /// Takes hex OID string, returns allocated path
     pub fn objectPath(self: *const LooseObjectStore, oid_hex: []const u8) ![]u8 {
-        // OID is 40 hex characters: first 2 chars as directory, rest as filename
-        if (oid_hex.len < 2) return error.InvalidOid;
-        
+        if (oid_hex.len != 40) return error.InvalidOid;
+
+        for (oid_hex) |c| {
+            if (!std.ascii.isHex(c)) return error.InvalidOid;
+        }
+
         const prefix = oid_hex[0..2];
         const suffix = oid_hex[2..];
-        
+
         return std.fmt.allocPrint(self.allocator, "{s}/{s}/{s}", .{
             self.objects_dir, prefix, suffix
         });

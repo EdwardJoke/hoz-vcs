@@ -120,13 +120,17 @@ pub const UnifiedDiff = struct {
 
         const old_start = if (edits[hunk_start].operation == .delete or edits[hunk_start].operation == .equal)
             edits[hunk_start].old_line - (if (edits[hunk_start].operation == .equal) 1 else 0)
+        else if (hunk_start + 1 < edits.len)
+            edits[hunk_start + 1].old_line
         else
-            edits[hunk_start + 1].old_line;
+            old_lines.len + 1;
 
         const new_start = if (edits[hunk_start].operation == .insert or edits[hunk_start].operation == .equal)
             edits[hunk_start].new_line - (if (edits[hunk_start].operation == .equal) 1 else 0)
+        else if (hunk_start + 1 < edits.len)
+            edits[hunk_start + 1].new_line
         else
-            edits[hunk_start + 1].new_line;
+            new_lines.len + 1;
 
         var lines = std.ArrayList([]const u8).init(self.allocator);
         errdefer {

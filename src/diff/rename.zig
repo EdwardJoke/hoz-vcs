@@ -91,6 +91,11 @@ pub const RenameDetection = struct {
         if (old_content.len == 0 and new_content.len == 0) return 1.0;
         if (old_content.len == 0 or new_content.len == 0) return 0.0;
 
+        const max_size = self.config.max_file_size;
+        if (old_content.len > max_size or new_content.len > max_size) {
+            return 0.0;
+        }
+
         const similarity = try self.computeMyersSimilarity(old_content, new_content);
         return similarity;
     }
@@ -134,7 +139,7 @@ pub const RenameDetection = struct {
             break :blk total;
         } else 0;
 
-        const similarity = @as(f64, @floatFromInt(2 * identical_bytes)) / @as(f64, @floatFromInt(old_bytes + new_bytes));
+        const similarity = @as(f64, @floatFromInt(identical_bytes)) * 2.0 / (@as(f64, @floatFromInt(old_bytes)) + @as(f64, @floatFromInt(new_bytes)));
 
         return @min(1.0, similarity);
     }

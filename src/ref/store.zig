@@ -249,9 +249,11 @@ pub const RefStore = struct {
 
         while (try walker.next()) |entry| {
             if (entry.kind != .file) continue;
-            const name = try std.fmt.allocPrint(self.allocator, "refs/{s}/{s}", .{
-                entry.path, entry.name,
-            });
+
+            const name = if (entry.path.len == 0)
+                try std.fmt.allocPrint(self.allocator, "refs/{s}", .{entry.name})
+            else
+                try std.fmt.allocPrint(self.allocator, "refs/{s}/{s}", .{ entry.path, entry.name });
             errdefer self.allocator.free(name);
 
             const full_name = if (prefix.len == 0)

@@ -62,8 +62,8 @@ pub const PackfileMemoryMapping = struct {
 
 pub fn isThinPack(data: []const u8) bool {
     if (data.len < 12) return false;
-    const header = std.mem.readIntBig(u32, data[4..8]);
-    _ = header;
+    const signature = std.mem.readIntBig(u32, data[0..4]);
+    if (signature != 0x5041434b) return false;
     return false;
 }
 

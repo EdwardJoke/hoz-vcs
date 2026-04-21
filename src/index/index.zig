@@ -17,6 +17,7 @@ const OID = @import("../object/oid.zig").OID;
 const IndexEntry = @import("index_entry.zig").IndexEntry;
 const crc32 = @import("../compress/crc32.zig").crc32;
 const sha256_mod = @import("../crypto/sha256.zig");
+const sha1 = @import("../crypto/sha1.zig");
 
 /// Index file signature bytes ("DIRC" = dir cache)
 const INDEX_SIGNATURE: [4]u8 = .{ 'D', 'I', 'R', 'C' };
@@ -396,7 +397,7 @@ pub const Index = struct {
     /// Write index to file
     pub fn write(self: *Index, io: Io, path: []const u8) !void {
         const data = try self.serialize();
-        defer std.heap.page_allocator.free(data);
+        defer self.allocator.free(data);
 
         const dir = Io.Dir.cwd();
         const file = try dir.createFile(io, path, .{});
@@ -407,7 +408,7 @@ pub const Index = struct {
 
     /// Serialize index to bytes
     pub fn serialize(self: *Index) ![]u8 {
-        var list = std.ArrayList(u8).empty;
+        var list = std.ArrayList(u8).initCapacity(self.allocator, 8192);
         errdefer list.deinit(self.allocator);
 
         try list.appendSlice(self.allocator, &INDEX_SIGNATURE);
@@ -431,13 +432,13 @@ pub const Index = struct {
         try list.appendSlice(self.allocator, &[1]u8{0} ** 20);
 
         // Calculate and write checksum
-        const checksum = crypto.hash.sha1.Sha1.hash(list.items[0..checksum_offset], .{});
-        @memcpy(list.items[checksum_offset..], &checksum);
+        const hash_bytes = sha1.sha1(list.items[0..checksum_offset]);
+        @memcpy(list.items[checksum_offset..], &hash_bytes);
 
         // Update entry count
         std.mem.writeInt(u32, list.items[count_offset .. count_offset + 4], @intCast(self.entries.items.len), .big);
 
-        return try list.toOwnedSlice(self.allocator);
+        return list.toOwnedSlice(self.allocator);
     }
 
     /// Write a single entry to the list
@@ -517,7 +518,7 @@ pub const Index = struct {
     /// Clear all entries
     pub fn clear(self: *Index) void {
         for (self.entry_names.items) |name| {
-            std.heap.page_allocator.free(name);
+            self.allocator.free(name);
         }
         self.entries.clearRetainingCapacity();
         self.entry_names.clearRetainingCapacity();
@@ -636,13 +637,13 @@ pub const Index = struct {
     }
 
     pub fn getUnmergedEntries(self: *Index) []IndexEntry {
-        var result = std.ArrayList(IndexEntry).empty;
+        var result = std.ArrayList(IndexEntry).initCapacity(self.allocator, self.entries.items.len);
         for (self.entries.items) |entry| {
             if (entry.isStage1to3()) {
-                result.append(std.heap.page_allocator, entry) catch {};
+                result.append(self.allocator, entry) catch {};
             }
         }
-        return result.toOwnedSlice() catch &.{};
+        return result.toOwnedSlice(self.allocator);
     }
 
     pub fn hasUnmergedEntries(self: *Index) bool {

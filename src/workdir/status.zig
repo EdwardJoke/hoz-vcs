@@ -58,7 +58,7 @@ pub fn detectStatusWithRetry(
             };
 
             if (retry_count < max_retries - 1) {
-                std.time.sleep(10 * std.time.ns_per_ms);
+                try io.sleep(10 * std.time.ns_per_ms);
             }
         }
     }
@@ -97,7 +97,7 @@ pub fn detectStatus(
     const stat_mtime_nsec = @as(i64, @intCast(@mod(stat_mtime_ns, std.time.ns_per_s)));
 
     const mtime_diff = (stat_mtime_sec - entry_mtime_sec) * 1000 + @divTrunc((stat_mtime_nsec - entry_mtime_nsec), 1000000);
-    if (mtime_diff > 1 or mtime_diff < -1) {
+    if (mtime_diff > NfsTimestampTolerance.NFS_TIME_TOLERANCE_MS or mtime_diff < -NfsTimestampTolerance.NFS_TIME_TOLERANCE_MS) {
         return .modified;
     }
 
@@ -117,15 +117,21 @@ pub const CaseSensitivity = enum {
 pub fn getFileSystemCaseSensitivity(io: *Io, path: []const u8) CaseSensitivity {
     _ = path;
     const dir = Io.Dir.cwd();
-    const test_lower = "hoz_cs_test_lower";
-    const test_upper = "HOZ_CS_TEST_UPPER";
 
-    dir.createFile(io, test_lower, .{}) catch return .case_sensitive;
-    defer dir.deleteFile(io, test_lower) catch {};
+    var now = std.time.Timer.start() catch return .case_sensitive;
+    const unique_id = now.read();
 
-    const exists_upper = dir.openFile(io.*, test_upper, .{});
+    var test_lower: [64]u8 = undefined;
+    var test_upper: [64]u8 = undefined;
+    const lower_len = std.fmt.bufPrint(&test_lower, "hoz_cs_test_{x}", .{unique_id}) catch return .case_sensitive;
+    const upper_len = std.fmt.bufPrint(&test_upper, "HOZ_CS_TEST_{x}", .{unique_id}) catch return .case_sensitive;
+
+    dir.createFile(io, test_lower[0..lower_len], .{}) catch return .case_sensitive;
+    defer dir.deleteFile(io, test_lower[0..lower_len]) catch {};
+
+    const exists_upper = dir.openFile(io.*, test_upper[0..upper_len], .{});
     if (exists_upper) |_| {
-        dir.deleteFile(io, test_upper) catch {};
+        dir.deleteFile(io, test_upper[0..upper_len]) catch {};
         return .case_insensitive;
     }
 

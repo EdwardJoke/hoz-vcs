@@ -142,7 +142,9 @@ pub const MyersDiff = struct {
             const temp = previous_trace;
             previous_trace = current_trace;
             current_trace = temp;
-            @memset(current_trace, 0);
+            if (d % 2 == 0) {
+                @memset(current_trace, 0);
+            }
         }
 
         return try self.backtrackEditsOptimized(old_text, new_text, v_old, v_new, max);

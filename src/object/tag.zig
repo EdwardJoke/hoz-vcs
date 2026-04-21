@@ -69,7 +69,8 @@ pub const Tag = struct {
     ///
     /// <message>
     pub fn serialize(self: Tag, allocator: std.mem.Allocator) ![]u8 {
-        var buffer = std.ArrayList(u8).init(allocator);
+        var buffer = std.ArrayList(u8).initCapacity(allocator, 256);
+        defer buffer.deinit(allocator);
 
         // Write object
         try buffer.appendSlice("object ");
@@ -157,7 +158,7 @@ pub const Tag = struct {
                 target_opt = try oid_mod.OID.fromHex(hex);
             } else if (std.mem.startsWith(u8, line, "type ")) {
                 const type_str = line[5..];
-                target_type_opt = typeFromStr(type_str);
+                target_type_opt = try typeFromStr(type_str);
             } else if (std.mem.startsWith(u8, line, "tag ")) {
                 name_opt = line[4..];
             } else if (std.mem.startsWith(u8, line, "tagger ")) {
@@ -190,12 +191,12 @@ pub const Tag = struct {
     }
 
     /// Parse type string to Type enum
-    fn typeFromStr(str: []const u8) ?object_mod.Type {
+    fn typeFromStr(str: []const u8) !object_mod.Type {
         if (std.mem.eql(u8, str, "blob")) return .blob;
         if (std.mem.eql(u8, str, "tree")) return .tree;
         if (std.mem.eql(u8, str, "commit")) return .commit;
         if (std.mem.eql(u8, str, "tag")) return .tag;
-        return null;
+        return error.UnknownType;
     }
 
     /// Parse tagger identity from string

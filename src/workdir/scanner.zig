@@ -59,7 +59,7 @@ pub const StatusScanner = struct {
     }
 
     pub fn scan(self: *StatusScanner) !status_mod.StatusResult {
-        var all_statuses = std.ArrayList(status_mod.WorkDirStatus).empty;
+        var all_statuses = try std.ArrayList(status_mod.WorkDirStatus).initCapacity(self.allocator, 256);
         errdefer all_statuses.deinit(self.allocator);
 
         if (self.index) |idx| {
@@ -98,13 +98,16 @@ pub const StatusScanner = struct {
                     if (!is_tracked) {
                         const is_dir = entry.entry_type == .directory;
                         const ignored = ignore_mod.isIgnored(patterns, entry.name, is_dir);
-                        if (ignored and !self.options.show_ignored) {
-                            try all_statuses.append(self.allocator, .{
-                                .path = try self.allocator.dupe(u8, entry.name),
-                                .status = .ignored,
-                                .index_entry = null,
-                            });
-                        } else if (!ignored or self.options.show_ignored) {
+
+                        if (ignored) {
+                            if (self.options.show_ignored) {
+                                try all_statuses.append(self.allocator, .{
+                                    .path = try self.allocator.dupe(u8, entry.name),
+                                    .status = .ignored,
+                                    .index_entry = null,
+                                });
+                            }
+                        } else {
                             try all_statuses.append(self.allocator, .{
                                 .path = try self.allocator.dupe(u8, entry.name),
                                 .status = .untracked,
