@@ -29,12 +29,20 @@ pub const LazyTreeEntry = struct {
     child_tree: ?*LazyTree = null,
 };
 
+pub const LazyTreeError = error{
+    OdbNotConfigured,
+    ObjectNotFound,
+    InvalidTreeObject,
+    IoError,
+};
+
 pub const LazyTree = struct {
     allocator: std.mem.Allocator,
     oid: oid_mod.OID,
     entries: std.ArrayList(LazyTreeEntry),
     loaded: bool,
     cache: ?*tree_cache.TreeCache,
+    odb: ?*const anyopaque,
     config: LazyTreeConfig,
     stats: *LazyTreeStats,
     peak_memory: *usize,
@@ -43,6 +51,7 @@ pub const LazyTree = struct {
         allocator: std.mem.Allocator,
         oid: oid_mod.OID,
         cache: ?*tree_cache.TreeCache,
+        odb: ?*const anyopaque,
         stats: *LazyTreeStats,
         peak_memory: *usize,
     ) LazyTree {
@@ -52,6 +61,7 @@ pub const LazyTree = struct {
             .entries = std.ArrayList(LazyTreeEntry).init(allocator),
             .loaded = false,
             .cache = cache,
+            .odb = odb,
             .config = .{},
             .stats = stats,
             .peak_memory = peak_memory,
@@ -128,22 +138,39 @@ pub const LazyTree = struct {
         }
     }
 
-    fn loadFromOdb(self: *LazyTree) !void {
-        var tree_data: [4096]u8 = undefined;
-        const data = tree_data[0..0];
+    fn loadFromOdb(self: *LazyTree) LazyTreeError!void {
+        const odb_ptr = self.odb orelse return LazyTreeError.OdbNotConfigured;
 
-        _ = data;
-
-        const fake_entries = &[_]tree_object.TreeEntry{
-            tree_object.TreeEntry{
-                .mode = .file,
-                .oid = oid_mod.OID.zero(),
-                .name = "lazy_placeholder",
-            },
+        const odb_fn = @as(*const OdbInterface, @ptrCast(odb_ptr));
+        const tree_obj = odb_fn.readTree(self.oid) catch |err| {
+            switch (err) {
+                error.ObjectNotFound => return LazyTreeError.ObjectNotFound,
+                else => return LazyTreeError.IoError,
+            }
         };
-        const tree = tree_object.Tree.create(fake_entries);
-        try self.populateFromTree(&tree);
+
+        const entries = tree_obj.entries;
+        for (entries) |entry| {
+            const name_copy = try self.allocator.dupe(u8, entry.name);
+            errdefer self.allocator.free(name_copy);
+
+            try self.entries.append(.{
+                .name = name_copy,
+                .mode = entry.mode,
+                .oid = entry.oid,
+                .loaded = false,
+                .child_tree = null,
+            });
+        }
     }
+
+    const OdbInterface = extern struct {
+        readTree: fn (oid: oid_mod.OID) anyerror!TreeObject,
+    };
+
+    const TreeObject = struct {
+        entries: []const tree_object.TreeEntry,
+    };
 
     fn updateMemoryStats(self: *LazyTree) void {
         var mem: usize = @sizeOf(LazyTree);
@@ -169,11 +196,12 @@ pub const LazyTree = struct {
             return error.NotADirectory;
         }
 
-        var child = try self.allocator.create(LazyTree);
+        const child = try self.allocator.create(LazyTree);
         child.* = LazyTree.init(
             self.allocator,
             entry.oid,
             self.cache,
+            null,
             self.stats,
             self.peak_memory,
         );
@@ -208,13 +236,14 @@ pub const LazyTreeLoader = struct {
     }
 
     pub fn loadTree(self: *LazyTreeLoader, oid: oid_mod.OID) !*LazyTree {
-        if (self.cache.get(oid)) |tree| {
+        if (self.cache.get(oid)) |_| {
             self.stats.cached_hits += 1;
             var lazy = try self.allocator.create(LazyTree);
             lazy.* = LazyTree.init(
                 self.allocator,
                 oid,
                 &self.cache,
+                null,
                 &self.stats,
                 &self.peak_memory,
             );
@@ -227,6 +256,7 @@ pub const LazyTreeLoader = struct {
             self.allocator,
             oid,
             &self.cache,
+            null,
             &self.stats,
             &self.peak_memory,
         );

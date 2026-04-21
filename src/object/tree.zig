@@ -53,14 +53,14 @@ pub fn modeFromStr(str: []const u8) !Mode {
     return error.UnsupportedMode;
 }
 
-pub fn modeFromInt(val: u16) Mode {
+pub fn modeFromInt(val: u16) !Mode {
     if (val == 0o100644) return .file;
     if (val == 0o100755) return .executable;
     if (val == 0o040000) return .directory;
     if (val == 0o120000) return .symlink;
     if (val == 0o160000) return .gitlink;
     if (val & 0o170000 == 0o100000) return .file;
-    return .file;
+    return error.UnsupportedMode;
 }
 
 /// A single entry in a tree (file or directory)
@@ -92,7 +92,8 @@ pub const Tree = struct {
     /// Format: "tree <size>\n<entry>\n<entry>..."
     /// Each entry: "<mode> <name>\x00<oid_bytes>"
     pub fn serialize(self: Tree, allocator: std.mem.Allocator) ![]u8 {
-        var buffer = std.ArrayList(u8).init(allocator);
+        var buffer = std.ArrayList(u8).initCapacity(allocator, 256);
+        defer buffer.deinit(allocator);
 
         // Build entries
         for (self.entries) |entry| {

@@ -4,15 +4,18 @@ const std = @import("std");
 /// Simple DEFLATE stored blocks (no compression) - Git packfiles use this for small objects
 /// Note: Allocator needed for dynamic buffer expansion
 pub fn store(data: []const u8, allocator: std.mem.Allocator) ![]u8 {
-    // Simple implementation: copy data directly (stored blocks format)
-    // Each stored block is: 1 byte header + 2 bytes len + 2 bytes nlen + data
-    // Max block size = 65535 bytes
+    const maxusize = std.math.maxInt(usize);
 
-    // Calculate output size (rough estimate with overhead)
-    const overhead = 5 * ((data.len / 65535) + 1); // 5 bytes per block max
-    const output_len = data.len + overhead;
+    const blocks = @divTrunc(data.len, 65535) + 1;
+    const (overhead, overflow1) = @mulWithOverflow(blocks, 5);
+    if (overflow1 != 0) return error.InputTooLarge;
 
-    var output = try allocator.alloc(u8, output_len);
+    const (output_len, overflow2) = @addWithOverflow(data.len, overhead);
+    if (overflow2 != 0) return error.InputTooLarge;
+
+    if (output_len > maxusize - 4) return error.InputTooLarge;
+
+    var output = try allocator.alloc(u8, output_len + 4);
     errdefer allocator.free(output);
 
     var offset: usize = 0;
@@ -23,11 +26,9 @@ pub fn store(data: []const u8, allocator: std.mem.Allocator) ![]u8 {
         const block_size = @min(remaining, 65535);
         const is_last = (offset + block_size >= data.len);
 
-        // BFINAL (1 bit) + BTYPE (2 bits: 00 = stored)
         output[out_offset] = if (is_last) 0x01 else 0x00;
         out_offset += 1;
 
-        // LEN (2 bytes) and NLEN (2 bytes, one's complement)
         const len: u16 = @truncate(block_size);
         const nlen: u16 = ~len;
         output[out_offset..][0..2].* = std.mem.asBytes(&len).*;
@@ -35,10 +36,7 @@ pub fn store(data: []const u8, allocator: std.mem.Allocator) ![]u8 {
         output[out_offset..][0..2].* = std.mem.asBytes(&nlen).*;
         out_offset += 2;
 
-        // Raw data
-        for (data[offset .. offset + block_size], output[out_offset .. out_offset + block_size]) |b, *dest| {
-            dest.* = b;
-        }
+        @memcpy(output[out_offset..out_offset + block_size], data[offset..offset + block_size]);
         out_offset += block_size;
 
         offset += block_size;

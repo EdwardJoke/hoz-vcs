@@ -41,8 +41,8 @@ pub fn listDirectory(
     };
     defer subdir.close(io.*);
 
-    var entries = std.ArrayList(DirEntry).empty;
-    errdefer entries.deinit(allocator);
+    var entries = try std.ArrayList(DirEntry).initCapacity(allocator, 16);
+    errdefer entries.deinit();
 
     var iterator = subdir.iterate();
     while (try iterator.next(io.*)) |entry| {
@@ -71,10 +71,13 @@ pub fn walkDirectory(
     io: *Io,
     dir_path: []const u8,
 ) ![]DirEntry {
-    var all_entries = std.ArrayList(DirEntry).empty;
+    var all_entries = try std.ArrayList(DirEntry).initCapacity(allocator, 256);
     errdefer all_entries.deinit(allocator);
 
-    try walkRecursive(allocator, io, dir_path, dir_path, &all_entries);
+    var visited = try std.ArrayList([]const u8).initCapacity(allocator, 16);
+    errdefer visited.deinit(allocator);
+
+    try walkRecursive(allocator, io, dir_path, dir_path, &all_entries, &visited);
 
     return all_entries.toOwnedSlice(allocator);
 }
@@ -85,6 +88,7 @@ fn walkRecursive(
     base_path: []const u8,
     current_path: []const u8,
     results: *std.ArrayList(DirEntry),
+    visited: *std.ArrayList([]const u8),
 ) !void {
     const dir = Io.Dir.cwd();
     const subdir = dir.openDir(io.*, current_path, .{}) catch return;
@@ -108,8 +112,31 @@ fn walkRecursive(
             .entry_type = entry_type,
         });
 
-        if (entry_type == .directory and !std.mem.eql(u8, entry.name, ".git")) {
-            try walkRecursive(allocator, io, base_path, full_path, results);
+        var should_recurse = true;
+        if (entry_type == .symlink) {
+            if (readSymlinkTarget(io, full_path, allocator)) |target| {
+                defer allocator.free(target);
+
+                const resolved = if (std.mem.startsWith(u8, target, "/"))
+                    target
+                else
+                    try std.mem.concat(allocator, u8, &.{ current_path, "/", target });
+
+                for (visited.items) |v| {
+                    if (std.mem.eql(u8, v, resolved)) {
+                        should_recurse = false;
+                        break;
+                    }
+                }
+            } else |_| {
+                should_recurse = false;
+            }
+        }
+
+        if (entry_type == .directory and !std.mem.eql(u8, entry.name, ".git") and should_recurse) {
+            try visited.append(allocator, full_path);
+            errdefer _ = visited.pop();
+            try walkRecursive(allocator, io, base_path, full_path, results, visited);
         }
     }
 }
@@ -119,7 +146,7 @@ pub fn filterByType(
     entries: []DirEntry,
     entry_type: DirEntryType,
 ) ![]DirEntry {
-    var filtered = std.ArrayList(DirEntry).empty;
+    var filtered = std.ArrayList(DirEntry).initCapacity(allocator, entries.len);
     errdefer filtered.deinit(allocator);
 
     for (entries) |entry| {
@@ -156,6 +183,7 @@ pub const SymlinkError = error{
 pub fn readSymlinkTarget(
     io: *Io,
     symlink_path: []const u8,
+    allocator: std.mem.Allocator,
 ) ![]u8 {
     const dir = Io.Dir.cwd();
     const file = try dir.openFile(io.*, symlink_path, .{});
@@ -164,10 +192,11 @@ pub fn readSymlinkTarget(
     const stat = try file.stat(io.*);
     const size = @as(usize, @intCast(stat.size));
 
-    const buffer = try std.heap.page_allocator.alloc(u8, size);
-    errdefer std.heap.page_allocator.free(buffer);
+    const buffer = try allocator.alloc(u8, size);
+    errdefer allocator.free(buffer);
 
-    try file.readAllAll(io.*, buffer);
+    var reader = file.reader(io.*, buffer);
+    try reader.interface.readSliceAll(buffer);
 
     return buffer;
 }
@@ -176,19 +205,20 @@ pub fn detectSymlinkLoop(
     io: *Io,
     symlink_path: []const u8,
     base_path: []const u8,
+    allocator: std.mem.Allocator,
 ) !bool {
-    const target = readSymlinkTarget(io, symlink_path) catch |err| {
+    const target = readSymlinkTarget(io, symlink_path, allocator) catch |err| {
         switch (err) {
             error.FileNotFound => return false,
             else => return err,
         }
     };
-    defer std.heap.page_allocator.free(target);
+    defer allocator.free(target);
 
     const full_target = if (std.mem.startsWith(u8, target, "/"))
         target
     else
-        try std.mem.concat(std.heap.page_allocator, u8, &.{ symlink_path, "/../", target });
+        try std.mem.concat(allocator, u8, &.{ symlink_path, "/../", target });
 
     return std.mem.containsAtLeast(u8, full_target, 1, base_path);
 }
@@ -198,13 +228,13 @@ pub fn resolveSymlink(
     symlink_path: []const u8,
     allocator: std.mem.Allocator,
 ) ![]u8 {
-    const target = readSymlinkTarget(io, symlink_path) catch |err| {
+    const target = readSymlinkTarget(io, symlink_path, allocator) catch |err| {
         switch (err) {
             error.SymlinkLoop => return symlink_path,
             else => return err,
         }
     };
-    defer std.heap.page_allocator.free(target);
+    defer allocator.free(target);
 
     if (std.mem.startsWith(u8, target, "/")) {
         return try allocator.dupe(u8, target);
@@ -221,8 +251,9 @@ pub fn isSymlinkLoop(
     io: *Io,
     symlink_path: []const u8,
     visited: *std.ArrayList([]const u8),
+    allocator: std.mem.Allocator,
 ) !bool {
-    const target = readSymlinkTarget(io, symlink_path) catch return false;
+    const target = readSymlinkTarget(io, symlink_path, allocator) catch return false;
 
     for (visited.items) |v| {
         if (std.mem.eql(u8, v, target)) {
@@ -230,7 +261,7 @@ pub fn isSymlinkLoop(
         }
     }
 
-    try visited.append(try std.heap.page_allocator.dupe(u8, target));
+    try visited.append(try allocator.dupe(u8, target));
 
     return false;
 }

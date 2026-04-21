@@ -15,8 +15,6 @@ jobs:
         exclude:
           - os: windows-latest
             arch: aarch64
-          - os: ubuntu-latest
-            arch: aarch64
 
     steps:
       - name: Checkout code
@@ -40,6 +38,12 @@ jobs:
           zig build -Drelease-safe -Dtarget=x86_64-linux-gnu
           tar -czvf hoz-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz zig-out/bin/hoz
 
+      - name: Build Linux aarch64
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'aarch64'
+        run: |
+          zig build -Drelease-safe -Dtarget=aarch64-linux-gnu
+          tar -czvf hoz-${{ steps.version.outputs.VERSION }}-linux-aarch64.tar.gz zig-out/bin/hoz
+
       - name: Build macOS x86_64
         if: matrix.os == 'macos-latest' && matrix.arch == 'x86_64'
         run: |
@@ -61,7 +65,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: hoz-${{ matrix.os }}-${{ matrix.arch }}
+          name: hoz-${{ steps.version.outputs.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}
           path: |
             *.tar.gz
             *.zip

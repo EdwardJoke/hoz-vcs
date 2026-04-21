@@ -13,13 +13,13 @@ class Hoz < Formula
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/EdwardJoke/hoz-vcs/releases/download/v0.1.1/hoz-0.1.1-macos-aarch64.tar.gz"
+      url "https://github.com/Edward/hoz/releases/download/v0.1.1/hoz-0.1.1-macos-aarch64.tar.gz"
       sha256 "PLACEHOLDER_MACOS_AARCH64_SHA256"
     end
   end
 
   on_linux do
-    url "https://github.com/EdwardJoke/hoz-vcs/releases/download/v0.1.1/hoz-0.1.1-linux-x86_64.tar.gz"
+    url "https://github.com/Edward/hoz/releases/download/v0.1.1/hoz-0.1.1-linux-x86_64.tar.gz"
     sha256 "PLACEHOLDER_LINUX_X86_64_SHA256"
   end
 

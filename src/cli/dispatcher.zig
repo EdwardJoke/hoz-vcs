@@ -67,8 +67,14 @@ pub const CommandDispatcher = struct {
     }
 
     fn runStatus(self: *CommandDispatcher, args: []const []const u8) !void {
-        _ = args;
         var status = Status.init(self.allocator, self.io, self.writer, self.style);
+        for (args) |arg| {
+            if (std.mem.eql(u8, arg, "--porcelain") or std.mem.eql(u8, arg, "-p")) {
+                status.porcelain = true;
+            } else if (std.mem.eql(u8, arg, "--short") or std.mem.eql(u8, arg, "-s")) {
+                status.short_format = true;
+            }
+        }
         try status.run();
     }
 
