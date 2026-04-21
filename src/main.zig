@@ -167,7 +167,7 @@ fn suggestSimilarCommand(input: []const u8) ?[]const u8 {
 fn printHelp(writer: *Io.Writer, style: OutputStyle) !void {
     var out = Output.init(writer, style, std.heap.page_allocator);
 
-    try out.section("Hoz - Git-compatible VCS");
+    try out.section("Hoz - Git-compatible VCS written in Zig");
     try writer.writeAll("Usage: hoz <command> [options]\n\n");
 
     try out.section("Commands");
