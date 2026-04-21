@@ -4,23 +4,31 @@
 //! - 12-byte header: DIR (4 bytes) + VERSION (4 bytes) + ENTRY_COUNT (4 bytes)
 //! - Sorted array of 62-byte entries (each entry is 62 bytes)
 //! - Optional extensions
-//! - 20-byte SHA-1 checksum of the above
+//! - 20-byte SHA-1 checksum of the above (or 32-byte SHA-256)
 //!
 //! Extensions are optional and can provide additional functionality.
 //! Common extensions include TREE (for faster tree computations) and
 //! REUC (resolve undo conflict information).
 
 const std = @import("std");
+const Io = std.Io;
 const crypto = std.crypto;
-const Oid = @import("../object/oid.zig").Oid;
+const OID = @import("../object/oid.zig").OID;
 const IndexEntry = @import("index_entry.zig").IndexEntry;
 const crc32 = @import("../compress/crc32.zig").crc32;
+const sha256_mod = @import("../crypto/sha256.zig");
 
 /// Index file signature bytes ("DIRC" = dir cache)
 const INDEX_SIGNATURE: [4]u8 = .{ 'D', 'I', 'R', 'C' };
 
+/// SHA-256 index signature ("DIRS" = dir cache SHA-256)
+const INDEX_SIGNATURE_SHA256: [4]u8 = .{ 'D', 'I', 'R', 'S' };
+
 /// Index file version
 pub const INDEX_VERSION: u32 = 2;
+
+/// SHA-256 index version (v3 with SHA-256)
+pub const INDEX_VERSION_SHA256: u32 = 4;
 
 /// Index header size (12 bytes)
 const INDEX_HEADER_SIZE: usize = 12;
@@ -46,6 +54,23 @@ pub const ExtensionSignature = enum(u8) {
     fmix = 'F', // FMIX extension - fan-out merge index
 };
 
+pub const CompressionLevel = enum(u8) {
+    none = 0,
+    fastest = 1,
+    fast = 3,
+    default = 5,
+    good = 7,
+    best = 9,
+};
+
+pub const IndexOptions = struct {
+    compression_level: CompressionLevel = .default,
+    version: u32 = INDEX_VERSION,
+    assume_unchanged: bool = false,
+    skip_worktree: bool = false,
+    hash_algorithm: sha256_mod.HashAlgorithm = .sha1,
+};
+
 /// Represents an extension in the index file
 pub const IndexExtension = struct {
     signature: [4]u8,
@@ -53,6 +78,52 @@ pub const IndexExtension = struct {
 
     pub fn isType(self: IndexExtension, ext_type: ExtensionSignature) bool {
         return self.signature[0] == @as(u8, @intFromEnum(ext_type));
+    }
+};
+
+pub const WriteBufferOptions = struct {
+    enabled: bool = true,
+    size: usize = 65536,
+};
+
+pub const TreeCache = struct {
+    allocator: std.mem.Allocator,
+    entries: std.StringArrayHashMap(TreeCacheEntry),
+    enabled: bool,
+
+    pub const TreeCacheEntry = struct {
+        oid: [20]u8,
+        path: []const u8,
+        mtime: u64,
+    };
+
+    pub fn init(allocator: std.mem.Allocator) TreeCache {
+        return .{
+            .allocator = allocator,
+            .entries = std.StringArrayHashMap(TreeCacheEntry).init(allocator),
+            .enabled = true,
+        };
+    }
+
+    pub fn deinit(self: *TreeCache) void {
+        self.entries.deinit();
+    }
+
+    pub fn get(self: *TreeCache, path: []const u8) ?TreeCacheEntry {
+        return self.entries.get(path);
+    }
+
+    pub fn put(self: *TreeCache, path: []const u8, entry: TreeCacheEntry) !void {
+        try self.entries.put(path, entry);
+    }
+
+    pub fn invalidate(self: *TreeCache, path: []const u8) void {
+        _ = self;
+        _ = path;
+    }
+
+    pub fn clear(self: *TreeCache) void {
+        self.entries.clearRetainingCapacity();
     }
 };
 
@@ -64,38 +135,114 @@ pub const Extensions = struct {
     others: std.ArrayList(IndexExtension),
 };
 
+pub const SplitIndexMode = struct {
+    enabled: bool = false,
+    shared_index_sha: ?[20]u8 = null,
+
+    pub fn isEnabled(self: *const SplitIndexMode) bool {
+        return self.enabled;
+    }
+
+    pub fn getSharedIndexSha(self: *const SplitIndexMode) ?[20]u8 {
+        return self.shared_index_sha;
+    }
+
+    pub fn setEnabled(self: *SplitIndexMode, enabled: bool) void {
+        self.enabled = enabled;
+    }
+
+    pub fn setSharedIndexSha(self: *SplitIndexMode, sha: [20]u8) void {
+        self.shared_index_sha = sha;
+    }
+
+    pub fn clear(self: *SplitIndexMode) void {
+        self.enabled = false;
+        self.shared_index_sha = null;
+    }
+};
+
 /// Index represents the Git staging area
 pub const Index = struct {
+    allocator: std.mem.Allocator,
     entries: std.ArrayList(IndexEntry),
     entry_names: std.ArrayList([]const u8),
     extensions: Extensions,
     checksum: [20]u8,
+    checksum_sha256: [32]u8,
+    version: u32,
+    split_index: SplitIndexMode,
+    options: IndexOptions,
+    buffered_writes: bool = false,
+    write_buffer: ?[]u8 = null,
+    tree_cache: ?*TreeCache = null,
 
-    /// Create a new empty Index
+    /// Create a new empty Index with default options
     pub fn init(allocator: std.mem.Allocator) Index {
         return Index{
-            .entries = std.ArrayList(IndexEntry).init(allocator),
-            .entry_names = std.ArrayList([]const u8).init(allocator),
+            .allocator = allocator,
+            .entries = std.ArrayList(IndexEntry).empty,
+            .entry_names = std.ArrayList([]const u8).empty,
             .extensions = Extensions{
-                .others = std.ArrayList(IndexExtension).init(allocator),
+                .others = std.ArrayList(IndexExtension).empty,
             },
             .checksum = [1]u8{0} ** 20,
+            .checksum_sha256 = [1]u8{0} ** 32,
+            .version = INDEX_VERSION,
+            .split_index = SplitIndexMode{},
+            .options = IndexOptions{},
+            .buffered_writes = false,
+            .write_buffer = null,
+            .tree_cache = null,
         };
     }
 
-    /// Create an Index from a file
-    pub fn read(allocator: std.mem.Allocator, path: []const u8) !Index {
-        const file = try std.fs.cwd().openFile(path, .{});
-        defer file.close();
+    /// Create a new Index with custom options
+    pub fn initWithOptions(allocator: std.mem.Allocator, opts: IndexOptions) Index {
+        return Index{
+            .allocator = allocator,
+            .entries = std.ArrayList(IndexEntry).empty,
+            .entry_names = std.ArrayList([]const u8).empty,
+            .extensions = Extensions{
+                .others = std.ArrayList(IndexExtension).empty,
+            },
+            .checksum = [1]u8{0} ** 20,
+            .checksum_sha256 = [1]u8{0} ** 32,
+            .version = opts.version,
+            .split_index = SplitIndexMode{},
+            .options = opts,
+        };
+    }
 
-        const stat = try file.stat();
-        const data = try allocator.alloc(u8, @intCast(stat.size));
-        defer allocator.free(data);
-
-        const bytes_read = try file.readAll(data);
-        if (bytes_read != stat.size) {
-            return error.IndexCorrupt;
+    /// Get checksum based on hash algorithm
+    pub fn getChecksum(self: *const Index) []const u8 {
+        if (self.options.hash_algorithm == .sha256) {
+            return &self.checksum_sha256;
         }
+        return &self.checksum;
+    }
+
+    /// Get checksum size based on hash algorithm
+    pub fn getChecksumSize(self: *const Index) usize {
+        if (self.options.hash_algorithm == .sha256) {
+            return 32;
+        }
+        return 20;
+    }
+
+    /// Create an Index from a file
+    pub fn read(allocator: std.mem.Allocator, io: Io, path: []const u8) !Index {
+        const dir = Io.Dir.cwd();
+        const file = try dir.openFile(io, path, .{});
+        defer file.close(io);
+
+        const stat = try file.stat(io);
+        const size: usize = @intCast(stat.size);
+
+        const data = try allocator.alloc(u8, size);
+        errdefer allocator.free(data);
+
+        var file_reader = file.reader(io, data);
+        try file_reader.interface.readSliceAll(data);
 
         return try parse(data, allocator);
     }
@@ -120,8 +267,8 @@ pub const Index = struct {
         const entry_count = std.mem.readInt(u32, data[8..12], .big);
 
         // Parse entries
-        var entries = std.ArrayList(IndexEntry).init(allocator);
-        var entry_names = std.ArrayList([]const u8).init(allocator);
+        var entries = std.ArrayList(IndexEntry).empty;
+        var entry_names = std.ArrayList([]const u8).empty;
         var offset: usize = INDEX_HEADER_SIZE;
 
         for (0..entry_count) |_| {
@@ -129,7 +276,7 @@ pub const Index = struct {
                 return error.IndexCorrupt;
             }
 
-            const entry = try parseEntry(data, offset);
+            const entry = try parseEntry(data, offset, version);
             offset += INDEX_ENTRY_FIXED_SIZE;
 
             const name_len = entry.nameLength();
@@ -143,13 +290,13 @@ pub const Index = struct {
             @memcpy(name, data[offset .. offset + name_len]);
             offset += path_size;
 
-            try entries.append(entry);
-            try entry_names.append(name);
+            try entries.append(allocator, entry);
+            try entry_names.append(allocator, name);
         }
 
         // Parse extensions (if any)
         var extensions = Extensions{
-            .others = std.ArrayList(IndexExtension).init(allocator),
+            .others = std.ArrayList(IndexExtension).empty,
         };
 
         while (offset < data.len - 20) {
@@ -163,26 +310,27 @@ pub const Index = struct {
                 break;
             }
 
-            const ext_sig = data[offset .. offset + 4];
-            const ext_size = std.mem.readInt(u32, data[offset + 4 .. offset + 8], .big);
+            const ext_sig = data[offset..][0..4];
+            const ext_size = std.mem.readInt(u32, data[offset + 4 ..][0..4], .big);
 
             if (offset + 8 + ext_size > data.len - 20) {
                 break;
             }
 
-            const ext_data = data[offset + 8 .. offset + 8 + ext_size];
+            const ext_data = data[offset + 8 ..][0..ext_size];
 
-            // Store known extensions
+            // Store known extensions (duplicate data to get mutable slice)
             if (ext_sig[0] == 'T') {
-                extensions.tree = ext_data;
+                extensions.tree = try allocator.dupe(u8, ext_data);
             } else if (ext_sig[0] == 'R') {
-                extensions.reuc = ext_data;
+                extensions.reuc = try allocator.dupe(u8, ext_data);
             } else if (ext_sig[0] == 'F') {
-                extensions.fmix = ext_data;
+                extensions.fmix = try allocator.dupe(u8, ext_data);
             } else {
-                try extensions.others.append(IndexExtension{
+                const ext_data_copy = try allocator.dupe(u8, ext_data);
+                try extensions.others.append(allocator, IndexExtension{
                     .signature = ext_sig.*,
-                    .data = ext_data,
+                    .data = ext_data_copy,
                 });
             }
 
@@ -194,30 +342,40 @@ pub const Index = struct {
         @memcpy(&checksum, data[data.len - 20 .. data.len]);
 
         return Index{
+            .allocator = allocator,
             .entries = entries,
             .entry_names = entry_names,
             .extensions = extensions,
             .checksum = checksum,
+            .checksum_sha256 = [1]u8{0} ** 32,
+            .version = version,
+            .split_index = SplitIndexMode{},
+            .options = IndexOptions{},
+            .buffered_writes = false,
+            .write_buffer = null,
+            .tree_cache = null,
         };
     }
 
     /// Parse a single index entry from data at offset
-    fn parseEntry(data: []const u8, offset: usize) !IndexEntry {
-        const ctime_sec = std.mem.readInt(u32, data[offset .. offset + 4], .big);
-        const ctime_nsec = std.mem.readInt(u32, data[offset + 4 .. offset + 8], .big);
-        const mtime_sec = std.mem.readInt(u32, data[offset + 8 .. offset + 12], .big);
-        const mtime_nsec = std.mem.readInt(u32, data[offset + 12 .. offset + 16], .big);
-        const dev = std.mem.readInt(u32, data[offset + 16 .. offset + 20], .big);
-        const ino = std.mem.readInt(u32, data[offset + 20 .. offset + 24], .big);
-        const mode = std.mem.readInt(u32, data[offset + 24 .. offset + 28], .big);
-        const uid = std.mem.readInt(u32, data[offset + 28 .. offset + 32], .big);
-        const gid = std.mem.readInt(u32, data[offset + 32 .. offset + 36], .big);
-        const file_size = std.mem.readInt(u32, data[offset + 36 .. offset + 40], .big);
+    /// Handles both v2 and v3 index formats
+    fn parseEntry(data: []const u8, offset: usize, version: u32) !IndexEntry {
+        _ = version;
+        const ctime_sec = std.mem.readInt(u32, data[offset..][0..4], .big);
+        const ctime_nsec = std.mem.readInt(u32, data[offset + 4 ..][0..4], .big);
+        const mtime_sec = std.mem.readInt(u32, data[offset + 8 ..][0..4], .big);
+        const mtime_nsec = std.mem.readInt(u32, data[offset + 12 ..][0..4], .big);
+        const dev = std.mem.readInt(u32, data[offset + 16 ..][0..4], .big);
+        const ino = std.mem.readInt(u32, data[offset + 20 ..][0..4], .big);
+        const mode = std.mem.readInt(u32, data[offset + 24 ..][0..4], .big);
+        const uid = std.mem.readInt(u32, data[offset + 28 ..][0..4], .big);
+        const gid = std.mem.readInt(u32, data[offset + 32 ..][0..4], .big);
+        const file_size = std.mem.readInt(u32, data[offset + 36 ..][0..4], .big);
 
-        var oid: Oid = undefined;
-        @memcpy(&oid, data[offset + 40 .. offset + 60]);
+        var oid: OID = .{ .bytes = undefined };
+        @memcpy(&oid.bytes, data[offset + 40 ..][0..20]);
 
-        const flags = std.mem.readInt(u16, data[offset + 60 .. offset + 62], .big);
+        const flags = std.mem.readInt(u16, data[offset + 60 ..][0..2], .big);
 
         return IndexEntry{
             .ctime_sec = ctime_sec,
@@ -236,31 +394,33 @@ pub const Index = struct {
     }
 
     /// Write index to file
-    pub fn write(self: *Index, path: []const u8) !void {
+    pub fn write(self: *Index, io: Io, path: []const u8) !void {
         const data = try self.serialize();
         defer std.heap.page_allocator.free(data);
 
-        const file = try std.fs.cwd().createFile(path, .{});
-        defer file.close();
+        const dir = Io.Dir.cwd();
+        const file = try dir.createFile(io, path, .{});
+        defer file.close(io);
 
-        try file.writeAll(data);
+        try file.writeAll(io, data);
     }
 
     /// Serialize index to bytes
     pub fn serialize(self: *Index) ![]u8 {
-        var list = std.ArrayList(u8).init(std.heap.page_allocator);
-        errdefer list.deinit();
+        var list = std.ArrayList(u8).empty;
+        errdefer list.deinit(self.allocator);
 
-        // Write header
-        try list.appendSlice(&INDEX_SIGNATURE);
-        try list.appendSlice(&[4]u8{ 0, 0, 0, INDEX_VERSION });
-        try list.appendSlice(&[4]u8{ 0, 0, 0, 0 }); // Placeholder for entry count
+        try list.appendSlice(self.allocator, &INDEX_SIGNATURE);
+        var version_bytes: [4]u8 = undefined;
+        std.mem.writeInt(u32, &version_bytes, self.version, .big);
+        try list.appendSlice(self.allocator, &version_bytes);
+        try list.appendSlice(self.allocator, &[4]u8{ 0, 0, 0, 0 });
 
         const count_offset = list.items.len - 4;
 
         // Write entries
         for (self.entries.items, self.entry_names.items) |entry, name| {
-            try self.writeEntry(&list, entry, name);
+            try writeEntry(self.allocator, &list, entry, name);
         }
 
         // Write extensions (placeholder - extensions not implemented for now)
@@ -268,7 +428,7 @@ pub const Index = struct {
 
         // Write checksum placeholder
         const checksum_offset = list.items.len;
-        try list.appendSlice(&[1]u8{0} ** 20);
+        try list.appendSlice(self.allocator, &[1]u8{0} ** 20);
 
         // Calculate and write checksum
         const checksum = crypto.hash.sha1.Sha1.hash(list.items[0..checksum_offset], .{});
@@ -277,15 +437,13 @@ pub const Index = struct {
         // Update entry count
         std.mem.writeInt(u32, list.items[count_offset .. count_offset + 4], @intCast(self.entries.items.len), .big);
 
-        return try list.toOwnedSlice();
+        return try list.toOwnedSlice(self.allocator);
     }
 
     /// Write a single entry to the list
-    fn writeEntry(self: *Index, list: *std.ArrayList(u8), entry: IndexEntry, name: []const u8) !void {
-        _ = self;
-
+    fn writeEntry(allocator: std.mem.Allocator, list: *std.ArrayList(u8), entry: IndexEntry, name: []const u8) !void {
         const offset = list.items.len;
-        try list.appendSlice(&[1]u8{0} ** INDEX_ENTRY_FIXED_SIZE);
+        try list.appendSlice(allocator, &[1]u8{0} ** INDEX_ENTRY_FIXED_SIZE);
 
         std.mem.writeInt(u32, list.items[offset .. offset + 4], entry.ctime_sec, .big);
         std.mem.writeInt(u32, list.items[offset + 4 .. offset + 8], entry.ctime_nsec, .big);
@@ -304,16 +462,16 @@ pub const Index = struct {
         const name_len = @as(u16, @intCast(name.len));
         const path_size = entryPathSize(name_len);
 
-        try list.appendSlice(name);
+        try list.appendSlice(allocator, name);
         if (name.len < path_size) {
-            try list.appendSlice(&[1]u8{0} ** (path_size - name.len));
+            try list.appendSlice(allocator, &[1]u8{0} ** (path_size - name.len));
         }
     }
 
     /// Add or update an entry in the index
     pub fn addEntry(self: *Index, entry: IndexEntry, name: []const u8) !void {
-        try self.entries.append(entry);
-        try self.entry_names.append(name);
+        try self.entries.append(self.allocator, entry);
+        try self.entry_names.append(self.allocator, name);
     }
 
     /// Remove an entry by name
@@ -322,7 +480,7 @@ pub const Index = struct {
             if (std.mem.eql(u8, n, name)) {
                 _ = self.entries.orderedRemove(i);
                 const removed_name = self.entry_names.orderedRemove(i);
-                std.heap.page_allocator.free(removed_name);
+                self.allocator.free(removed_name);
                 return;
             }
         }
@@ -365,14 +523,219 @@ pub const Index = struct {
         self.entry_names.clearRetainingCapacity();
     }
 
+    pub const SortOrder = enum {
+        ascending,
+        descending,
+    };
+
+    pub fn sort(self: *Index, order: SortOrder) void {
+        const len = self.entries.items.len;
+        if (len <= 1) return;
+
+        var indices = std.ArrayList(usize).empty;
+        defer indices.deinit(self.allocator);
+        try indices.appendSlice(self.allocator, &[1]usize{0} ** len);
+        for (0..len) |i| indices.items[i] = i;
+
+        const cmp = if (order == .ascending) sortCompareAsc else sortCompareDesc;
+        std.sort.sort(usize, indices.items, self, cmp);
+
+        var new_entries = std.ArrayList(IndexEntry).empty;
+        defer new_entries.deinit(self.allocator);
+        var new_names = std.ArrayList([]const u8).empty;
+        defer {
+            for (new_names.items) |n| self.allocator.free(n);
+            new_names.deinit(self.allocator);
+        }
+
+        try new_entries.ensureTotalCapacity(self.allocator, len);
+        try new_names.ensureTotalCapacity(self.allocator, len);
+        for (indices.items) |old_idx| {
+            new_entries.appendAssumeCapacity(self.entries.items[old_idx]);
+            new_names.appendAssumeCapacity(self.entry_names.items[old_idx]);
+        }
+
+        self.entries = new_entries;
+        self.entry_names = new_names;
+    }
+
+    fn sortCompareAsc(_: *Index, a: usize, b: usize) bool {
+        return a < b;
+    }
+
+    fn sortCompareDesc(_: *Index, a: usize, b: usize) bool {
+        return a > b;
+    }
+
+    pub fn sortByPath(self: *Index, order: SortOrder) void {
+        const len = self.entries.items.len;
+        if (len <= 1) return;
+
+        var indices = std.ArrayList(usize).empty;
+        defer indices.deinit(self.allocator);
+        try indices.appendSlice(self.allocator, &[1]usize{0} ** len);
+        for (0..len) |i| indices.items[i] = i;
+
+        const cmp: *const fn (*Index, usize, usize) bool = if (order == .ascending) sortPathAsc else sortPathDesc;
+        std.sort.sort(usize, indices.items, self, cmp);
+
+        var new_entries = std.ArrayList(IndexEntry).empty;
+        defer new_entries.deinit(self.allocator);
+        var new_names = std.ArrayList([]const u8).empty;
+        defer {
+            for (new_names.items) |n| self.allocator.free(n);
+            new_names.deinit(self.allocator);
+        }
+
+        try new_entries.ensureTotalCapacity(self.allocator, len);
+        try new_names.ensureTotalCapacity(self.allocator, len);
+        for (indices.items) |old_idx| {
+            new_entries.appendAssumeCapacity(self.entries.items[old_idx]);
+            new_names.appendAssumeCapacity(self.entry_names.items[old_idx]);
+        }
+
+        self.entries = new_entries;
+        self.entry_names = new_names;
+    }
+
+    fn sortPathAsc(self: *Index, a: usize, b: usize) bool {
+        const name_a = self.entry_names.items[a] orelse return false;
+        const name_b = self.entry_names.items[b] orelse return true;
+        return std.mem.lessThan(u8, name_a, name_b);
+    }
+
+    fn sortPathDesc(self: *Index, a: usize, b: usize) bool {
+        const name_a = self.entry_names.items[a] orelse return true;
+        const name_b = self.entry_names.items[b] orelse return false;
+        return std.mem.lessThan(u8, name_b, name_a);
+    }
+
+    pub fn isSorted(self: *Index) bool {
+        for (1..self.entries.items.len) |i| {
+            const prev_name = self.entry_names.items[i - 1] orelse continue;
+            const curr_name = self.entry_names.items[i] orelse continue;
+            if (std.mem.compare(u8, prev_name, curr_name) == .gt) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    pub fn verifySort(self: *Index) bool {
+        return self.isSorted();
+    }
+
     /// Release resources
     pub fn deinit(self: *Index) void {
         for (self.entry_names.items) |name| {
-            std.heap.page_allocator.free(name);
+            self.allocator.free(name);
         }
-        self.entries.deinit();
-        self.entry_names.deinit();
-        self.extensions.others.deinit();
+        self.entries.deinit(self.allocator);
+        self.entry_names.deinit(self.allocator);
+        self.extensions.others.deinit(self.allocator);
+    }
+
+    pub fn getUnmergedEntries(self: *Index) []IndexEntry {
+        var result = std.ArrayList(IndexEntry).empty;
+        for (self.entries.items) |entry| {
+            if (entry.isStage1to3()) {
+                result.append(std.heap.page_allocator, entry) catch {};
+            }
+        }
+        return result.toOwnedSlice() catch &.{};
+    }
+
+    pub fn hasUnmergedEntries(self: *Index) bool {
+        for (self.entries.items) |entry| {
+            if (entry.isStage1to3()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn getConflictEntries(self: *Index, path: []const u8) [3]?IndexEntry {
+        var results: [3]?IndexEntry = .{ null, null, null };
+        for (self.entries.items, 0..) |entry, i| {
+            if (self.entry_names.items[i]) |name| {
+                if (std.mem.eql(u8, name, path)) {
+                    const stage = entry.stage();
+                    if (stage >= 1 and stage <= 3) {
+                        results[stage - 1] = entry;
+                    }
+                }
+            }
+        }
+        return results;
+    }
+
+    pub fn removeUnmergedEntries(self: *Index, path: []const u8) void {
+        var i: usize = 0;
+        while (i < self.entries.items.len) {
+            if (self.entry_names.items[i]) |name| {
+                if (std.mem.eql(u8, name, path)) {
+                    const entry = self.entries.items[i];
+                    if (entry.isStage1to3()) {
+                        _ = self.entries.orderedRemove(i);
+                        const removed_name = self.entry_names.orderedRemove(i);
+                        std.heap.page_allocator.free(removed_name);
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+
+    pub fn getSplitIndex(self: *Index) *SplitIndexMode {
+        return &self.split_index;
+    }
+
+    pub fn isSplitIndexEnabled(self: *Index) bool {
+        return self.split_index.isEnabled();
+    }
+
+    pub fn enableSplitIndex(self: *Index, shared_sha: ?[20]u8) void {
+        self.split_index.setEnabled(true);
+        if (shared_sha) |sha| {
+            self.split_index.setSharedIndexSha(sha);
+        }
+    }
+
+    pub fn disableSplitIndex(self: *Index) void {
+        self.split_index.clear();
+    }
+
+    pub fn syncSplitIndex(self: *Index) void {
+        if (self.split_index.isEnabled() and self.split_index.getSharedIndexSha()) |_| {
+            return;
+        }
+        self.split_index.clear();
+    }
+
+    pub fn verifySplitIndex(self: *Index) bool {
+        if (!self.split_index.isEnabled()) {
+            return true;
+        }
+        if (self.split_index.getSharedIndexSha()) |_| {
+            return true;
+        }
+        return false;
+    }
+
+    pub fn upgradeVersion(self: *Index, target_version: u32) !void {
+        if (target_version < 2 or target_version > 3) {
+            return error.UnsupportedIndexVersion;
+        }
+        if (self.version == target_version) {
+            return;
+        }
+        if (self.version == 2 and target_version == 3) {
+            self.version = 3;
+            self.options.version = 3;
+        } else if (self.version == 3 and target_version == 2) {
+            return error.CannotDowngradeIndex;
+        }
     }
 };
 
@@ -434,7 +797,7 @@ test "index add and find entry" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -473,7 +836,7 @@ test "index remove entry" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -508,7 +871,7 @@ test "index serialize and checksum" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -546,7 +909,7 @@ test "index entry stage bits" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
 
     const entry0 = IndexEntry.fromStat(stat, oid, "file0.txt", 0);
     try index.addEntry(entry0, "file0.txt");
@@ -594,7 +957,7 @@ test "index getEntryName" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
 
     try std.testing.expect(index.getEntryName(0) == null);
 
@@ -632,7 +995,7 @@ test "index count" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
 
     const entry = IndexEntry.fromStat(stat, oid, "file.txt", 0);
     try index.addEntry(entry, "file.txt");
@@ -664,7 +1027,7 @@ test "index clear" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
 
     const entry1 = IndexEntry.fromStat(stat, oid, "file1.txt", 0);
     try index.addEntry(entry1, "file1.txt");
@@ -702,7 +1065,7 @@ test "index verifyChecksum" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
 
     const entry = IndexEntry.fromStat(stat, oid, "test.txt", 0);
     try index.addEntry(entry, "test.txt");
@@ -772,7 +1135,7 @@ test "index multiple entries with different stages" {
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = Oid.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.oidFromHex(oid_hex) catch unreachable;
 
     const entry0 = IndexEntry.fromStat(stat, oid, "file.txt", 0);
     try index.addEntry(entry0, "file.txt");

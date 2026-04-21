@@ -28,18 +28,18 @@ pub const Identity = struct {
         );
     }
 
-    /// Convert timezone offset to string (e.g., "+0000", "-0500")
     pub fn timezoneToStr(self: Identity) [5]u8 {
-        const sign: u8 = if (self.timezone >= 0) '+' else '-';
-        const abs_min = @abs(self.timezone);
-        const hours = abs_min / 60;
-        const mins = abs_min % 60;
+        const tz_mins = self.timezone;
+        const sign: u8 = if (tz_mins >= 0) '+' else '-';
+        const abs_mins: u32 = if (tz_mins < 0) -@as(i32, @intCast(tz_mins)) else tz_mins;
+        const hours = abs_mins / 60;
+        const mins = abs_mins % 60;
         return .{
             sign,
-            @as(u8, @intCast((hours / 10) + '0')),
-            @as(u8, @intCast((hours % 10) + '0')),
-            @as(u8, @intCast((mins / 10) + '0')),
-            @as(u8, @intCast((mins % 10) + '0')),
+            @as(u8, @intCast('0' + hours / 10)),
+            @as(u8, @intCast('0' + hours % 10)),
+            @as(u8, @intCast('0' + mins / 10)),
+            @as(u8, @intCast('0' + mins % 10)),
         };
     }
 
@@ -141,13 +141,13 @@ pub const Commit = struct {
 
         // Write tree
         try buffer.appendSlice("tree ");
-        try buffer.appendSlice(self.tree.toHex());
+        try buffer.appendSlice(&self.tree.toHex());
         try buffer.append('\n');
 
         // Write parents
         for (self.parents) |parent| {
             try buffer.appendSlice("parent ");
-            try buffer.appendSlice(parent.toHex());
+            try buffer.appendSlice(&parent.toHex());
             try buffer.append('\n');
         }
 
@@ -218,10 +218,10 @@ pub const Commit = struct {
 
             if (std.mem.startsWith(u8, line, "tree ")) {
                 const hex = line[5..];
-                tree_opt = oid_mod.OID.fromHex(hex);
+                tree_opt = try oid_mod.OID.fromHex(hex);
             } else if (std.mem.startsWith(u8, line, "parent ")) {
                 const hex = line[7..];
-                try parents.append(oid_mod.OID.fromHex(hex));
+                try parents.append(try oid_mod.OID.fromHex(hex));
             } else if (std.mem.startsWith(u8, line, "author ")) {
                 const identity_str = line[7..];
                 author_opt = try Identity.parse(identity_str);
@@ -318,6 +318,14 @@ test "identity timezone to string" {
 
     const id_zero = Identity{ .name = "Test", .email = "t@t.com", .timestamp = 0, .timezone = 0 };
     try std.testing.expectEqualSlices(u8, "+0000", &id_zero.timezoneToStr());
+}
+
+test "identity timezone edge cases" {
+    const id_min = Identity{ .name = "Test", .email = "t@t.com", .timestamp = 0, .timezone = -720 };
+    try std.testing.expectEqualSlices(u8, "-1200", &id_min.timezoneToStr());
+
+    const id_max = Identity{ .name = "Test", .email = "t@t.com", .timestamp = 0, .timezone = 720 };
+    try std.testing.expectEqualSlices(u8, "+1200", &id_max.timezoneToStr());
 }
 
 test "identity parse invalid" {

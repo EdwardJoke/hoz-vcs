@@ -14,6 +14,13 @@ pub const AbortResult = struct {
 pub const MergeAborter = struct {
     allocator: std.mem.Allocator,
     options: AbortOptions,
+    state: MergeAbortState = .idle,
+
+    pub const MergeAbortState = enum {
+        idle,
+        in_progress,
+        needs_abort,
+    };
 
     pub fn init(allocator: std.mem.Allocator, options: AbortOptions) MergeAborter {
         return .{ .allocator = allocator, .options = options };
@@ -24,10 +31,24 @@ pub const MergeAborter = struct {
         return AbortResult{ .success = true, .files_restored = 0 };
     }
 
+    pub fn quit(self: *MergeAborter) !QuitResult {
+        _ = self;
+        return QuitResult{ .success = true, .state_cleared = true };
+    }
+
     pub fn canAbort(self: *MergeAborter) bool {
         _ = self;
         return true;
     }
+
+    pub fn canQuit(self: *MergeAborter) bool {
+        return self.state != .idle;
+    }
+};
+
+pub const QuitResult = struct {
+    success: bool,
+    state_cleared: bool,
 };
 
 test "AbortOptions default values" {

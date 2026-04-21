@@ -134,6 +134,152 @@ pub const DiffStats = struct {
     }
 };
 
+pub const WhitespaceError = struct {
+    line_number: usize,
+    is_old: bool,
+    error_type: WhitespaceErrorType,
+    line_content: []const u8,
+};
+
+pub const WhitespaceErrorType = enum {
+    trailing_whitespace,
+    space_before_tab,
+    blank_line_at_eof,
+    indentation_uses_spaces_only,
+    indentation_uses_tabs_only,
+    line_ends_with_single_cr,
+    line_ends_with_cr_and_lf,
+};
+
+pub const WhitespaceReport = struct {
+    allocator: std.mem.Allocator,
+    errors: std.ArrayList(WhitespaceError),
+
+    pub fn init(allocator: std.mem.Allocator) WhitespaceReport {
+        return .{
+            .allocator = allocator,
+            .errors = std.ArrayList(WhitespaceError).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *WhitespaceReport) void {
+        for (self.errors.items) |err| {
+            self.allocator.free(err.line_content);
+        }
+        self.errors.deinit();
+    }
+
+    pub fn addError(self: *WhitespaceReport, err: WhitespaceError) !void {
+        const line_copy = try self.allocator.dupe(u8, err.line_content);
+        errdefer self.allocator.free(line_copy);
+        var mutable_err = err;
+        mutable_err.line_content = line_copy;
+        try self.errors.append(mutable_err);
+    }
+
+    pub fn detectWhitespaceErrors(
+        self: *WhitespaceReport,
+        lines: []const []const u8,
+        is_old: bool,
+    ) !void {
+        for (lines, 0..) |line, idx| {
+            const line_num = idx + 1;
+            if (self.containsTrailingWhitespace(line)) {
+                try self.addError(.{
+                    .line_number = line_num,
+                    .is_old = is_old,
+                    .error_type = .trailing_whitespace,
+                    .line_content = line,
+                });
+            }
+            if (self.containsSpaceBeforeTab(line)) {
+                try self.addError(.{
+                    .line_number = line_num,
+                    .is_old = is_old,
+                    .error_type = .space_before_tab,
+                    .line_content = line,
+                });
+            }
+            if (self.hasBlankLineAtEndOfFile(lines, idx, line)) {
+                try self.addError(.{
+                    .line_number = line_num,
+                    .is_old = is_old,
+                    .error_type = .blank_line_at_eof,
+                    .line_content = line,
+                });
+            }
+            if (self.containsInvalidCR(line)) {
+                try self.addError(.{
+                    .line_number = line_num,
+                    .is_old = is_old,
+                    .error_type = .line_ends_with_single_cr,
+                    .line_content = line,
+                });
+            }
+        }
+    }
+
+    fn containsTrailingWhitespace(self: *WhitespaceReport, line: []const u8) bool {
+        _ = self;
+        if (line.len == 0) return false;
+        return line[line.len - 1] == ' ' or line[line.len - 1] == '\t';
+    }
+
+    fn containsSpaceBeforeTab(self: *WhitespaceReport, line: []const u8) bool {
+        _ = self;
+        for (0..line.len - 1) |i| {
+            if (line[i] == ' ' and line[i + 1] == '\t') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn hasBlankLineAtEndOfFile(self: *WhitespaceReport, lines: []const []const u8, idx: usize, line: []const u8) bool {
+        _ = self;
+        if (idx == lines.len - 1) {
+            return line.len == 0;
+        }
+        return false;
+    }
+
+    fn containsInvalidCR(self: *WhitespaceReport, line: []const u8) bool {
+        _ = self;
+        if (line.len > 0 and line[line.len - 1] == '\r') {
+            if (line.len == 1 or (line.len > 1 and line[line.len - 2] != '\r')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn count(self: *const WhitespaceReport) usize {
+        return self.errors.items.len;
+    }
+
+    pub fn formatReport(self: *WhitespaceReport, writer: anytype) !void {
+        if (self.errors.items.len == 0) {
+            try writer.writeAll("No whitespace errors found.\n");
+            return;
+        }
+
+        try writer.print("Whitespace errors:\n", .{});
+        for (self.errors.items) |err| {
+            const side: []const u8 = if (err.is_old) "old" else "new";
+            const error_desc = switch (err.error_type) {
+                .trailing_whitespace => "trailing whitespace",
+                .space_before_tab => "space before tab",
+                .blank_line_at_eof => "blank line at end of file",
+                .indentation_uses_spaces_only => "indentation uses spaces only",
+                .indentation_uses_tabs_only => "indentation uses tabs only",
+                .line_ends_with_single_cr => "line ends with CR",
+                .line_ends_with_cr_and_lf => "line ends with CRLF",
+            };
+            try writer.print("  {s}:{d}: {s}\n", .{ side, err.line_number, error_desc });
+        }
+    }
+};
+
 test "DiffResult init" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();

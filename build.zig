@@ -142,6 +142,72 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 
+    // Cross-platform build targets
+    const cross_targets = [_]struct {
+        name: []const u8,
+        triple: std.Target.Query,
+    }{
+        .{
+            .name = "macos-x86_64",
+            .triple = .{ .cpu_arch = .x86_64, .os_tag = .macos, .abi = null },
+        },
+        .{
+            .name = "macos-aarch64",
+            .triple = .{ .cpu_arch = .aarch64, .os_tag = .macos, .abi = null },
+        },
+        .{
+            .name = "linux-x86_64",
+            .triple = .{ .cpu_arch = .x86_64, .os_tag = .linux, .abi = .gnu },
+        },
+        .{
+            .name = "linux-aarch64",
+            .triple = .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .gnu },
+        },
+        .{
+            .name = "windows-x86_64",
+            .triple = .{ .cpu_arch = .x86_64, .os_tag = .windows, .abi = .gnu },
+        },
+    };
+
+    inline for (cross_targets) |ct| {
+        const cross_target = b.addExecutable(.{
+            .name = "hoz",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = b.resolveTargetQuery(ct.triple),
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "hoz", .module = mod },
+                },
+            }),
+        });
+
+        const install_cross = b.addInstallArtifact(cross_target, .{});
+        const cross_step = b.step(
+            b.fmt("install-{s}", .{ct.name}),
+            b.fmt("Install hoz for {s}", .{ct.name}),
+        );
+        cross_step.dependOn(&install_cross.step);
+    }
+
+    const release_step = b.step("release", "Build release binaries for all platforms");
+    inline for (cross_targets) |ct| {
+        const release_target = b.addExecutable(.{
+            .name = b.fmt("hoz-{s}", .{ct.name}),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = b.resolveTargetQuery(ct.triple),
+                .optimize = .ReleaseSafe,
+                .imports = &.{
+                    .{ .name = "hoz", .module = mod },
+                },
+            }),
+        });
+
+        const install_release = b.addInstallArtifact(release_target, .{});
+        release_step.dependOn(&install_release.step);
+    }
+
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
     // The Zig build system is entirely implemented in userland, which means

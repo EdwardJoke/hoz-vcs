@@ -28,7 +28,7 @@ pub const RepositoryLayout = struct {
 
 pub fn findRepositoryRoot(
     allocator: std.mem.Allocator,
-    io: *Io,
+    io: Io,
     start_path: []const u8,
 ) !RepositoryLayout {
     const dir = Io.Dir.cwd();

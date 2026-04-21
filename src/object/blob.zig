@@ -18,20 +18,27 @@ pub const Blob = struct {
         return .blob;
     }
 
-    /// Compute the OID (SHA) for this blob
-    /// Git blob format: "blob <size>\0<content>"
     pub fn oid(self: Blob) oid_mod.OID {
-        // Build header: "blob <size>\0"
-        const size_str = std.fmt.comptimePrint("{}", .{self.data.len});
-        const header = std.fmt.comptimePrint("blob {}\x00", .{size_str});
+        const size_str_len = std.fmt.count("{}", .{self.data.len});
+        const header_len = 5 + size_str_len + 1;
+        const total_len = header_len + self.data.len;
 
-        // For content up to 1000 bytes, use inline computation
-        var content_with_header: [1024]u8 = undefined;
-        @memcpy(content_with_header[0..header.len], header);
-        @memcpy(content_with_header[header.len .. header.len + self.data.len], self.data);
-        const full_content = content_with_header[0 .. header.len + self.data.len];
-
-        return oid_mod.oidFromContent(full_content);
+        if (total_len <= 1024) {
+            var buffer: [1024]u8 = undefined;
+            @memcpy(buffer[0..5], "blob ");
+            _ = std.fmt.bufPrint(buffer[5..], "{}", .{self.data.len}) catch unreachable;
+            buffer[5 + size_str_len] = 0;
+            @memcpy(buffer[header_len..], self.data);
+            return oid_mod.oidFromContent(buffer[0..total_len]);
+        } else {
+            var buffer = std.ArrayList(u8).init(std.heap.page_allocator);
+            defer buffer.deinit();
+            try buffer.appendSlice("blob ");
+            try std.fmt.allocPrintBuffer(&buffer, "{}", .{self.data.len});
+            try buffer.append(0);
+            try buffer.appendSlice(self.data);
+            return oid_mod.oidFromContent(buffer.items);
+        }
     }
 
     /// Serialize blob to loose object format
@@ -117,6 +124,24 @@ test "blob binary content" {
     const binary_data = "\x00\x01\x02\xff\xfe\xfd";
     const blob = Blob.create(binary_data);
     try std.testing.expectEqualSlices(u8, binary_data, blob.data);
+}
+
+test "blob binary oid" {
+    const binary_data = "\x00\x01\x02\xff\xfe\xfd";
+    const blob = Blob.create(binary_data);
+    const oid = blob.oid();
+    try std.testing.expect(!oid.isZero());
+
+    const same_blob = Blob.create(binary_data);
+    try std.testing.expect(same_blob.oid().eql(oid));
+}
+
+test "blob large content oid" {
+    const content = "x" ** 5000;
+    const blob = Blob.create(content);
+    try std.testing.expectEqual(5000, blob.data.len);
+    const oid = blob.oid();
+    try std.testing.expect(!oid.isZero());
 }
 
 test "blob newline content" {

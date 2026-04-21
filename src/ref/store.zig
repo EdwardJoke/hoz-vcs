@@ -10,22 +10,27 @@ const MAX_RESOLVE_DEPTH = 40;
 /// PackedRefsManager handles reading packed refs
 const PackedRefsManager = struct {
     git_dir: std.fs.Dir,
+    allocator: std.mem.Allocator,
 
-    /// Read all packed refs
+    /// Read all packed refs with proper locking
     /// Format: "<OID> <refname>\n" or "<OID> <refname>^\n" (peeled tag)
-    pub fn readAll(self: PackedRefsManager, allocator: std.mem.Allocator) RefError![]Ref {
-        var refs = std.ArrayList(Ref).init(allocator);
-        errdefer refs.deinit();
+    pub fn readAll(self: PackedRefsManager) RefError![]Ref {
+        var refs = std.ArrayList(Ref).empty;
+        errdefer refs.deinit(self.allocator);
+
+        // Acquire shared lock on packed-refs
+        const lock = try self.acquireLock(.shared);
+        defer lock.release();
 
         const packed_file = self.git_dir.openFile("packed-refs", .{}) catch {
             return refs.toOwnedSlice(); // No packed-refs file is fine
         };
         defer packed_file.close();
 
-        const content = packed_file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch {
+        const content = packed_file.readToEndAlloc(self.allocator, std.math.maxInt(usize)) catch {
             return refs.toOwnedSlice();
         };
-        defer allocator.free(content);
+        defer self.allocator.free(content);
 
         var lines = std.mem.tokenize(u8, content, "\n");
         while (lines.next()) |line| {
@@ -44,10 +49,86 @@ const PackedRefsManager = struct {
 
             const oid = Oid.fromHex(oid_hex) catch continue;
             const ref = Ref.directRef(ref_name, oid);
-            refs.append(ref) catch continue;
+            refs.append(self.allocator, ref) catch continue;
         }
 
         return refs.toOwnedSlice();
+    }
+
+    /// Write all refs to packed-refs atomically with exclusive lock
+    pub fn writeAll(self: PackedRefsManager, refs_to_write: []const Ref) RefError!void {
+        // Acquire exclusive lock on packed-refs
+        const lock = try self.acquireLock(.exclusive);
+        defer lock.release();
+
+        // Write to temp file first, then rename atomically
+        const temp_path = "packed-refs.tmp";
+        const final_path = "packed-refs";
+
+        // Delete any existing temp file
+        self.git_dir.deleteFile(temp_path) catch {};
+
+        var temp_file = try self.git_dir.createFile(temp_path, .{});
+        defer temp_file.close();
+
+        // Write header
+        try temp_file.writeAll("# pack-refs with: peeled fully-peeled sorted\n");
+
+        // Write each ref
+        var writer = temp_file.writer();
+        for (refs_to_write) |ref| {
+            try writer.print("{s} {s}\n", .{ ref.getTargetString(), ref.name });
+        }
+
+        // Sync to ensure data is written
+        try temp_file.sync();
+
+        // Close file before renaming
+        temp_file.close();
+
+        // Rename to final location atomically
+        self.git_dir.rename(temp_path, final_path) catch {
+            return error.IoError;
+        };
+    }
+
+    /// Lock type for packed-refs
+    const LockType = enum {
+        shared,
+        exclusive,
+    };
+
+    /// RAII-style lock guard for packed-refs
+    const Lock = struct {
+        git_dir: std.fs.Dir,
+        lock_path: []const u8,
+
+        pub fn release(self: *Lock) void {
+            self.git_dir.deleteFile(self.lock_path) catch {};
+        }
+    };
+
+    /// Acquire a lock on packed-refs
+    fn acquireLock(self: PackedRefsManager, lock_type: LockType) RefError!Lock {
+        const lock_path = "packed-refs.lock";
+        const lock_file = self.git_dir.createFile(lock_path, .{
+            .exclusive = lock_type == .exclusive,
+        }) catch {
+            return error.IoError;
+        };
+        defer lock_file.close();
+
+        // Write lock metadata (PID for debugging)
+        const pid = std.process.getCurrentPid();
+        try lock_file.writer().print("lock {d}\n", .{pid});
+
+        // Sync the lock file
+        lock_file.sync() catch {};
+
+        return Lock{
+            .git_dir = self.git_dir,
+            .lock_path = lock_path,
+        };
     }
 };
 
@@ -101,7 +182,11 @@ pub const RefStore = struct {
 
     /// Resolve a symbolic ref to its target OID
     /// Returns the resolved Ref with an OID for symbolic refs
+    /// Uses visited set to detect cycles (e.g., A->B->C->A)
     pub fn resolve(self: RefStore, name: []const u8) RefError!Ref {
+        var visited = std.AutoHashMap([]const u8, void).init(self.allocator);
+        defer visited.deinit();
+
         var ref = try self.readWithDepth(name, 0);
 
         // If already direct, return as-is
@@ -109,7 +194,7 @@ pub const RefStore = struct {
             return ref;
         }
 
-        // Follow symbolic ref chain
+        // Follow symbolic ref chain with cycle detection
         var depth: usize = 0;
         while (ref.isSymbolic()) {
             if (depth > MAX_RESOLVE_DEPTH) {
@@ -117,6 +202,14 @@ pub const RefStore = struct {
             }
 
             const target = ref.target.symbolic;
+
+            // Cycle detection: check if we've seen this ref before
+            if (visited.contains(target)) {
+                return RefError.SymrefCycleDetected;
+            }
+
+            try visited.put(target, {});
+
             ref = try self.readWithDepth(target, depth + 1);
             depth += 1;
         }
@@ -147,8 +240,8 @@ pub const RefStore = struct {
 
     /// List all refs matching a prefix
     pub fn list(self: RefStore, prefix: []const u8) RefError![]const Ref {
-        var refs = std.ArrayList(Ref).init(self.allocator);
-        defer refs.deinit();
+        var refs = std.ArrayList(Ref).empty;
+        defer refs.deinit(self.allocator);
 
         const refs_dir = try self.git_dir.openDir("refs", .{});
         var walker = try refs_dir.walk(self.allocator);
@@ -169,7 +262,7 @@ pub const RefStore = struct {
                 continue;
 
             const ref = self.read(full_name) catch continue;
-            try refs.append(ref);
+            try refs.append(self.allocator, ref);
         }
 
         return refs.toOwnedSlice();

@@ -11,6 +11,9 @@ pub const ConflictType = enum {
     deleted_by_them,
     added_by_us,
     added_by_them,
+    rename_add_conflict,
+    rename_rename_conflict,
+    rename_delete_conflict,
 };
 
 pub const FileConflict = struct {
@@ -19,6 +22,14 @@ pub const FileConflict = struct {
     our_oid: ?OID,
     their_oid: ?OID,
     ancestor_oid: ?OID,
+};
+
+pub const RenameAddConflict = struct {
+    old_path: []const u8,
+    new_path: []const u8,
+    is_rename_on_ours: bool,
+    is_rename_on_theirs: bool,
+    content_changed: bool,
 };
 
 pub const ConflictDetector = struct {
@@ -49,11 +60,72 @@ pub const ConflictDetector = struct {
         }
     }
 
+    pub fn detectRenameAddConflict(
+        self: *ConflictDetector,
+        old_path: []const u8,
+        new_path: []const u8,
+        ancestor_oid: ?OID,
+        ours_oid: ?OID,
+        theirs_oid: ?OID,
+    ) !RenameAddConflict {
+        const is_rename_on_ours = ancestor_oid != null and ours_oid != null and !std.mem.eql(u8, &old_path, &new_path);
+        const is_rename_on_theirs = ancestor_oid != null and theirs_oid != null and !std.mem.eql(u8, &old_path, &new_path);
+
+        const content_changed = (ours_oid != null and theirs_oid != null) and
+            (ours_oid.?.bytes != theirs_oid.?.bytes);
+
+        return RenameAddConflict{
+            .old_path = old_path,
+            .new_path = new_path,
+            .is_rename_on_ours = is_rename_on_ours,
+            .is_rename_on_theirs = is_rename_on_theirs,
+            .content_changed = content_changed,
+        };
+    }
+
+    pub fn isRenameAddConflict(self: *ConflictDetector, conflict: *const RenameAddConflict) bool {
+        _ = self;
+        const is_rename_either_side = conflict.is_rename_on_ours or conflict.is_rename_on_theirs;
+        const is_add_different_content = conflict.content_changed;
+        return is_rename_either_side and is_add_different_content;
+    }
+
     pub fn hasConflicts(_: *ConflictDetector, conflicts: []const FileConflict) bool {
         for (conflicts) |c| {
             if (c.conflict_type != .none) return true;
         }
         return false;
+    }
+
+    pub fn detectRenameRenameConflict(
+        self: *ConflictDetector,
+        old_path_a: []const u8,
+        old_path_b: []const u8,
+        new_path_a: []const u8,
+        new_path_b: []const u8,
+        oid_a: ?OID,
+        oid_b: ?OID,
+    ) bool {
+        _ = self;
+        if (oid_a == null or oid_b == null) return false;
+
+        const same_target = std.mem.eql(u8, &new_path_a, &new_path_b);
+        const different_source = !std.mem.eql(u8, &old_path_a, &old_path_b);
+
+        return same_target and different_source;
+    }
+
+    pub fn detectRenameDeleteConflict(
+        self: *ConflictDetector,
+        renamed_path: []const u8,
+        deleted_path: []const u8,
+        rename_oid: ?OID,
+        delete_oid: ?OID,
+    ) bool {
+        _ = self;
+        const same_path = std.mem.eql(u8, &renamed_path, &deleted_path);
+        const one_deleted = (rename_oid != null and delete_oid == null) or (rename_oid == null and delete_oid != null);
+        return same_path and one_deleted;
     }
 };
 

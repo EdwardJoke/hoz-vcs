@@ -13,13 +13,18 @@ pub const Capability = enum {
     delete_refs,
     thin_pack,
     no_progress,
-    include_tag,
     quiet,
+    agent,
+    object_format,
+    no_done,
+    wait_for_done,
 };
 
 pub const NegotiationOptions = struct {
     want_walk: bool = true,
     deepen_relative: bool = false,
+    multi_ack: bool = false,
+    multi_ack_detailed: bool = false,
 };
 
 pub const CapabilityNegotiator = struct {
@@ -31,22 +36,113 @@ pub const CapabilityNegotiator = struct {
     }
 
     pub fn negotiate(self: *CapabilityNegotiator, server_caps: []const []const u8) ![]const Capability {
-        _ = self;
-        _ = server_caps;
-        return &.{};
+        var result = std.ArrayList(Capability).init(self.allocator);
+        errdefer result.deinit();
+
+        for (server_caps) |cap_str| {
+            if (self.parseAndValidateCapability(cap_str)) |cap| {
+                if (self.isCapabilityUseful(cap)) {
+                    try result.append(cap);
+                }
+            }
+        }
+
+        self.applyNegotiatedCapabilities(&result);
+        return result.toOwnedSlice();
     }
 
     pub fn hasCapability(self: *CapabilityNegotiator, cap: Capability, caps: []const Capability) bool {
         _ = self;
-        _ = cap;
-        _ = caps;
+        for (caps) |c| {
+            if (c == cap) return true;
+        }
         return false;
     }
 
     pub fn formatCapabilities(self: *CapabilityNegotiator, caps: []const Capability) ![]const u8 {
+        if (caps.len == 0) return "";
+
+        var buf = std.ArrayList(u8).init(self.allocator);
+        errdefer buf.deinit();
+
+        for (caps, 0..) |cap, i| {
+            if (i > 0) try buf.append(' ');
+            try buf.writer().print("{s}", .{@tagName(cap)});
+        }
+
+        return buf.toOwnedSlice();
+    }
+
+    fn parseAndValidateCapability(self: *CapabilityNegotiator, cap_str: []const u8) ?Capability {
+        const dash_idx = std.mem.indexOfScalar(u8, cap_str, '-');
+        const cap_name = if (dash_idx) |idx| cap_str[0..idx] else cap_str;
+
+        const normalized = self.normalizeCapabilityName(cap_name);
+
+        inline for (comptime std.meta.fields(Capability)) |field| {
+            if (std.mem.eql(u8, normalized, field.name)) {
+                return @as(Capability, @enumFromInt(field.value));
+            }
+        }
+
+        return null;
+    }
+
+    fn normalizeCapabilityName(self: *CapabilityNegotiator, name: []const u8) []const u8 {
         _ = self;
-        _ = caps;
-        return "";
+        var result: [32]u8 = undefined;
+        var j: usize = 0;
+
+        for (name) |c| {
+            if (c == '_') continue;
+            if (c >= 'A' and c <= 'Z') {
+                result[j] = c + 32;
+            } else {
+                result[j] = c;
+            }
+            j += 1;
+        }
+
+        return result[0..j];
+    }
+
+    fn isCapabilityUseful(self: *CapabilityNegotiator, cap: Capability) bool {
+        switch (cap) {
+            .multi_ack_detailed => return self.options.want_walk,
+            .multi_ack => return self.options.want_walk,
+            .side_band_64k => return true,
+            .side_band => return true,
+            .ofs_delta => return true,
+            .include_tag => return true,
+            .no_progress => return true,
+            .quiet => return true,
+            .thin_pack => return true,
+            else => return true,
+        }
+    }
+
+    fn applyNegotiatedCapabilities(self: *CapabilityNegotiator, caps: *std.ArrayList(Capability)) void {
+        _ = self;
+        var has_multi_ack_detailed = false;
+        var has_multi_ack = false;
+
+        for (caps.items) |cap| {
+            switch (cap) {
+                .multi_ack_detailed => has_multi_ack_detailed = true,
+                .multi_ack => has_multi_ack = true,
+                else => {},
+            }
+        }
+
+        if (has_multi_ack_detailed and has_multi_ack) {
+            var i: usize = 0;
+            while (i < caps.items.len) : (i += 1) {
+                if (caps.items[i] == .multi_ack) {
+                    _ = caps.swapRemove(i);
+                    break;
+                }
+            }
+        }
     }
 };
 

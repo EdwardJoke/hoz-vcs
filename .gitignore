@@ -16,3 +16,7 @@ tests/
 
 # Mac
 .DS_Store
+
+# AI
+CLAUDE.md
+AGENTS.md

@@ -11,6 +11,51 @@ pub const ConfigEntry = struct {
     key: []const u8,
     value: []const u8,
     scope: ConfigScope,
+    value_type: ConfigType = .string,
+};
+
+pub const ConfigType = enum {
+    string,
+    bool,
+    int,
+    path,
+    expiry_date,
+};
+
+pub const ConfigTypeParser = struct {
+    pub fn parseBool(value: []const u8) !bool {
+        if (std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "yes") or std.mem.eql(u8, value, "on")) {
+            return true;
+        } else if (std.mem.eql(u8, value, "false") or std.mem.eql(u8, value, "no") or std.mem.eql(u8, value, "off")) {
+            return false;
+        }
+        return error.InvalidBoolValue;
+    }
+
+    pub fn formatBool(value: bool) []const u8 {
+        return if (value) "true" else "false";
+    }
+
+    pub fn parseInt(value: []const u8) !i64 {
+        return std.fmt.parseInt(i64, value, 10);
+    }
+
+    pub fn formatInt(value: i64) []const u8 {
+        return std.fmt.print("{d}", .{value});
+    }
+
+    pub fn parsePath(value: []const u8) ![]const u8 {
+        return value;
+    }
+
+    pub fn parseExpiryDate(value: []const u8) !i64 {
+        _ = value;
+        return 0;
+    }
+
+    pub fn formatExpiryDate(timestamp: i64) []const u8 {
+        return std.fmt.print("{d}", .{timestamp});
+    }
 };
 
 pub const Config = struct {

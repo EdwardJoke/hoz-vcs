@@ -53,6 +53,9 @@ pub const HeadManager = struct {
     /// Detach HEAD to a specific ref (resolved)
     pub fn detachToRef(self: HeadManager, ref_name: []const u8) RefError!void {
         const resolved = try self.store.resolve(ref_name);
+        if (resolved.isSymbolic()) {
+            return RefError.SymrefTargetNotFound;
+        }
         const ref = Ref.directRef("HEAD", resolved.target.direct);
         try self.store.write(ref);
     }
@@ -76,8 +79,20 @@ pub const HeadManager = struct {
             return target["refs/heads/".len..];
         }
 
-        // Could be a full ref path
         return target;
+    }
+
+    /// Verify HEAD state consistency
+    /// Returns error if HEAD is in an inconsistent state
+    pub fn verify(self: HeadManager) RefError!void {
+        const head = try self.store.read("HEAD");
+
+        if (head.isSymbolic()) {
+            const target = head.target.symbolic;
+            if (!Ref.isValidName(target)) {
+                return RefError.InvalidRefName;
+            }
+        }
     }
 };
 

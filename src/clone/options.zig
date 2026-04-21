@@ -8,6 +8,19 @@ pub const CloneOptions = struct {
     no_checkout: bool = false,
     local: bool = true,
     recursive: bool = true,
+    filter: ?FilterSpec = null,
+};
+
+pub const FilterSpec = struct {
+    blob_filter: BlobFilter = .none,
+    tree_depth: u32 = 0,
+    allow_unavailable: bool = false,
+};
+
+pub const BlobFilter = enum {
+    none,
+    blob_limit,
+    blob_type,
 };
 
 pub const CloneResult = struct {

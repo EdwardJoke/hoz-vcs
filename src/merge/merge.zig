@@ -13,6 +13,8 @@ pub usingnamespace @import("resolution.zig");
 pub usingnamespace @import("commit.zig");
 pub usingnamespace @import("abort.zig");
 pub usingnamespace @import("rerere.zig");
+pub usingnamespace @import("squash.zig");
+pub usingnamespace @import("strategy.zig");
 
 test "merge module loads" {
     try std.testing.expect(true);

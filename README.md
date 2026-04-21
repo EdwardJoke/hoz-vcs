@@ -1,72 +1,83 @@
 # Hoz - Git-Compatible Version Control System
 
-A full-featured Git implementation in Zig 0.16.0, built for type safety and performance.
+A full-featured Git implementation in Zig 0.16.0, built for type safety and performance. 
+Hoz is the next generation of Git-compatible version control with a clean, modern codebase.
 
-## Features
+## Why Hoz?
 
-- **Full Git Compatibility** - All major Git commands implemented
-- **Modular Architecture** - Clean separation of concerns
-- **Type-Safe** - Zig's safety guarantees throughout
-- **Performance** - Optimized object database and diff engine
-
-## Building
-
-```bash
-zig build
-```
-
-## Testing
-
-```bash
-zig build test
-```
-
-## Installation
-
-```bash
-zig build install
-```
+- **Git-Compatible** - Works with existing Git repositories and workflows
+- **Type-Safe** - Written in Zig for memory safety and compile-time verification
+- **Fast** - Optimized object database and efficient diff engine
+- **Portable** - Runs anywhere Zig 0.16.0 is available
 
 ## Quick Start
 
+Initialize a new repository:
+
 ```bash
-hoz init
+hoz init my-project
+cd my-project
+```
+
+Stage and commit changes:
+
+```bash
 hoz add .
 hoz commit -m "Initial commit"
 ```
 
-## Commands
+## Common Commands
 
-- `init`, `clone` - Repository creation
-- `add`, `stage` - File staging
-- `commit` - Recording changes
-- `branch`, `checkout`, `switch` - Branching
-- `merge`, `rebase` - Integration
-- `stash` - Work in progress
-- `log`, `blame`, `show` - History
-- `diff`, `status` - Changes
-- `fetch`, `push`, `pull` - Remote operations
-- `tag` - Tagging
-
-## Architecture
-
-```
-src/
-├── object/    # Blob, tree, commit, tag objects
-├── odb/       # Object database
-├── ref/       # References and branches
-├── index/     # Staging area
-├── workdir/   # Working directory
-├── diff/      # Diff engine
-├── merge/     # Merge algorithms
-├── network/   # Protocol handling
-└── cli/       # Command interface
+### Repository Operations
+```bash
+hoz init           # Create a new repository
+hoz clone <url>    # Clone an existing repository
 ```
 
-## Status
+### Making Changes
+```bash
+hoz add <file>     # Stage files for commit
+hoz commit -m ""   # Record staged changes
+hoz status         # Show working tree status
+hoz diff           # Show unstaged changes
+```
 
-Phase 1 complete - Core infrastructure implemented.
+### Branching
+```bash
+hoz branch                    # List branches
+hoz branch <name>             # Create a branch
+hoz checkout <branch>         # Switch branches
+hoz merge <branch>            # Merge branches
+```
+
+### History & Inspection
+```bash
+hoz log           # View commit history
+hoz show <ref>    # Show commit details
+hoz blame <file>  # Show file annotations
+```
+
+### Remote Collaboration
+```bash
+hoz fetch         # Download objects from remote
+hoz push          # Upload objects to remote
+hoz pull          # Fetch and merge remote changes
+```
+
+## Project Status
+
+Hoz is in active development. Core Git functionality is implemented including:
+- Object database (blobs, trees, commits, tags)
+- Reference management (branches, tags, HEAD)
+- Staging area (index)
+- Working directory operations
+- Diff and merge algorithms
+
+## Contributing
+
+Contributions welcome. Please ensure `zig build test` passes before submitting changes.
 
 ## License
 
-MIT
+Apache License 2.0
+-

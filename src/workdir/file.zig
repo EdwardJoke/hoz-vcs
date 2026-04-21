@@ -32,7 +32,7 @@ pub const StatusError = error{
 
 pub fn readFile(allocator: std.mem.Allocator, io: *Io, path: []const u8) FileReadError![]u8 {
     const dir = Io.Dir.cwd();
-    const file = dir.openFile(io, path, .{}) catch |err| {
+    const file = dir.openFile(io.*, path, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => return FileReadError.FileNotFound,
             error.PermissionDenied => return FileReadError.PermissionDenied,
@@ -57,7 +57,7 @@ pub fn readFile(allocator: std.mem.Allocator, io: *Io, path: []const u8) FileRea
 
 pub fn writeFile(io: *Io, path: []const u8, data: []const u8) FileWriteError!void {
     const dir = Io.Dir.cwd();
-    const file = dir.openFile(io, path, .{ .mode = .write_only }) catch |err| {
+    const file = dir.openFile(io.*, path, .{ .mode = .write_only }) catch |err| {
         switch (err) {
             error.FileNotFound => return FileWriteError.DirectoryNotFound,
             error.PermissionDenied => return FileWriteError.PermissionDenied,
@@ -87,13 +87,13 @@ pub fn createFile(io: *Io, path: []const u8, data: []const u8) FileWriteError!vo
 
 pub fn fileExists(io: *Io, path: []const u8) bool {
     const dir = Io.Dir.cwd();
-    dir.openFile(io, path, .{}) catch return false;
+    dir.openFile(io.*, path, .{}) catch return false;
     return true;
 }
 
 pub fn getFileSize(io: *Io, path: []const u8) StatusError!u64 {
     const dir = Io.Dir.cwd();
-    const file = dir.openFile(io, path, .{}) catch |err| {
+    const file = dir.openFile(io.*, path, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => return StatusError.FileNotFound,
             else => return StatusError.IoError,
@@ -107,7 +107,7 @@ pub fn getFileSize(io: *Io, path: []const u8) StatusError!u64 {
 
 pub fn getFileModifiedTime(io: *Io, path: []const u8) StatusError!i128 {
     const dir = Io.Dir.cwd();
-    const file = dir.openFile(io, path, .{}) catch |err| {
+    const file = dir.openFile(io.*, path, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => return StatusError.FileNotFound,
             else => return StatusError.IoError,

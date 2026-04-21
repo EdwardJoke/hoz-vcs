@@ -98,67 +98,104 @@ pub const MyersDiff = struct {
         const new_len: isize = @intCast(new_text.len);
         const max: isize = old_len + new_len;
 
-        var traces = std.ArrayList([2]std.ArrayList(isize)).init(self.allocator);
-        defer {
-            for (traces.items) |trace| {
-                trace[0].deinit();
-                trace[1].deinit();
-            }
-            traces.deinit();
-        }
+        const trace_size = @as(usize, @intCast(max * 2 + 1));
+        var current_trace = try self.allocator.alloc(isize, trace_size);
+        defer self.allocator.free(current_trace);
+        var previous_trace = try self.allocator.alloc(isize, trace_size);
+        defer self.allocator.free(previous_trace);
 
-        outer: for (0..@intCast(max + 1)) |_| {
-            var trace_pair = [_]std.ArrayList(isize){
-                std.ArrayList(isize).init(self.allocator),
-                std.ArrayList(isize).init(self.allocator),
-            };
-            errdefer {
-                trace_pair[0].deinit();
-                trace_pair[1].deinit();
-            };
+        @memset(current_trace, 0);
+        @memset(previous_trace, 0);
 
-            for (0..@intCast(max + 1)) |_| {
-                try trace_pair[0].append(0);
-                try trace_pair[1].append(0);
-            }
+        const offset: isize = max;
+        var v_old: isize = 0;
+        var v_new: isize = 0;
 
-            for (1..@intCast(max + 1)) |d| {
-                for (-d..d + 1) |k| {
-                    const trace_idx = if (d % 2 == 1) 1 else 0;
-                    const other_idx = if (d % 2 == 1) 0 else 1;
+        outer: for (1..@intCast(max + 1)) |d| {
+            for (-d..d + 1) |k| {
+                const trace_idx = @as(usize, @intCast(k + offset));
 
-                    var v: isize = undefined;
-                    if (k == -d or (k != d and trace_pair[trace_idx].items[@intCast(k - 1 + d)] > trace_pair[trace_idx].items[@intCast(k + d)])) {
-                        v = trace_pair[trace_idx].items[@intCast(k - 1 + d)];
-                    } else {
-                        v = trace_pair[trace_idx].items[@intCast(k + d)] + 1;
-                    }
+                var v: isize = undefined;
+                if (k == -d or (k != d and current_trace[trace_idx - 1] > current_trace[trace_idx])) {
+                    v = current_trace[trace_idx - 1];
+                } else {
+                    v = current_trace[trace_idx] + 1;
+                }
 
-                    while (v > 0 and v < old_len and v - k < new_len and
-                        std.mem.eql(u8, old_text[@intCast(v)], new_text[@intCast(v - k)])) : (v += 1) {}
+                var x = v;
+                while (x > 0 and x < old_len and x - k < new_len and
+                    std.mem.eql(u8, old_text[@intCast(x - 1)], new_text[@intCast(x - k - 1)])) : (x += 1) {}
 
-                    trace_pair[other_idx].items[@intCast(k + d)] = v;
+                if (d % 2 == 1) {
+                    previous_trace[trace_idx] = x;
+                } else {
+                    current_trace[trace_idx] = x;
+                }
 
-                    if (v >= old_len and v - k >= new_len) {
-                        try self.backtrack(traces.items, old_text, new_text, old_len, new_len);
-                        break :outer;
-                    }
+                if (x >= old_len and x - k >= new_len) {
+                    v_old = x;
+                    v_new = x - k;
+                    break :outer;
                 }
             }
 
-            try traces.append(trace_pair);
+            const temp = previous_trace;
+            previous_trace = current_trace;
+            current_trace = temp;
+            @memset(current_trace, 0);
         }
 
-        return try self.backtrackEdits(traces.items, old_text, new_text);
+        return try self.backtrackEditsOptimized(old_text, new_text, v_old, v_new, max);
     }
 
-    fn backtrack(self: *MyersDiff, traces: []const [2]std.ArrayList(isize), old_text: []const []const u8, new_text: []const []const u8, old_len: isize, new_len: isize) !void {
-        _ = self;
-        _ = traces;
-        _ = old_text;
-        _ = new_text;
-        _ = old_len;
-        _ = new_len;
+    fn backtrackEditsOptimized(
+        self: *MyersDiff,
+        old_text: []const []const u8,
+        new_text: []const []const u8,
+        v_old: isize,
+        v_new: isize,
+        max: isize,
+    ) ![]const Edit {
+        var edits = std.ArrayList(Edit).init(self.allocator);
+        errdefer edits.deinit();
+
+        var old_idx = @as(isize, @intCast(old_text.len));
+        var new_idx = @as(isize, @intCast(new_text.len));
+        var d = max;
+
+        while (d > 0 or old_idx > 0 or new_idx > 0) {
+            const k = old_idx - new_idx;
+
+            const is_delete = old_idx > 0 and (new_idx == 0 or d <= max - old_idx);
+            const is_insert = new_idx > 0 and (old_idx == 0 or d <= max - new_idx);
+
+            if (is_delete) {
+                try edits.append(.{ .operation = .delete, .old_line = @intCast(old_idx), .new_line = 0 });
+                old_idx -= 1;
+            } else if (is_insert) {
+                try edits.append(.{ .operation = .insert, .old_line = 0, .new_line = @intCast(new_idx) });
+                new_idx -= 1;
+            } else {
+                if (old_idx > 0 and new_idx > 0) {
+                    try edits.append(.{ .operation = .equal, .old_line = @intCast(old_idx), .new_line = @intCast(new_idx) });
+                    old_idx -= 1;
+                    new_idx -= 1;
+                } else if (old_idx > 0) {
+                    try edits.append(.{ .operation = .delete, .old_line = @intCast(old_idx), .new_line = 0 });
+                    old_idx -= 1;
+                } else if (new_idx > 0) {
+                    try edits.append(.{ .operation = .insert, .old_line = 0, .new_line = @intCast(new_idx) });
+                    new_idx -= 1;
+                } else {
+                    break;
+                }
+            }
+
+            if (d > 0) d -= 1;
+        }
+
+        std.mem.reverse(Edit, edits.items);
+        return edits.toOwnedSlice();
     }
 
     fn backtrackEdits(self: *MyersDiff, traces: []const [2]std.ArrayList(isize), old_text: []const []const u8, new_text: []const []const u8) ![]const Edit {

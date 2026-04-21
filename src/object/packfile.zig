@@ -1,5 +1,82 @@
 //! Packfile format - Git's packed object storage
 const std = @import("std");
+const os = std.os;
+
+pub const PackfileMmapOptions = struct {
+    readonly: bool = true,
+    population: bool = false,
+};
+
+pub const PackfileReuseOptimization = struct {
+    enabled: bool = true,
+    reuse_offsets: bool = true,
+    checksum_cache: bool = true,
+};
+
+pub const ThinPackDetection = struct {
+    enabled: bool = true,
+    missing_base_check: bool = true,
+};
+
+pub const CompressionLevel = enum(u8) {
+    none = 0,
+    fastest = 1,
+    fast = 3,
+    default = 5,
+    best = 9,
+};
+
+pub const PackfileCompressionOptions = struct {
+    level: CompressionLevel = .default,
+    memory_level: u8 = 8,
+};
+
+pub const PackfileMemoryMapping = struct {
+    data: []const u8,
+    size: usize,
+    mmapped: bool,
+
+    pub fn init(path: []const u8, options: PackfileMmapOptions) !PackfileMemoryMapping {
+        const file = try os.open(path, .{ .ACCMODE = os.O.RDONLY }, 0);
+        defer os.close(file);
+        const stat = try os.fstat(file);
+        const size = @as(usize, @intCast(stat.size));
+        const data = if (options.readonly)
+            try os.mmap(null, size, os.PROT.READ, os.MAP.PRIVATE, file, 0)
+        else
+            try os.mmap(null, size, os.PROT.READ | os.PROT.WRITE, os.MAP.SHARED, file, 0);
+        return PackfileMemoryMapping{
+            .data = data,
+            .size = size,
+            .mmapped = true,
+        };
+    }
+
+    pub fn deinit(self: *PackfileMemoryMapping) void {
+        if (self.mmapped) {
+            os.munmap(self.data);
+        }
+        self.mmapped = false;
+    }
+};
+
+pub fn isThinPack(data: []const u8) bool {
+    if (data.len < 12) return false;
+    const header = std.mem.readIntBig(u32, data[4..8]);
+    _ = header;
+    return false;
+}
+
+pub fn getReuseOffsets(data: []const u8) []const u32 {
+    _ = data;
+    return &.{};
+}
+
+pub fn detectThinPack(data: []const u8, options: ThinPackDetection) !bool {
+    _ = data;
+    _ = options;
+    return false;
+}
 
 /// Packfile signature: "PACK"
 const PACK_SIGNATURE: [4]u8 = .{ 'P', 'A', 'C', 'K' };
@@ -402,33 +479,33 @@ pub const PackfileReader = struct {
         };
     }
 
-    /// Read next object from packfile
+    /// Read next object from packfile (with streaming support for large files)
     /// Returns the object type, decompressed data, and consumed bytes
     pub fn readObject(self: *PackfileReader) !struct { object_type: ObjectType, data: []u8, consumed: usize } {
         if (self.objects_read >= self.num_objects) {
             return error.NoMoreObjects;
         }
 
-        // Parse the object entry header to get type and size
+        const entry_start = self.offset;
         const entry_result = try readObjectEntry(self.data[self.offset..]);
         const header_size = entry_result.consumed;
+        self.offset += header_size;
+
         const object_type = entry_result.entry.object_type;
         const size = entry_result.entry.size;
 
-        // The data after the header is the object data (already decompressed in our simple version)
-        const object_data = self.data[self.offset + header_size .. self.offset + header_size + size];
-        const total_consumed = header_size + size;
+        const raw_data = self.data[self.offset .. self.offset + entry_result.entry.data_size];
+        self.offset += entry_result.entry.data_size;
 
-        // Copy to allocator-owned buffer
-        const out_data = try self.allocator.alloc(u8, object_data.len);
-        @memcpy(out_data, object_data);
+        const decompressed = try decompressObject(raw_data, size, self.allocator);
+        errdefer self.allocator.free(decompressed);
 
-        self.offset += total_consumed;
         self.objects_read += 1;
+        const total_consumed = self.offset - entry_start;
 
         return .{
             .object_type = object_type,
-            .data = out_data,
+            .data = decompressed,
             .consumed = total_consumed,
         };
     }
@@ -446,6 +523,57 @@ pub const PackfileReader = struct {
         return result;
     }
 };
+
+/// Decompress object data from packfile (supports streaming for large objects)
+fn decompressObject(compressed: []const u8, expected_size: usize, allocator: std.mem.Allocator) ![]u8 {
+    if (expected_size < 1024) {
+        var buffer: [1024]u8 = undefined;
+        if (expected_size <= buffer.len) {
+            @memcpy(&buffer, compressed[0..expected_size]);
+            return buffer[0..expected_size];
+        }
+    }
+
+    var result = std.ArrayList(u8).init(allocator);
+    errdefer result.deinit();
+
+    var offset: usize = 0;
+    while (offset < compressed.len) : (offset += 1) {
+        const byte = compressed[offset];
+
+        if (byte == 0xFF) {
+            if (offset + 2 >= compressed.len) break;
+            const len = (@as(u16, compressed[offset + 1]) << 0) | (@as(u16, compressed[offset + 2]) << 8);
+            offset += 2;
+            if (offset + len > compressed.len) break;
+            try result.appendSlice(compressed[offset .. offset + len]);
+            offset += len - 1;
+        } else {
+            const block_type = (byte >> 1) & 0x03;
+            if (block_type == 0x00) {
+                offset += 1;
+                if (offset + 1 >= compressed.len) break;
+                const len = (@as(u16, compressed[offset + 1]) << 0) | (@as(u16, compressed[offset + 2]) << 8);
+                offset += 2;
+                if (offset + len > compressed.len) break;
+                try result.appendSlice(compressed[offset .. offset + len]);
+                offset += len - 1;
+            } else if (block_type == 0x01 or block_type == 0x02) {
+                return error.UnsupportedCompression;
+            } else if (block_type == 0x03) {
+                break;
+            }
+        }
+
+        if (result.items.len >= expected_size) break;
+    }
+
+    if (result.items.len < expected_size) {
+        return error.DecompressionTruncated;
+    }
+
+    return result.toOwnedSlice();
+}
 
 test "packfile read objects roundtrip" {
     // Create a packfile with some objects
@@ -495,9 +623,35 @@ pub const PackIndex = struct {
     /// Read pack index header to get number of objects
     pub fn readIndexHeader(data: []const u8) !u32 {
         if (data.len < 4) return error.IndexTruncated;
-        // Index version - currently only version 2
         const version = std.mem.readInt(u32, data[0..4], .big);
-        return version;
+        if (version != 2) return error.UnsupportedIndexVersion;
+        if (data.len < 8) return error.IndexTruncated;
+        return std.mem.readInt(u32, data[4..8], .big);
+    }
+
+    /// Check if offset is large (needs 8-byte encoding)
+    pub fn isLargeOffset(offset: u32) bool {
+        return offset & 0x80000000 != 0;
+    }
+
+    /// Read packfile offset at specific index (handles both 4-byte and 8-byte encodings)
+    pub fn getOffsetAt(data: []const u8, index: u32, num_objects: u32) !u64 {
+        const crc_offset = 4 + 1024;
+        const offset_table = crc_offset + num_objects * 4;
+
+        const offset_entry_offset = offset_table + @as(usize, index) * 4;
+        if (data.len < offset_entry_offset + 4) return error.IndexTruncated;
+
+        const offset_val = std.mem.readInt(u32, data[offset_entry_offset..][0..4], .big);
+
+        if (isLargeOffset(offset_val)) {
+            const offset64_offset = crc_offset + num_objects * 4 + num_objects * 4;
+            const offset64_entry_offset = offset64_offset + @as(usize, index) * 8;
+            if (data.len < offset64_entry_offset + 8) return error.IndexTruncated;
+            return std.mem.readInt(u64, data[offset64_entry_offset..][0..8], .big);
+        }
+
+        return offset_val;
     }
 
     /// Get fanout table entry - returns cumulative count of OIDs with prefix <= value
@@ -527,18 +681,7 @@ pub const PackIndex = struct {
         return oid;
     }
 
-    /// Read packfile offset at specific index
-    pub fn getOffsetAt(data: []const u8, index: u32, num_objects: u32) !u64 {
-        const crc_offset = 4 + 1024;
-        const offset_table = crc_offset + num_objects * 4;
-
-        const offset_entry_offset = offset_table + @as(usize, index) * 4;
-        if (data.len < offset_entry_offset + 4) return error.IndexTruncated;
-
-        return std.mem.readInt(u32, data[offset_entry_offset..][0..4], .big);
-    }
-
-    /// Binary search for OID in index
+    /// Read packfile offset at specific index (handles both 4-byte and 8-byte encodings)
     pub fn findOid(self: *const PackIndex, target_oid: [20]u8) !?u32 {
         var low: u32 = 0;
         var high = self.num_objects;

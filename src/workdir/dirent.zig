@@ -32,20 +32,20 @@ pub fn listDirectory(
     dir_path: []const u8,
 ) ![]DirEntry {
     const dir = Io.Dir.cwd();
-    const subdir = dir.openDir(io, dir_path, .{}) catch |err| {
+    const subdir = dir.openDir(io.*, dir_path, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => return error.DirectoryNotFound,
             error.PermissionDenied => return error.PermissionDenied,
             else => return error.IoError,
         }
     };
-    defer subdir.close(io);
+    defer subdir.close(io.*);
 
-    var entries = std.ArrayList(DirEntry).init(allocator);
-    errdefer entries.deinit();
+    var entries = std.ArrayList(DirEntry).empty;
+    errdefer entries.deinit(allocator);
 
-    var iterator = subdir.iterate(io, .{});
-    while (try iterator.next(io)) |entry| {
+    var iterator = subdir.iterate();
+    while (try iterator.next(io.*)) |entry| {
         const entry_type: DirEntryType = switch (entry.kind) {
             .file => .file,
             .directory => .directory,
@@ -56,14 +56,14 @@ pub fn listDirectory(
         const full_path = try std.mem.concat(allocator, u8, &.{ dir_path, "/", entry.name });
         defer allocator.free(full_path);
 
-        try entries.append(.{
+        try entries.append(allocator, .{
             .name = try allocator.dupe(u8, entry.name),
             .path = full_path,
             .entry_type = entry_type,
         });
     }
 
-    return entries.toOwnedSlice();
+    return entries.toOwnedSlice(allocator);
 }
 
 pub fn walkDirectory(
@@ -71,12 +71,12 @@ pub fn walkDirectory(
     io: *Io,
     dir_path: []const u8,
 ) ![]DirEntry {
-    var all_entries = std.ArrayList(DirEntry).init(allocator);
-    errdefer all_entries.deinit();
+    var all_entries = std.ArrayList(DirEntry).empty;
+    errdefer all_entries.deinit(allocator);
 
     try walkRecursive(allocator, io, dir_path, dir_path, &all_entries);
 
-    return all_entries.toOwnedSlice();
+    return all_entries.toOwnedSlice(allocator);
 }
 
 fn walkRecursive(
@@ -87,11 +87,11 @@ fn walkRecursive(
     results: *std.ArrayList(DirEntry),
 ) !void {
     const dir = Io.Dir.cwd();
-    const subdir = dir.openDir(io, current_path, .{}) catch return;
-    defer subdir.close(io);
+    const subdir = dir.openDir(io.*, current_path, .{}) catch return;
+    defer subdir.close(io.*);
 
-    var iterator = subdir.iterate(io, .{});
-    while (try iterator.next(io)) |entry| {
+    var iterator = subdir.iterate();
+    while (try iterator.next(io.*)) |entry| {
         const entry_type: DirEntryType = switch (entry.kind) {
             .file => .file,
             .directory => .directory,
@@ -102,7 +102,7 @@ fn walkRecursive(
         const full_path = try std.mem.concat(allocator, u8, &.{ current_path, "/", entry.name });
         errdefer allocator.free(full_path);
 
-        try results.append(.{
+        try results.append(allocator, .{
             .name = try allocator.dupe(u8, entry.name),
             .path = full_path,
             .entry_type = entry_type,
@@ -119,16 +119,16 @@ pub fn filterByType(
     entries: []DirEntry,
     entry_type: DirEntryType,
 ) ![]DirEntry {
-    var filtered = std.ArrayList(DirEntry).init(allocator);
-    errdefer filtered.deinit();
+    var filtered = std.ArrayList(DirEntry).empty;
+    errdefer filtered.deinit(allocator);
 
     for (entries) |entry| {
         if (entry.entry_type == entry_type) {
-            try filtered.append(entry);
+            try filtered.append(allocator, entry);
         }
     }
 
-    return filtered.toOwnedSlice();
+    return filtered.toOwnedSlice(allocator);
 }
 
 pub fn countEntries(entries: []DirEntry) struct { files: usize, dirs: usize, symlinks: usize } {
@@ -144,6 +144,95 @@ pub fn countEntries(entries: []DirEntry) struct { files: usize, dirs: usize, sym
     }
 
     return counts;
+}
+
+pub const SymlinkError = error{
+    SymlinkLoop,
+    TargetNotFound,
+    PermissionDenied,
+    IoError,
+};
+
+pub fn readSymlinkTarget(
+    io: *Io,
+    symlink_path: []const u8,
+) ![]u8 {
+    const dir = Io.Dir.cwd();
+    const file = try dir.openFile(io.*, symlink_path, .{});
+    defer file.close(io.*);
+
+    const stat = try file.stat(io.*);
+    const size = @as(usize, @intCast(stat.size));
+
+    const buffer = try std.heap.page_allocator.alloc(u8, size);
+    errdefer std.heap.page_allocator.free(buffer);
+
+    try file.readAllAll(io.*, buffer);
+
+    return buffer;
+}
+
+pub fn detectSymlinkLoop(
+    io: *Io,
+    symlink_path: []const u8,
+    base_path: []const u8,
+) !bool {
+    const target = readSymlinkTarget(io, symlink_path) catch |err| {
+        switch (err) {
+            error.FileNotFound => return false,
+            else => return err,
+        }
+    };
+    defer std.heap.page_allocator.free(target);
+
+    const full_target = if (std.mem.startsWith(u8, target, "/"))
+        target
+    else
+        try std.mem.concat(std.heap.page_allocator, u8, &.{ symlink_path, "/../", target });
+
+    return std.mem.containsAtLeast(u8, full_target, 1, base_path);
+}
+
+pub fn resolveSymlink(
+    io: *Io,
+    symlink_path: []const u8,
+    allocator: std.mem.Allocator,
+) ![]u8 {
+    const target = readSymlinkTarget(io, symlink_path) catch |err| {
+        switch (err) {
+            error.SymlinkLoop => return symlink_path,
+            else => return err,
+        }
+    };
+    defer std.heap.page_allocator.free(target);
+
+    if (std.mem.startsWith(u8, target, "/")) {
+        return try allocator.dupe(u8, target);
+    }
+
+    const parent = std.mem.sliceTo(symlink_path, 0);
+    const last_sep = std.mem.lastIndexOfScalar(u8, parent, '/');
+    const parent_path = if (last_sep) |idx| parent[0..idx] else ".";
+
+    return try std.mem.concat(allocator, u8, &.{ parent_path, "/", target });
+}
+
+pub fn isSymlinkLoop(
+    io: *Io,
+    symlink_path: []const u8,
+    visited: *std.ArrayList([]const u8),
+) !bool {
+    const target = readSymlinkTarget(io, symlink_path) catch return false;
+
+    for (visited.items) |v| {
+        if (std.mem.eql(u8, v, target)) {
+            return true;
+        }
+    }
+
+    try visited.append(try std.heap.page_allocator.dupe(u8, target));
+
+    return false;
 }
 
 test "listDirectory lists directory entries" {

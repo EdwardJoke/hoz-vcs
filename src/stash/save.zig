@@ -4,6 +4,7 @@ const OID = @import("../object/oid.zig").OID;
 
 pub const SaveOptions = struct {
     include_untracked: bool = false,
+    only_untracked: bool = false,
     keep_index: bool = false,
     patch: bool = false,
     message: ?[]const u8 = null,

@@ -73,7 +73,7 @@ pub const Tag = struct {
 
         // Write object
         try buffer.appendSlice("object ");
-        try buffer.appendSlice(self.target.toHex());
+        try buffer.appendSlice(&self.target.toHex());
         try buffer.append('\n');
 
         // Write type
@@ -94,7 +94,7 @@ pub const Tag = struct {
             try buffer.appendSlice(tagger.email);
             try buffer.appendSlice("> ");
             try buffer.appendSlice(try std.fmt.allocPrint(allocator, "{}", .{tagger.timestamp}));
-            try buffer.appendSlice(timezoneToStr(tagger.timezone));
+            try buffer.appendSlice(&timezoneToStr(tagger.timezone));
             try buffer.append('\n');
         }
 
@@ -154,7 +154,7 @@ pub const Tag = struct {
 
             if (std.mem.startsWith(u8, line, "object ")) {
                 const hex = line[7..];
-                target_opt = oid_mod.OID.fromHex(hex);
+                target_opt = try oid_mod.OID.fromHex(hex);
             } else if (std.mem.startsWith(u8, line, "type ")) {
                 const type_str = line[5..];
                 target_type_opt = typeFromStr(type_str);

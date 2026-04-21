@@ -17,6 +17,9 @@ pub usingnamespace @import("bloom.zig");
 pub usingnamespace @import("midx.zig");
 pub usingnamespace @import("fsck.zig");
 pub usingnamespace @import("gc_auto.zig");
+pub usingnamespace @import("arena.zig");
+pub usingnamespace @import("pool.zig");
+pub usingnamespace @import("stream.zig");
 
 test "perf module loads" {
     try std.testing.expect(true);

@@ -15,6 +15,9 @@ pub const binary = @import("binary.zig");
 pub const rename = @import("rename.zig");
 pub const ignore = @import("ignore.zig");
 pub const patch = @import("patch.zig");
+pub const cache = @import("cache.zig");
+pub const parallel = @import("parallel.zig");
+pub const large_file = @import("large_file.zig");
 
 pub const DiffEngine = struct {
     allocator: std.mem.Allocator,

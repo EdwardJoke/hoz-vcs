@@ -1,0 +1,259 @@
+//! CPU Profiler - CPU usage profiling for performance analysis
+//!
+//! Provides CPU profiling capabilities to identify hotspots,
+//! measure CPU time per function, and analyze performance bottlenecks.
+
+const std = @import("std");
+const builtin = @import("builtin");
+
+pub const CPUProfileConfig = struct {
+    sample_interval_ns: u64 = 1000000,
+    max_stack_depth: u32 = 32,
+    enable_function_timing: bool = true,
+    track_idle: bool = false,
+};
+
+pub const CPUProfileStats = struct {
+    total_samples: u64 = 0,
+    samples_in_user_mode: u64 = 0,
+    samples_in_kernel_mode: u64 = 0,
+    total_cpu_time_ns: u64 = 0,
+    profiling_time_ns: u64 = 0,
+};
+
+pub const StackFrame = struct {
+    address: usize,
+    function_name: ?[]const u8,
+    file_name: ?[]const u8,
+    line_number: u32,
+};
+
+pub const ProfileSample = struct {
+    timestamp: i64,
+    stack_trace: []StackFrame,
+    cpu_time_ns: u64,
+    is_kernel: bool,
+};
+
+pub const FunctionProfile = struct {
+    name: []const u8,
+    address: usize,
+    hit_count: u64,
+    total_cpu_time_ns: u64,
+    min_cpu_time_ns: u64,
+    max_cpu_time_ns: u64,
+    avg_cpu_time_ns: u64,
+    samples: []usize,
+};
+
+pub const CPUProfile = struct {
+    allocator: std.mem.Allocator,
+    config: CPUProfileConfig,
+    samples: std.ArrayList(ProfileSample),
+    function_profiles: std.AutoArrayHashMap([]const u8, FunctionProfile),
+    stats: CPUProfileStats,
+    enabled: bool,
+    start_time: i64,
+
+    pub fn init(allocator: std.mem.Allocator, config: CPUProfileConfig) CPUProfile {
+        return .{
+            .allocator = allocator,
+            .config = config,
+            .samples = std.ArrayList(ProfileSample).init(allocator),
+            .function_profiles = std.AutoArrayHashMap([]const u8, FunctionProfile).init(allocator),
+            .stats = .{},
+            .enabled = false,
+            .start_time = 0,
+        };
+    }
+
+    pub fn deinit(self: *CPUProfile) void {
+        for (self.samples.items) |sample| {
+            self.allocator.free(sample.stack_trace);
+        }
+        self.samples.deinit();
+
+        var iter = self.function_profiles.iterator();
+        while (iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.samples);
+        }
+        self.function_profiles.deinit();
+    }
+
+    pub fn start(self: *CPUProfile) void {
+        self.enabled = true;
+        self.start_time = std.time.timestamp();
+    }
+
+    pub fn stop(self: *CPUProfile) void {
+        self.enabled = false;
+        self.stats.profiling_time_ns = @as(u64, @intCast(std.time.timestamp() - self.start_time)) * 1000000000;
+    }
+
+    pub fn recordSample(self: *CPUProfile, stack_trace: []StackFrame, cpu_time_ns: u64, is_kernel: bool) !void {
+        if (!self.enabled) return;
+
+        const sample = ProfileSample{
+            .timestamp = std.time.timestamp(),
+            .stack_trace = stack_trace,
+            .cpu_time_ns = cpu_time_ns,
+            .is_kernel = is_kernel,
+        };
+
+        try self.samples.append(sample);
+        self.stats.total_samples += 1;
+        self.stats.total_cpu_time_ns += cpu_time_ns;
+
+        if (is_kernel) {
+            self.stats.samples_in_kernel_mode += 1;
+        } else {
+            self.stats.samples_in_user_mode += 1;
+        }
+
+        for (stack_trace) |frame| {
+            if (frame.function_name) |name| {
+                try self.recordFunctionHit(name, cpu_time_ns);
+            }
+        }
+    }
+
+    fn recordFunctionHit(self: *CPUProfile, name: []const u8, cpu_time_ns: u64) !void {
+        if (self.function_profiles.getEntry(name)) |entry| {
+            entry.value_ptr.hit_count += 1;
+            entry.value_ptr.total_cpu_time_ns += cpu_time_ns;
+            entry.value_ptr.min_cpu_time_ns = @min(entry.value_ptr.min_cpu_time_ns, cpu_time_ns);
+            entry.value_ptr.max_cpu_time_ns = @max(entry.value_ptr.max_cpu_time_ns, cpu_time_ns);
+        } else {
+            const name_copy = try self.allocator.dupe(u8, name);
+            errdefer self.allocator.free(name_copy);
+
+            try self.function_profiles.put(name_copy, .{
+                .name = name_copy,
+                .address = 0,
+                .hit_count = 1,
+                .total_cpu_time_ns = cpu_time_ns,
+                .min_cpu_time_ns = cpu_time_ns,
+                .max_cpu_time_ns = cpu_time_ns,
+                .avg_cpu_time_ns = cpu_time_ns,
+                .samples = &.{},
+            });
+        }
+    }
+
+    pub fn getTopFunctions(self: *CPUProfile, count: usize) ![]const FunctionProfile {
+        var sorted = std.ArrayList(FunctionProfile).init(self.allocator);
+        defer sorted.deinit();
+
+        var iter = self.function_profiles.iterator();
+        while (iter.next()) |entry| {
+            try sorted.append(entry.value_ptr.*);
+        }
+
+        std.mem.sort(FunctionProfile, sorted.items, {}, struct {
+            fn less(_: void, a: FunctionProfile, b: FunctionProfile) bool {
+                return a.total_cpu_time_ns > b.total_cpu_time_ns;
+            }
+        }.less);
+
+        return sorted.items[0..@min(count, sorted.items.len)];
+    }
+
+    pub fn getStats(self: *const CPUProfile) CPUProfileStats {
+        return self.stats;
+    }
+
+    pub fn getSampleCount(self: *const CPUProfile) u64 {
+        return @as(u64, @intCast(self.samples.items.len));
+    }
+
+    pub fn getFunctionCount(self: *const CPUProfile) usize {
+        return self.function_profiles.count();
+    }
+
+    pub fn printSummary(self: *CPUProfile) !void {
+        const stdout = std.io.getStdOut().writer();
+        try stdout.print("\n=== CPU Profile Summary ===\n", .{});
+        try stdout.print("Total samples: {d}\n", .{self.stats.total_samples});
+        try stdout.print("User mode samples: {d}\n", .{self.stats.samples_in_user_mode});
+        try stdout.print("Kernel mode samples: {d}\n", .{self.stats.samples_in_kernel_mode});
+        try stdout.print("Total CPU time: {d} ns\n", .{self.stats.total_cpu_time_ns});
+        try stdout.print("Functions profiled: {d}\n", .{self.getFunctionCount()});
+
+        try stdout.print("\n=== Top Functions by CPU Time ===\n", .{});
+        const top = try self.getTopFunctions(10);
+        try stdout.print("{:<30} {:>12} {:>15}\n", .{"Function", "Hits", "Total Time(ns)"});
+        try stdout.print("{:<30} {:>12} {:>15}\n", .{"--------", "----", "------------"});
+
+        for (top) |func| {
+            try stdout.print("{:<30} {:>12} {:>15}\n", .{
+                func.name,
+                func.hit_count,
+                func.total_cpu_time_ns,
+            });
+        }
+    }
+
+    pub fn enable(self: *CPUProfile) void {
+        self.enabled = true;
+    }
+
+    pub fn disable(self: *CPUProfile) void {
+        self.enabled = false;
+    }
+
+    pub fn reset(self: *CPUProfile) void {
+        for (self.samples.items) |sample| {
+            self.allocator.free(sample.stack_trace);
+        }
+        self.samples.clearRetainingCapacity();
+
+        var iter = self.function_profiles.iterator();
+        while (iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.samples);
+        }
+        self.function_profiles.clearRetainingCapacity();
+
+        self.stats = .{};
+    }
+};
+
+test "CPUProfileConfig default" {
+    const config = CPUProfileConfig{};
+    try std.testing.expectEqual(@as(u64, 1000000), config.sample_interval_ns);
+    try std.testing.expectEqual(@as(u32, 32), config.max_stack_depth);
+    try std.testing.expect(config.enable_function_timing);
+}
+
+test "CPUProfileStats init" {
+    const stats = CPUProfileStats{};
+    try std.testing.expectEqual(@as(u64, 0), stats.total_samples);
+    try std.testing.expectEqual(@as(u64, 0), stats.total_cpu_time_ns);
+}
+
+test "StackFrame" {
+    const frame = StackFrame{
+        .address = 0x401000,
+        .function_name = "main",
+        .file_name = "main.zig",
+        .line_number = 42,
+    };
+    try std.testing.expectEqual(@as(usize, 0x401000), frame.address);
+    try std.testing.expectEqual(@as(u32, 42), frame.line_number);
+}
+
+test "FunctionProfile" {
+    const profile = FunctionProfile{
+        .name = "test_func",
+        .address = 0x401000,
+        .hit_count = 100,
+        .total_cpu_time_ns = 5000000,
+        .min_cpu_time_ns = 40000,
+        .max_cpu_time_ns = 60000,
+        .avg_cpu_time_ns = 50000,
+        .samples = &.{},
+    };
+    try std.testing.expectEqual(@as(u64, 100), profile.hit_count);
+    try std.testing.expectEqual(@as(u64, 5000000), profile.total_cpu_time_ns);
+}
