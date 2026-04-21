@@ -1,5 +1,9 @@
 # Hoz - Git-Compatible Version Control System
 
+## Important
+
+This project is in active development and now just a toy, please do not use it in production.
+
 A full-featured Git implementation in Zig 0.16.0, built for type safety and performance. 
 Hoz is the next generation of Git-compatible version control with a clean, modern codebase.
 
