@@ -61,7 +61,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: hoz-${{ matrix.os }}-${{ matrix.arch }}
+          name: hoz-${{ steps.version.outputs.VERSION }}-${{ matrix.os }}-${{ matrix.arch }}
           path: |
             *.tar.gz
             *.zip
