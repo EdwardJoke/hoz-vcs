@@ -78,13 +78,16 @@ jobs:
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
+        with:
+          pattern: hoz-*
+          merge-multiple: true
 
       - name: Create release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            *.tar.gz
-            *.zip
+            hoz-*.tar.gz
+            hoz-*.zip
           draft: false
           prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
         env:
