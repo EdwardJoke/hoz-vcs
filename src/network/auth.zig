@@ -51,16 +51,93 @@ pub const CredentialHelperResult = struct {
 };
 
 pub fn runCredentialHelper(allocator: std.mem.Allocator, io: Io, protocol: []const u8, host: []const u8) !?CredentialHelperResult {
-    _ = io;
-    _ = protocol;
-    _ = host;
-    return null;
+    var child = std.process.spawn(io, .{
+        .argv = &.{ "git", "credential", "fill" },
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    }) catch {
+        return null;
+    };
+
+    const request = try std.fmt.allocPrint(allocator, "protocol={s}\nhost={s}\n\n", .{ protocol, host });
+    defer allocator.free(request);
+
+    try child.stdin.?.writeStreamingAll(io, request);
+    child.stdin.?.close();
+
+    const term = try child.wait(io);
+    switch (term) {
+        .exited => |code| {
+            if (code != 0) return null;
+        },
+        else => return null,
+    }
+
+    var stdout_file = child.stdout.?;
+    defer stdout_file.close(io);
+
+    var buf: [4096]u8 = undefined;
+    var result = std.ArrayList(u8).empty;
+    errdefer result.deinit(allocator);
+
+    var reader = stdout_file.reader(io, &buf);
+    while (true) {
+        const n = try reader.read();
+        if (n == 0) break;
+        try result.appendSlice(allocator, buf[0..n]);
+    }
+
+    const output = try result.toOwnedSlice(allocator);
+
+    var username: ?[]const u8 = null;
+    var password: ?[]u8 = null;
+
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, "username=")) {
+            username = try allocator.dupe(u8, line[9..]);
+        } else if (std.mem.startsWith(u8, line, "password=")) {
+            password = try allocator.dupe(u8, line[9..]);
+        }
+    }
+
+    if (username == null and password == null) {
+        allocator.free(output);
+        return null;
+    }
+
+    return CredentialHelperResult{
+        .username = username,
+        .password = password,
+    };
 }
 
 pub fn getEnvCredential(allocator: std.mem.Allocator, protocol: []const u8, host: []const u8) ?CredentialHelperResult {
-    _ = allocator;
-    _ = protocol;
     _ = host;
+    if (std.mem.eql(u8, protocol, "https")) {
+        if (std.process.getEnvVarOwned(allocator, "HTTPS_PROXY")) |proxy| {
+            defer allocator.free(proxy);
+            return CredentialHelperResult{
+                .username = null,
+                .password = null,
+            };
+        }
+    } else if (std.mem.eql(u8, protocol, "http")) {
+        if (std.process.getEnvVarOwned(allocator, "HTTP_PROXY")) |proxy| {
+            defer allocator.free(proxy);
+            return CredentialHelperResult{
+                .username = null,
+                .password = null,
+            };
+        }
+    }
+    if (std.process.getEnvVarOwned(allocator, "GIT_ASKPASS")) |_| {
+        return CredentialHelperResult{
+            .username = null,
+            .password = null,
+        };
+    }
     return null;
 }
 

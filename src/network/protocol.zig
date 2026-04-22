@@ -47,6 +47,7 @@ pub const ProtocolV2Capability = enum {
 };
 
 pub const ProtocolCapabilities = struct {
+    version: u8 = 0,
     multi_ack: bool = false,
     multi_ack_detailed: bool = false,
     sideband: bool = false,
@@ -123,6 +124,7 @@ fn parseGitUrl(url: []const u8) !ProtocolOptions {
 
 pub fn parseCapabilities(line: []const u8) ProtocolCapabilities {
     var caps = ProtocolCapabilities{};
+
     var iter = std.mem.splitScalar(u8, line, ' ');
     while (iter.next()) |cap| {
         if (std.mem.startsWith(u8, cap, "agent=")) {
@@ -151,8 +153,17 @@ pub fn parseCapabilities(line: []const u8) ProtocolCapabilities {
             // handled by client preference
         } else if (std.mem.eql(u8, cap, "thin-pack")) {
             // handled by client preference
+        } else if (std.mem.eql(u8, cap, "ls_refs")) {
+            caps.version = 2;
+        } else if (std.mem.eql(u8, cap, "fetch_spec")) {
+            caps.version = 2;
         }
     }
+
+    if (caps.version == 0 and (caps.sideband or caps.multi_ack)) {
+        caps.version = 1;
+    }
+
     return caps;
 }
 

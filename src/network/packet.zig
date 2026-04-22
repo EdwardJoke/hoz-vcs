@@ -40,8 +40,9 @@ pub const PacketEncoder = struct {
         var result = try self.allocator.alloc(u8, MIN_PACKET_LINE_LENGTH + data.len);
         errdefer self.allocator.free(result);
 
-        const total_len = MIN_PACKET_LINE_LENGTH + data.len;
-        std.fmt.bufPrintSentinel(result[0..4], 0, "{x}", .{total_len});
+        const total_len: u16 = @as(u16, @intCast(MIN_PACKET_LINE_LENGTH + data.len));
+        const printed = try std.fmt.bufPrint(result[0..4], "{x:0>4}", .{total_len});
+        _ = printed;
         @memcpy(result[MIN_PACKET_LINE_LENGTH..], data);
         return result;
     }
@@ -73,7 +74,7 @@ pub const PacketEncoder = struct {
 
 pub const PacketDecoder = struct {
     allocator: std.mem.Allocator,
-    buffer: []u8,
+    buffer: []const u8,
     offset: usize,
 
     pub fn init(allocator: std.mem.Allocator) PacketDecoder {
@@ -183,9 +184,9 @@ pub const PacketDecoder = struct {
 
     fn parseHexNibble(byte: u8) !u4 {
         return switch (byte) {
-            '0'...'9' => @as(u4, byte - '0'),
-            'a'...'f' => @as(u4, byte - 'a' + 10),
-            'A'...'F' => @as(u4, byte - 'A' + 10),
+            '0'...'9' => @as(u4, @intCast(byte - '0')),
+            'a'...'f' => @as(u4, @intCast(byte - 'a' + 10)),
+            'A'...'F' => @as(u4, @intCast(byte - 'A' + 10)),
             else => PacketDecodeError.InvalidLengthPrefix,
         };
     }

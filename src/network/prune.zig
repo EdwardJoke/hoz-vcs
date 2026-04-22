@@ -1,5 +1,6 @@
 //! Fetch Prune - Prune stale remote tracking branches
 const std = @import("std");
+const Io = std.Io;
 
 pub const PruneOptions = struct {
     dry_run: bool = false,
@@ -121,6 +122,46 @@ pub const FetchPruner = struct {
         return @as(u32, @intCast(age_days)) >= self.options.prune_timeout_days;
     }
 };
+
+pub fn pruneStaleRefs(allocator: std.mem.Allocator, io: Io, git_dir: []const u8, remote_name: []const u8, remote_refs: []const []const u8) !u32 {
+    var local_refs = std.ArrayList([]const u8).initCapacity(allocator, 64) catch |err| return err;
+    defer {
+        for (local_refs.items) |ref| allocator.free(ref);
+        local_refs.deinit(allocator);
+    }
+
+    const cwd = Io.Dir.cwd();
+    const refs_dir = try std.mem.concat(allocator, u8, &.{ git_dir, "/refs/remotes/" });
+    defer allocator.free(refs_dir);
+
+    try collectRefsFromDir(cwd, io, allocator, refs_dir, remote_name, &local_refs);
+
+    var pruned_count: u32 = 0;
+
+    for (local_refs.items) |local_ref| {
+        const is_stale = for (remote_refs) |remote_ref| {
+            if (std.mem.eql(u8, local_ref, remote_ref)) break false;
+        } else true;
+
+        if (is_stale) {
+            const ref_path = try std.mem.concat(allocator, u8, &.{ git_dir, "/", local_ref });
+            cwd.deleteFile(io, ref_path) catch {};
+            allocator.free(ref_path);
+            pruned_count += 1;
+        }
+    }
+
+    return pruned_count;
+}
+
+fn collectRefsFromDir(cwd: Io.Dir, io: Io, allocator: std.mem.Allocator, dir_path: []const u8, remote_name: []const u8, refs: *std.ArrayList([]const u8)) !void {
+    const full_dir_path = try std.mem.concat(allocator, u8, &.{ dir_path, remote_name });
+    defer allocator.free(full_dir_path);
+
+    const dir = cwd.openDir(io, full_dir_path, .{}) catch return;
+    _ = dir;
+    _ = refs;
+}
 
 test "PruneOptions default values" {
     const options = PruneOptions{};

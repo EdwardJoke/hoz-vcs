@@ -63,7 +63,7 @@ pub const Clone = struct {
     }
 
     fn cloneBare(self: *Clone, url: []const u8, path: []const u8, options: CloneOptions) !void {
-        var cloner = BareCloner.init(self.allocator);
+        var cloner = BareCloner.init(self.allocator, self.io);
         cloner.cloneWithOptions(url, path, options) catch |err| {
             try self.output.errorMessage("Clone failed: {}", .{err});
             return;
@@ -72,7 +72,7 @@ pub const Clone = struct {
     }
 
     fn cloneWorkingDir(self: *Clone, url: []const u8, path: []const u8, options: CloneOptions) !void {
-        var cloner = WorkingDirCloner.init(self.allocator);
+        var cloner = WorkingDirCloner.init(self.allocator, self.io);
         cloner.cloneWithOptions(url, path, options) catch |err| {
             try self.output.errorMessage("Clone failed: {}", .{err});
             return;
@@ -163,7 +163,7 @@ test "CloneFlags default" {
 }
 
 test "parseCloneArgs basic" {
-    const result = parseCloneArgs(&.{ "https://github.com/user/repo.git" });
+    const result = parseCloneArgs(&.{"https://github.com/user/repo.git"});
     try std.testing.expectEqualStrings("https://github.com/user/repo.git", result.url);
     try std.testing.expect(result.path == null);
 }

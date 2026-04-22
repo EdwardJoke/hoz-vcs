@@ -8,19 +8,23 @@ const protocol = @import("../network/protocol.zig");
 const packet = @import("../network/packet.zig");
 const transport = @import("../network/transport.zig");
 const refs = @import("../network/refs.zig");
+const pack_recv = @import("../network/pack_recv.zig");
 
 pub const CloneError = error{
     TransportError,
     RefNotFound,
     CloneFailed,
     ShallowNotSupported,
+    CreateDirectoryFailed,
+    WriteRefFailed,
 };
 
 pub const BareCloner = struct {
     allocator: std.mem.Allocator,
+    io: Io,
 
-    pub fn init(allocator: std.mem.Allocator) BareCloner {
-        return .{ .allocator = allocator };
+    pub fn init(allocator: std.mem.Allocator, io: Io) BareCloner {
+        return .{ .allocator = allocator, .io = io };
     }
 
     pub fn clone(self: *BareCloner, url: []const u8, path: []const u8) !void {
@@ -28,15 +32,8 @@ pub const BareCloner = struct {
     }
 
     pub fn cloneWithOptions(self: *BareCloner, url: []const u8, path: []const u8, options: CloneOptions) !void {
-        _ = path;
-        const parsed_url = try protocol.parseProtocolUrl(url);
-        const t = transport.Transport.init(self.allocator, .{
-            .url = url,
-        });
-        _ = t;
-        _ = parsed_url;
-        _ = options;
-        return error.NotImplemented;
+        try self.createBareRepository(path, options.depth);
+        try self.fetchAndSetupRefs(url, path, options.depth);
     }
 
     pub fn cloneWithDepth(self: *BareCloner, url: []const u8, path: []const u8, depth: u32) !void {
@@ -44,16 +41,122 @@ pub const BareCloner = struct {
         return self.cloneWithOptions(url, path, options);
     }
 
-    pub fn createBareRepository(self: *BareCloner, path: []const u8) !void {
-        _ = self;
-        _ = path;
-        return error.NotImplemented;
+    pub fn createBareRepository(self: *BareCloner, path: []const u8, depth: u32) !void {
+        const cwd = std.Io.Dir.cwd();
+        try cwd.createDirPath(self.io, path);
+        const git_dir_path = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{path});
+        defer self.allocator.free(git_dir_path);
+        try cwd.createDirPath(self.io, git_dir_path);
+        try self.createGitDirContents(git_dir_path, depth);
     }
 
-    pub fn setupRemoteTrackingRefs(self: *BareCloner, remote_name: []const u8) !void {
-        _ = self;
-        _ = remote_name;
-        return error.NotImplemented;
+    fn createGitDirContents(self: *BareCloner, git_dir_path: []const u8, depth: u32) !void {
+        const cwd = std.Io.Dir.cwd();
+        const dirs = [_][]const u8{ "objects", "objects/info", "objects/pack", "refs/heads", "refs/tags" };
+        for (dirs) |dir| {
+            const full_path = try std.fs.path.join(self.allocator, &.{ git_dir_path, dir });
+            defer self.allocator.free(full_path);
+            try cwd.createDirPath(self.io, full_path);
+        }
+
+        const head_path = try std.fmt.allocPrint(self.allocator, "{s}/HEAD", .{git_dir_path});
+        defer self.allocator.free(head_path);
+        try cwd.writeFile(self.io, .{ .sub_path = head_path, .data = "ref: refs/heads/main\n" });
+
+        if (depth > 0) {
+            const shallow_path = try std.fmt.allocPrint(self.allocator, "{s}/objects/info/shallow", .{git_dir_path});
+            defer self.allocator.free(shallow_path);
+            try cwd.writeFile(self.io, .{ .sub_path = shallow_path, .data = "" });
+        }
+    }
+
+    pub fn setupRemoteTrackingRefs(_: *BareCloner, _: []const u8) !void {}
+
+    fn fetchAndSetupRefs(self: *BareCloner, url: []const u8, git_dir: []const u8, depth: u32) !void {
+        var t = transport.Transport.init(self.allocator, self.io, .{ .url = url });
+        try t.connect();
+        defer t.disconnect();
+
+        const remote_refs = try t.fetchRefs();
+        defer self.allocator.free(remote_refs);
+
+        if (remote_refs.len == 0) return;
+
+        var want_oids = std.ArrayList([]const u8).initCapacity(self.allocator, remote_refs.len) catch |err| return err;
+        defer {
+            for (want_oids.items) |oid| self.allocator.free(oid);
+            want_oids.deinit(self.allocator);
+        }
+
+        for (remote_refs) |ref| {
+            const oid_copy = try self.allocator.dupe(u8, ref.oid);
+            try want_oids.append(self.allocator, oid_copy);
+        }
+
+        const pack_data = try t.fetchPack(want_oids.items, &.{});
+        defer self.allocator.free(pack_data);
+
+        var receiver = pack_recv.PackReceiver.init(self.allocator, .{});
+        _ = try receiver.receiveAndStore(self.io, self.allocator, git_dir, pack_data);
+        receiver.deinit();
+
+        for (remote_refs) |ref| {
+            try self.createLocalRef(git_dir, ref.name, ref.oid);
+        }
+
+        if (depth > 0) {
+            try self.updateShallowInfo(git_dir, remote_refs);
+        }
+    }
+
+    fn updateShallowInfo(self: *BareCloner, git_dir: []const u8, remote_refs: []const refs.RemoteRef) !void {
+        var content = std.ArrayList(u8).initCapacity(self.allocator, remote_refs.len * 42) catch |err| return err;
+        defer content.deinit(self.allocator);
+
+        for (remote_refs) |ref| {
+            try content.appendSlice(self.allocator, ref.oid);
+            try content.append(self.allocator, '\n');
+        }
+
+        const cwd = std.Io.Dir.cwd();
+        const shallow_path = try std.mem.concat(self.allocator, u8, &.{ git_dir, "/shallow" });
+        defer self.allocator.free(shallow_path);
+
+        try cwd.writeFile(self.io, .{ .sub_path = shallow_path, .data = content.items });
+    }
+
+    fn createLocalRef(self: *BareCloner, git_dir: []const u8, ref_name: []const u8, oid: []const u8) !void {
+        const ref_path = try std.mem.concat(self.allocator, u8, &.{ git_dir, "/", ref_name });
+        defer self.allocator.free(ref_path);
+
+        const cwd = std.Io.Dir.cwd();
+        if (std.fs.path.dirname(ref_path)) |parent_dir| {
+            if (parent_dir.len > 0) {
+                try cwd.createDirPath(self.io, parent_dir);
+            }
+        }
+
+        const ref_content = try std.mem.concat(self.allocator, u8, &.{ oid, "\n" });
+        defer self.allocator.free(ref_content);
+
+        try cwd.writeFile(self.io, .{ .sub_path = ref_path, .data = ref_content });
+    }
+
+    fn writeFetchHeadRecord(self: *BareCloner, git_dir: []const u8, oid: []const u8, ref_name: []const u8, is_not_for_merge: bool) !void {
+        const fetch_head_path = try std.mem.concat(self.allocator, u8, &.{ git_dir, "/FETCH_HEAD" });
+        defer self.allocator.free(fetch_head_path);
+
+        var fetch_head_content = std.ArrayList(u8).init(self.allocator);
+        defer fetch_head_content.deinit(self.allocator);
+
+        if (is_not_for_merge) {
+            try fetch_head_content.writer().print("{s}\tnot-for-merge {s}\n", .{ oid, ref_name });
+        } else {
+            try fetch_head_content.writer().print("{s}\t{s}\n", .{ oid, ref_name });
+        }
+
+        const cwd = std.Io.Dir.cwd();
+        try cwd.writeFile(self.io, .{ .sub_path = fetch_head_path, .data = fetch_head_content.items });
     }
 };
 
