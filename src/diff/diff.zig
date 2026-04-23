@@ -95,7 +95,6 @@ pub const DiffEngine = struct {
     }
 
     fn splitIntoLines(self: *DiffEngine, text: []const u8) ![]const []const u8 {
-        _ = self;
         var lines = std.ArrayList([]const u8).init(self.allocator);
         errdefer lines.deinit();
 
@@ -134,13 +133,16 @@ pub const DiffEngine = struct {
             const content: []const u8 = switch (edit.operation) {
                 .equal => if (edit.old_line > 0 and edit.old_line <= old_lines.len)
                     old_lines[edit.old_line - 1]
-                else "",
+                else
+                    "",
                 .delete => if (edit.old_line > 0 and edit.old_line <= old_lines.len)
                     old_lines[edit.old_line - 1]
-                else "",
+                else
+                    "",
                 .insert => if (edit.new_line > 0 and edit.new_line <= new_lines.len)
                     new_lines[edit.new_line - 1]
-                else "",
+                else
+                    "",
             };
 
             try lines.append(.{
@@ -167,7 +169,7 @@ const std = @import("std");
 
 test "DiffEngine init" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
     var engine = DiffEngine.init(gpa.allocator());
     defer engine.deinit();
@@ -177,57 +179,57 @@ test "DiffEngine init" {
 
 test "DiffEngine diffText no changes" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
     var engine = DiffEngine.init(gpa.allocator());
     defer engine.deinit();
 
-    const result = try engine.diffText("hello\nworld\n", "hello\nworld\n");
-    defer result.deinit();
+    const diff_result = try engine.diffText("hello\nworld\n", "hello\nworld\n");
+    defer diff_result.deinit();
 
-    try std.testing.expectEqual(@as(usize, 0), result.stats.insertions);
-    try std.testing.expectEqual(@as(usize, 0), result.stats.deletions);
+    try std.testing.expectEqual(@as(usize, 0), diff_result.stats.insertions);
+    try std.testing.expectEqual(@as(usize, 0), diff_result.stats.deletions);
 }
 
 test "DiffEngine diffText with changes" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
     var engine = DiffEngine.init(gpa.allocator());
     defer engine.deinit();
 
-    const result = try engine.diffText("hello\nworld\n", "hello\nzig\nworld\n");
-    defer result.deinit();
+    const diff_result = try engine.diffText("hello\nworld\n", "hello\nzig\nworld\n");
+    defer diff_result.deinit();
 
-    try std.testing.expect(result.stats.insertions > 0 or result.stats.deletions > 0);
+    try std.testing.expect(diff_result.stats.insertions > 0 or diff_result.stats.deletions > 0);
 }
 
 test "DiffEngine detectBinary text" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
     var engine = DiffEngine.init(gpa.allocator());
     defer engine.deinit();
 
-    const result = engine.detectBinary("hello world");
-    try std.testing.expectEqual(false, result.is_binary);
+    const binary_result = engine.detectBinary("hello world");
+    try std.testing.expectEqual(false, binary_result.is_binary);
 }
 
 test "DiffEngine detectBinary binary" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
     var engine = DiffEngine.init(gpa.allocator());
     defer engine.deinit();
 
     const content: [10]u8 = .{ 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01 };
-    const result = engine.detectBinary(&content);
-    try std.testing.expectEqual(true, result.is_binary);
+    const binary_result = engine.detectBinary(&content);
+    try std.testing.expectEqual(true, binary_result.is_binary);
 }
 
 test "DiffEngine setOptions" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
     var engine = DiffEngine.init(gpa.allocator());
     defer engine.deinit();

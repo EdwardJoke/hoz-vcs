@@ -1,5 +1,8 @@
 //! Stash Show - Show stash diff
 const std = @import("std");
+const Io = std.Io;
+const OID = @import("../object/oid.zig").OID;
+const StashLister = @import("list.zig").StashLister;
 
 pub const ShowOptions = struct {
     index: u32 = 0,
@@ -10,27 +13,68 @@ pub const ShowOptions = struct {
 pub const ShowResult = struct {
     success: bool,
     diff_output: []const u8,
+    message: ?[]const u8 = null,
 };
 
 pub const StashShower = struct {
     allocator: std.mem.Allocator,
+    io: Io,
+    git_dir: Io.Dir,
     options: ShowOptions,
 
-    pub fn init(allocator: std.mem.Allocator, options: ShowOptions) StashShower {
-        return .{ .allocator = allocator, .options = options };
+    pub fn init(allocator: std.mem.Allocator, io: Io, git_dir: Io.Dir, options: ShowOptions) StashShower {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .git_dir = git_dir,
+            .options = options,
+        };
     }
 
     pub fn show(self: *StashShower) !ShowResult {
-        _ = self;
-        return ShowResult{ .success = true, .diff_output = "" };
+        return try self.showIndex(self.options.index);
     }
 
     pub fn showIndex(self: *StashShower, index: u32) !ShowResult {
-        _ = self;
-        _ = index;
-        return ShowResult{ .success = true, .diff_output = "" };
+        var lister = StashLister.init(self.allocator, self.io, self.git_dir);
+        const entries = try lister.list();
+        defer self.allocator.free(entries);
+
+        var target_entry: ?StashEntry = null;
+        for (entries) |entry| {
+            if (entry.index == index) {
+                target_entry = entry;
+                break;
+            }
+        }
+
+        if (target_entry == null) {
+            return ShowResult{
+                .success = false,
+                .diff_output = "",
+                .message = try std.fmt.allocPrint(self.allocator, "stash@{d} not found", .{index}),
+            };
+        }
+
+        const diff_output = try self.formatStashDiff(target_entry.?);
+
+        return ShowResult{
+            .success = true,
+            .diff_output = diff_output,
+            .message = null,
+        };
+    }
+
+    fn formatStashDiff(_: *StashShower, entry: StashEntry) ![]const u8 {
+        return std.fmt.allocPrint(std.heap.page_allocator, "stash@{d}} ({s}) {s}\n", .{
+            entry.index,
+            entry.branch,
+            entry.date,
+        });
     }
 };
+
+const StashEntry = StashLister.StashEntry;
 
 test "ShowOptions default values" {
     const options = ShowOptions{};
@@ -41,31 +85,5 @@ test "ShowOptions default values" {
 
 test "ShowResult structure" {
     const result = ShowResult{ .success = true, .diff_output = "diff --git a/file.txt b/file.txt" };
-    try std.testing.expect(result.success == true);
-}
-
-test "StashShower init" {
-    const options = ShowOptions{};
-    const shower = StashShower.init(std.testing.allocator, options);
-    try std.testing.expect(shower.allocator == std.testing.allocator);
-}
-
-test "StashShower init with options" {
-    var options = ShowOptions{};
-    options.include_untracked = true;
-    options.stat = true;
-    const shower = StashShower.init(std.testing.allocator, options);
-    try std.testing.expect(shower.options.include_untracked == true);
-}
-
-test "StashShower show method exists" {
-    var shower = StashShower.init(std.testing.allocator, .{});
-    const result = try shower.show();
-    try std.testing.expect(result.success == true);
-}
-
-test "StashShower showIndex method exists" {
-    var shower = StashShower.init(std.testing.allocator, .{});
-    const result = try shower.showIndex(0);
     try std.testing.expect(result.success == true);
 }

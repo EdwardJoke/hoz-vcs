@@ -71,7 +71,7 @@ pub const CommitBuilder = struct {
         return content.toOwnedSlice();
     }
 
-    pub fn computeOid(self: *CommitBuilder, content: []const u8) !OID {
+    pub fn computeOid(_: *CommitBuilder, content: []const u8) !OID {
         return OID.oidFromContent(content);
     }
 };
@@ -93,7 +93,6 @@ test "CommitBuilder init" {
     };
 
     var builder = CommitBuilder.init(std.testing.allocator, options);
-    defer _ = builder;
 
     try std.testing.expect(builder.options.tree_oid.isZero());
 }
@@ -108,7 +107,7 @@ test "CommitBuilder build creates valid commit" {
 
     const tree_oid = try OID.fromHex("abc123def456789012345678901234567890abcd");
 
-    var options = CommitOptions{
+    const options = CommitOptions{
         .tree_oid = tree_oid,
         .author = author,
         .committer = author,
@@ -116,7 +115,6 @@ test "CommitBuilder build creates valid commit" {
     };
 
     var builder = CommitBuilder.init(std.testing.allocator, options);
-    defer _ = builder;
 
     const commit = try builder.build();
     try std.testing.expectEqual(tree_oid, commit.tree);
@@ -141,7 +139,6 @@ test "CommitBuilder serialize produces valid format" {
     };
 
     var builder = CommitBuilder.init(std.testing.allocator, options);
-    defer _ = builder;
 
     const commit = try builder.build();
     const serialized = try builder.serialize(commit);

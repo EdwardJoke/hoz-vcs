@@ -162,7 +162,7 @@ test "BinaryDetection init" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var detector = BinaryDetection.init(gpa.allocator());
+    const detector = BinaryDetection.init(gpa.allocator());
     try std.testing.expect(detector.allocator == gpa.allocator());
 }
 
@@ -170,7 +170,7 @@ test "BinaryDetection text file" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var detector = BinaryDetection.init(gpa.allocator());
+    const detector = BinaryDetection.init(gpa.allocator());
     const content = "Hello, World!\nThis is a text file.\n";
 
     const result = detector.detect(content);
@@ -182,7 +182,7 @@ test "BinaryDetection binary file" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var detector = BinaryDetection.init(gpa.allocator());
+    const detector = BinaryDetection.init(gpa.allocator());
     const content = [_]u8{ 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00 };
 
     const result = detector.detect(&content);
@@ -194,7 +194,7 @@ test "BinaryDetection empty content" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var detector = BinaryDetection.init(gpa.allocator());
+    const detector = BinaryDetection.init(gpa.allocator());
     const content: []const u8 = &.{};
 
     const result = detector.detect(content);
@@ -206,7 +206,7 @@ test "BinaryDetection high null byte ratio" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var detector = BinaryDetection.init(gpa.allocator());
+    const detector = BinaryDetection.init(gpa.allocator());
     var content: [100]u8 = .{0} ** 100;
     content[0] = 'h';
     content[1] = 'i';

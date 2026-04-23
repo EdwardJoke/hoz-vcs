@@ -190,9 +190,9 @@ pub const UnifiedDiff = struct {
 
 test "UnifiedDiff init" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
-    var diff = UnifiedDiff.init(gpa.allocator());
+    const diff = UnifiedDiff.init(gpa.allocator());
     try std.testing.expect(diff.allocator == gpa.allocator());
     try std.testing.expectEqual(@as(usize, 3), diff.config.context_lines);
 }

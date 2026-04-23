@@ -187,7 +187,6 @@ pub const DateIndex = struct {
             const timestamp = entry.value_ptr.*;
             const bucket_key = self.getBucketKey(timestamp);
             if (self.buckets.get(bucket_key)) |bucket| {
-                const idx = bucket.items;
                 for (0..bucket.items.len) |i| {
                     if (std.mem.eql(u8, &bucket.items[i].bytes, &oid.bytes)) {
                         _ = bucket.swapRemove(i);

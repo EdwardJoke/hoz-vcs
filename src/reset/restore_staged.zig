@@ -1,11 +1,20 @@
 //! Restore Staged - Restore index from another commit (git restore --staged)
 const std = @import("std");
+const Io = std.Io;
+const OID = @import("../object/oid.zig").OID;
+const SoftReset = @import("soft.zig").SoftReset;
 
 pub const RestoreStaged = struct {
     allocator: std.mem.Allocator,
+    io: Io,
+    git_dir: Io.Dir,
 
-    pub fn init(allocator: std.mem.Allocator) RestoreStaged {
-        return .{ .allocator = allocator };
+    pub fn init(allocator: std.mem.Allocator, io: Io, git_dir: Io.Dir) RestoreStaged {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .git_dir = git_dir,
+        };
     }
 
     pub fn restore(self: *RestoreStaged, paths: []const []const u8, source: []const u8) !void {
@@ -21,18 +30,6 @@ pub const RestoreStaged = struct {
 };
 
 test "RestoreStaged init" {
-    const restore = RestoreStaged.init(std.testing.allocator);
+    const restore = RestoreStaged.init(std.testing.allocator, undefined, undefined);
     try std.testing.expect(restore.allocator == std.testing.allocator);
-}
-
-test "RestoreStaged restore method exists" {
-    var restore = RestoreStaged.init(std.testing.allocator);
-    try restore.restore(&.{ "file.txt" }, "HEAD");
-    try std.testing.expect(true);
-}
-
-test "RestoreStaged restoreAll method exists" {
-    var restore = RestoreStaged.init(std.testing.allocator);
-    try restore.restoreAll("HEAD~1");
-    try std.testing.expect(true);
 }

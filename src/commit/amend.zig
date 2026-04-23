@@ -36,17 +36,17 @@ pub const Amender = struct {
 };
 
 test "Amender init" {
-    var odb: ODB = undefined;
-    var ref_store: RefStore = undefined;
-    var amender = Amender.init(std.testing.allocator, &odb, &ref_store);
+    const odb: ODB = undefined;
+    const ref_store: RefStore = undefined;
+    const amender = Amender.init(std.testing.allocator, &odb, &ref_store);
 
     try std.testing.expect(amender.allocator == std.testing.allocator);
 }
 
 test "Amender init with odbs and refstore" {
-    var odb: ODB = undefined;
-    var ref_store: RefStore = undefined;
-    var amender = Amender.init(std.testing.allocator, &odb, &ref_store);
+    const odb: ODB = undefined;
+    const ref_store: RefStore = undefined;
+    const amender = Amender.init(std.testing.allocator, &odb, &ref_store);
 
     try std.testing.expect(amender.odb == &odb);
     try std.testing.expect(amender.ref_store == &ref_store);

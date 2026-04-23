@@ -27,7 +27,6 @@ pub const BranchDeleter = struct {
 
     pub fn delete(self: *BranchDeleter, name: []const u8) !DeleteResult {
         _ = self;
-        _ = name;
         return DeleteResult{
             .name = name,
             .deleted = true,
@@ -76,24 +75,24 @@ test "BranchDeleter init" {
 }
 
 test "BranchDeleter init with options" {
-    var options = DeleteOptions{};
-    options.force = true;
-    const deleter = BranchDeleter.init(std.testing.allocator, options);
+    var opts = DeleteOptions{};
+    opts.force = true;
+    const deleter = BranchDeleter.init(std.testing.allocator, opts);
 
     try std.testing.expect(deleter.options.force == true);
 }
 
 test "BranchDeleter delete method exists" {
-    var options = DeleteOptions{};
-    var deleter = BranchDeleter.init(std.testing.allocator, options);
+    const options = DeleteOptions{};
+    const deleter = BranchDeleter.init(std.testing.allocator, options);
 
     const result = try deleter.delete("feature-branch");
     try std.testing.expectEqualStrings("feature-branch", result.name);
 }
 
 test "BranchDeleter deleteMultiple method exists" {
-    var options = DeleteOptions{};
-    var deleter = BranchDeleter.init(std.testing.allocator, options);
+    const options = DeleteOptions{};
+    const deleter = BranchDeleter.init(std.testing.allocator, options);
 
     const result = try deleter.deleteMultiple(&.{ "branch1", "branch2" });
     _ = result;
@@ -101,8 +100,8 @@ test "BranchDeleter deleteMultiple method exists" {
 }
 
 test "BranchDeleter isMerged method exists" {
-    var options = DeleteOptions{};
-    var deleter = BranchDeleter.init(std.testing.allocator, options);
+    const options = DeleteOptions{};
+    const deleter = BranchDeleter.init(std.testing.allocator, options);
 
     const merged = try deleter.isMerged("feature", "main");
     try std.testing.expect(merged == true);

@@ -26,8 +26,6 @@ pub const BranchRenamer = struct {
 
     pub fn rename(self: *BranchRenamer, old_name: []const u8, new_name: []const u8) !RenameResult {
         _ = self;
-        _ = old_name;
-        _ = new_name;
         return RenameResult{
             .old_name = old_name,
             .new_name = new_name,
@@ -37,7 +35,6 @@ pub const BranchRenamer = struct {
 
     pub fn renameCurrent(self: *BranchRenamer, new_name: []const u8) !RenameResult {
         _ = self;
-        _ = new_name;
         return RenameResult{
             .old_name = "HEAD",
             .new_name = new_name,
@@ -72,24 +69,24 @@ test "BranchRenamer init" {
 }
 
 test "BranchRenamer init with options" {
-    var options = RenameOptions{};
-    options.force = true;
-    const renamer = BranchRenamer.init(std.testing.allocator, options);
+    var opts = RenameOptions{};
+    opts.force = true;
+    const renamer = BranchRenamer.init(std.testing.allocator, opts);
 
     try std.testing.expect(renamer.options.force == true);
 }
 
 test "BranchRenamer rename method exists" {
-    var options = RenameOptions{};
-    var renamer = BranchRenamer.init(std.testing.allocator, options);
+    const options = RenameOptions{};
+    const renamer = BranchRenamer.init(std.testing.allocator, options);
 
     const result = try renamer.rename("old-name", "new-name");
     try std.testing.expectEqualStrings("old-name", result.old_name);
 }
 
 test "BranchRenamer renameCurrent method exists" {
-    var options = RenameOptions{};
-    var renamer = BranchRenamer.init(std.testing.allocator, options);
+    const options = RenameOptions{};
+    const renamer = BranchRenamer.init(std.testing.allocator, options);
 
     const result = try renamer.renameCurrent("new-branch-name");
     try std.testing.expectEqualStrings("new-branch-name", result.new_name);

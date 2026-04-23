@@ -46,7 +46,6 @@ pub const PatchFormat = struct {
     }
 
     fn stripPath(self: *const PatchFormat, path: []const u8) []const u8 {
-        _ = self;
         var count = self.strip_level;
         var start: usize = 0;
 
@@ -74,7 +73,6 @@ pub const PatchFormat = struct {
         is_deleted: bool,
         is_renamed: bool,
     ) !void {
-        _ = self;
         try writer.print("diff --git {s}{s} {s}{s}\n", .{ self.remove_prefix, old_path, self.add_prefix, new_path });
 
         if (is_new) {
@@ -114,7 +112,7 @@ pub const PatchFormat = struct {
         _ = self;
         const width: usize = 60;
         const path_len = @min(path.len, 40);
-        const padding = width - path_len - 10;
+        _ = width - path_len - 10;
 
         try writer.print(" {s}", .{path[0..path_len]});
         var i: usize = path_len;
@@ -146,16 +144,16 @@ pub const PatchFormat = struct {
 
 test "PatchFormat init" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
-    var patch = PatchFormat.init(gpa.allocator());
+    const patch = PatchFormat.init(gpa.allocator());
     try std.testing.expectEqual(@as(usize, 0), patch.strip_level);
     try std.testing.expectEqual(true, patch.include_headers);
 }
 
 test "PatchFormat strip_path" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
     var patch = PatchFormat.init(gpa.allocator());
     patch.strip_level = 1;
@@ -166,7 +164,7 @@ test "PatchFormat strip_path" {
 
 test "PatchFormat strip_path_deep" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
     var patch = PatchFormat.init(gpa.allocator());
     patch.strip_level = 2;
@@ -177,7 +175,7 @@ test "PatchFormat strip_path_deep" {
 
 test "PatchFormat strip_path_single" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
     var patch = PatchFormat.init(gpa.allocator());
     patch.strip_level = 3;
@@ -188,9 +186,9 @@ test "PatchFormat strip_path_single" {
 
 test "PatchFormat prefixes" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
-    var patch = PatchFormat.init(gpa.allocator());
+    const patch = PatchFormat.init(gpa.allocator());
     try std.testing.expectEqualStrings("a/", patch.remove_prefix);
     try std.testing.expectEqualStrings("b/", patch.add_prefix);
 }

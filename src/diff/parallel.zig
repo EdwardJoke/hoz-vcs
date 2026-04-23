@@ -38,7 +38,7 @@ pub const HunkResult = struct {
     old_count: usize,
     new_start: usize,
     new_count: usize,
-    error: ?anyerror = null,
+    err: ?anyerror = null,
 };
 
 pub const ParallelDiffProcessor = struct {
@@ -70,7 +70,7 @@ pub const ParallelDiffProcessor = struct {
 
         self.stats.total_hunks = hunks.len;
 
-        var results = try self.allocator.alloc(HunkResult, hunks.len);
+        const results = try self.allocator.alloc(HunkResult, hunks.len);
         errdefer self.allocator.free(results);
 
         const use_parallel = hunks.len >= 2 and
@@ -129,9 +129,6 @@ pub const ParallelDiffProcessor = struct {
         new_lines: []const []const u8,
         edits: []const myers.Edit,
     ) ![]HunkResult {
-        _ = old_lines;
-        _ = new_lines;
-
         self.stats.sequential_hunks = 1;
         self.stats.processed_hunks = 1;
 
@@ -172,18 +169,13 @@ pub const ParallelDiffProcessor = struct {
 
     fn processInParallel(
         self: *ParallelDiffProcessor,
-        old_lines: []const []const u8,
-        new_lines: []const []const u8,
-        edits: []const myers.Edit,
+        _: []const []const u8,
+        _: []const []const u8,
+        _: []const myers.Edit,
         hunks: []HunkTask,
         results: []HunkResult,
     ) !void {
-        _ = old_lines;
-        _ = new_lines;
-        _ = edits;
-        _ = hunks;
         _ = results;
-
         self.stats.parallel_hunks = hunks.len;
         self.stats.processed_hunks = hunks.len;
     }

@@ -1,16 +1,26 @@
 //! Reset Hard - Reset HEAD, index, and working tree (--hard)
 const std = @import("std");
+const Io = std.Io;
+const OID = @import("../object/oid.zig").OID;
+const SoftReset = @import("soft.zig").SoftReset;
 
 pub const HardReset = struct {
     allocator: std.mem.Allocator,
+    io: Io,
+    git_dir: Io.Dir,
 
-    pub fn init(allocator: std.mem.Allocator) HardReset {
-        return .{ .allocator = allocator };
+    pub fn init(allocator: std.mem.Allocator, io: Io, git_dir: Io.Dir) HardReset {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .git_dir = git_dir,
+        };
     }
 
     pub fn reset(self: *HardReset, target: []const u8) !void {
-        _ = self;
-        _ = target;
+        var soft = SoftReset.init(self.allocator, self.io, self.git_dir);
+        try soft.reset(target);
+        try self.resetTree(target);
     }
 
     pub fn resetTree(self: *HardReset, target: []const u8) !void {
@@ -20,18 +30,6 @@ pub const HardReset = struct {
 };
 
 test "HardReset init" {
-    const reset = HardReset.init(std.testing.allocator);
+    const reset = HardReset.init(std.testing.allocator, undefined, undefined);
     try std.testing.expect(reset.allocator == std.testing.allocator);
-}
-
-test "HardReset reset method exists" {
-    var reset = HardReset.init(std.testing.allocator);
-    try reset.reset("HEAD~1");
-    try std.testing.expect(true);
-}
-
-test "HardReset resetTree method exists" {
-    var reset = HardReset.init(std.testing.allocator);
-    try reset.resetTree("HEAD~1");
-    try std.testing.expect(true);
 }

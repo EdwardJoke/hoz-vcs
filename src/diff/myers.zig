@@ -124,7 +124,8 @@ pub const MyersDiff = struct {
 
                 var x = v;
                 while (x > 0 and x < old_len and x - k < new_len and
-                    std.mem.eql(u8, old_text[@intCast(x - 1)], new_text[@intCast(x - k - 1)])) : (x += 1) {}
+                    std.mem.eql(u8, old_text[@intCast(x - 1)], new_text[@intCast(x - k - 1)])) : (x += 1)
+                {}
 
                 if (d % 2 == 1) {
                     previous_trace[trace_idx] = x;
@@ -154,8 +155,8 @@ pub const MyersDiff = struct {
         self: *MyersDiff,
         old_text: []const []const u8,
         new_text: []const []const u8,
-        v_old: isize,
-        v_new: isize,
+        _: isize,
+        _: isize,
         max: isize,
     ) ![]const Edit {
         var edits = std.ArrayList(Edit).init(self.allocator);
@@ -166,7 +167,7 @@ pub const MyersDiff = struct {
         var d = max;
 
         while (d > 0 or old_idx > 0 or new_idx > 0) {
-            const k = old_idx - new_idx;
+            _ = old_idx - new_idx;
 
             const is_delete = old_idx > 0 and (new_idx == 0 or d <= max - old_idx);
             const is_insert = new_idx > 0 and (old_idx == 0 or d <= max - new_idx);
@@ -214,17 +215,23 @@ pub const MyersDiff = struct {
                 d = 0;
             }
 
-            const trace_idx = if (d % 2 == 1) 1 else 0;
             const other_idx = if (d % 2 == 1) 0 else 1;
 
             if (d > 0 and old_idx > 0 and new_idx > 0 and
-                std.mem.eql(u8, old_text[@intCast(old_idx - 1)], new_text[@intCast(new_idx - 1)])) {
+                std.mem.eql(u8, old_text[@intCast(old_idx - 1)], new_text[@intCast(new_idx - 1)]))
+            {
                 try edits.append(.{ .operation = .equal, .old_line = @intCast(old_idx), .new_line = @intCast(new_idx) });
                 old_idx -= 1;
                 new_idx -= 1;
             } else if (d > 0 and old_idx > 0 and (new_idx == 0 or
-                (d < traces.len and traces[@intCast(d - 1)][other_idx].items.len > @intCast(@max(0, @intCast(old_idx - 1 + @intCast(d) - 1))) and
-                traces[@intCast(d - 1)][other_idx].items[@intCast(@max(0, @intCast(old_idx - 1 + @intCast(d) - 1)))] >= old_idx - 1))) {
+                blk: {
+                    const idx: isize = old_idx - 1 + @as(isize, @intCast(d)) - 1;
+                    const capped: isize = if (idx < 0) 0 else idx;
+                    const usize_idx: usize = @intCast(capped);
+                    break :blk (d < traces.len and traces[@intCast(d - 1)][other_idx].items.len > usize_idx and
+                        traces[@intCast(d - 1)][other_idx].items[usize_idx] >= @as(usize, @intCast(old_idx - 1)));
+                }))
+            {
                 try edits.append(.{ .operation = .delete, .old_line = @intCast(old_idx), .new_line = 0 });
                 old_idx -= 1;
                 d -= 1;
@@ -250,9 +257,9 @@ pub const MyersDiff = struct {
 
 test "MyersDiff init" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
-    var diff = MyersDiff.init(gpa.allocator());
+    const diff = MyersDiff.init(gpa.allocator());
     try std.testing.expect(diff.allocator == gpa.allocator());
 }
 
@@ -325,8 +332,8 @@ test "MyersDiff replace" {
     defer _ = gpa.deinit();
 
     var diff = MyersDiff.init(gpa.allocator());
-    const old_text: []const []const u8 = &.{ "hello" };
-    const new_text: []const []const u8 = &.{ "world" };
+    const old_text: []const []const u8 = &.{"hello"};
+    const new_text: []const []const u8 = &.{"world"};
 
     const edits = try diff.diff(old_text, new_text);
     defer diff.allocator.free(edits);

@@ -61,7 +61,7 @@ pub const ConflictDetector = struct {
     }
 
     pub fn detectRenameAddConflict(
-        self: *ConflictDetector,
+        _: *ConflictDetector,
         old_path: []const u8,
         new_path: []const u8,
         ancestor_oid: ?OID,

@@ -34,7 +34,6 @@ pub const IgnoreFilter = struct {
     }
 
     fn strippedEqual(self: *const IgnoreFilter, a: []const u8, b: []const u8) bool {
-        _ = self;
         const stripped_a = self.stripWhitespace(a);
         const stripped_b = self.stripWhitespace(b);
         return std.mem.eql(u8, stripped_a, stripped_b);

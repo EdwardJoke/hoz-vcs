@@ -501,10 +501,181 @@ pub const Transport = struct {
         return std.fmt.parseInt(u16, code_str, 10) catch 0;
     }
 
-    pub fn pushRefs(self: *Transport, updates: []const RefUpdate) !void {
-        _ = self;
+    pub fn pushRefs(self: *Transport, updates: []const RefUpdate, pack_data: ?[]const u8) !void {
+        return switch (self.transport_type) {
+            .https, .http => self.pushRefsHttp(updates, pack_data),
+            .ssh => self.pushRefsSsh(updates, pack_data),
+            else => error.NotImplemented,
+        };
+    }
+
+    fn pushRefsHttp(self: *Transport, updates: []const RefUpdate, pack_data: ?[]const u8) !void {
+        const parsed = try parseHttpUrl(self.opts.url);
+        const service = "git-receive-pack";
+
+        // First, get the ref advertisement to check capabilities
+        const refs_url = try std.fmt.allocPrint(self.allocator, "{s}/info/refs?service={s}", .{ parsed.full_path, service });
+        defer self.allocator.free(refs_url);
+
+        const refs_response = try self.httpGet(refs_url, self.opts.auth);
+        defer self.allocator.free(refs_response);
+
+        // Parse capabilities from refs response
+        var caps = protocol.ProtocolCapabilities{};
+        var decoder = packet.PacketDecoder.init(self.allocator);
+        decoder.setBuffer(refs_response);
+
+        while (try decoder.next()) |line| {
+            if (line.data.len > 0 and !std.mem.startsWith(u8, line.data, "# service=")) {
+                // Parse ref line for capabilities
+                const space_idx = std.mem.indexOf(u8, line.data, " ");
+                if (space_idx) |idx| {
+                    const caps_str = line.data[idx + 1 ..];
+                    caps = protocol.parseCapabilities(caps_str);
+                }
+            }
+        }
+
+        // Build push request body
+        var request_body = try std.ArrayList(u8).initCapacity(self.allocator, 4096);
+        defer request_body.deinit(self.allocator);
+
+        var encoder = packet.PacketEncoder.init(self.allocator);
+
+        // Send capabilities
+        const cap_line = try self.buildPushCapabilities(&caps);
+        defer self.allocator.free(cap_line);
+        const encoded_caps = try encoder.encode(cap_line);
+        defer self.allocator.free(encoded_caps);
+        try request_body.appendSlice(self.allocator, encoded_caps);
+
+        // Send ref updates
+        for (updates) |update| {
+            const update_line = try std.fmt.allocPrint(
+                self.allocator,
+                "{s} {s} {s}",
+                .{ update.old_oid, update.new_oid, update.name },
+            );
+            defer self.allocator.free(update_line);
+            const encoded = try encoder.encode(update_line);
+            defer self.allocator.free(encoded);
+            try request_body.appendSlice(self.allocator, encoded);
+        }
+
+        // Flush to end commands
+        const flush = encoder.encodeFlush();
+        try request_body.appendSlice(self.allocator, flush);
+
+        // Append packfile if provided
+        if (pack_data) |pack| {
+            try request_body.appendSlice(self.allocator, pack);
+        }
+
+        // Send POST request
+        const post_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ parsed.full_path, service });
+        defer self.allocator.free(post_path);
+
+        const host = try self.allocator.dupe(u8, parsed.host);
+        defer self.allocator.free(host);
+
+        var address = try std.Io.net.IpAddress.resolve(self.io, host, parsed.port);
+        var socket = try address.connect(self.io, .{ .mode = .stream });
+        errdefer socket.close(self.io);
+
+        var request_buf: [8192]u8 = undefined;
+        var request_writer = std.Io.Writer.fixed(&request_buf);
+
+        try request_writer.print(
+            "POST {s} HTTP/1.1\r\nHost: {s}\r\nUser-Agent: hoz/1.0\r\nAccept: */*\r\nContent-Type: application/x-git-receive-pack-request\r\nContent-Length: {d}\r\n",
+            .{ post_path, parsed.host, request_body.items.len },
+        );
+
+        if (self.opts.auth) |token| {
+            try request_writer.writeAll("Authorization: Bearer ");
+            try request_writer.writeAll(token);
+            try request_writer.writeAll("\r\n");
+        }
+
+        try request_writer.writeAll("\r\n");
+
+        var socket_writer = socket.writer(self.io, &request_buf);
+        try socket_writer.interface.writeAll(request_writer.buffer[0..request_writer.end]);
+        try socket_writer.interface.flush();
+
+        try socket.socket.send(self.io, &address, request_body.items);
+
+        // Read response
+        var response_buf: [65536]u8 = undefined;
+        var total_read: usize = 0;
+
+        while (true) {
+            const msg = try socket.socket.receive(self.io, response_buf[total_read..]);
+            if (msg.data.len == 0) break;
+            total_read += msg.data.len;
+            if (total_read >= response_buf.len) break;
+        }
+
+        socket.close(self.io);
+
+        const body_start = std.mem.indexOf(u8, response_buf[0..total_read], "\r\n\r\n");
+        if (body_start == null) {
+            return error.InvalidHttpResponse;
+        }
+
+        const status_line = response_buf[0..body_start.?];
+        const status_code = parseHttpStatusCode(status_line);
+
+        if (status_code == 401) {
+            return error.HttpUnauthorized;
+        }
+
+        if (status_code != 200) {
+            return error.HttpError;
+        }
+
+        // Parse response for errors
+        const response_body = response_buf[body_start.? + 4 .. total_read];
+        var resp_decoder = packet.PacketDecoder.init(self.allocator);
+        resp_decoder.setBuffer(response_body);
+
+        while (try resp_decoder.next()) |line| {
+            if (std.mem.startsWith(u8, line.data, "ng ")) {
+                // Push rejected
+                return error.PushRejected;
+            }
+        }
+    }
+
+    fn pushRefsSsh(self: *Transport, updates: []const RefUpdate, pack_data: ?[]const u8) !void {
+        const parsed = try parseSshUrl(self.opts.url);
+
+        var ssh_transport = SshTransport.init(self.allocator, self.io, parsed.host);
+        if (parsed.username) |user| {
+            ssh_transport.setUsername(user);
+        }
+        if (parsed.port != 22) {
+            ssh_transport.setPort(parsed.port);
+        }
+
+        // Build push command
+        var cmd_buffer = try std.ArrayList(u8).initCapacity(self.allocator, 4096);
+        defer cmd_buffer.deinit(self.allocator);
+
+        try cmd_buffer.appendSlice(self.allocator, "git-receive-pack ");
+        try cmd_buffer.appendSlice(self.allocator, parsed.path);
+
+        // TODO: Implement SSH push with packfile
         _ = updates;
+        _ = pack_data;
+
         return error.NotImplemented;
+    }
+
+    fn buildPushCapabilities(self: *Transport, caps: *const protocol.ProtocolCapabilities) ![]const u8 {
+        _ = self;
+        _ = caps;
+        // Build capability string for push
+        return try std.fmt.allocPrint(std.heap.page_allocator, "report-status side-band-64k agent=hoz/1.0", .{});
     }
 };
 

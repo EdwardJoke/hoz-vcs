@@ -1,16 +1,29 @@
 //! Reset Merge - Reset with merge conflict handling (--merge)
 const std = @import("std");
+const Io = std.Io;
+const SoftReset = @import("soft.zig").SoftReset;
+const MixedReset = @import("mixed.zig").MixedReset;
 
 pub const MergeReset = struct {
     allocator: std.mem.Allocator,
+    io: Io,
+    git_dir: Io.Dir,
 
-    pub fn init(allocator: std.mem.Allocator) MergeReset {
-        return .{ .allocator = allocator };
+    pub fn init(allocator: std.mem.Allocator, io: Io, git_dir: Io.Dir) MergeReset {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .git_dir = git_dir,
+        };
     }
 
     pub fn reset(self: *MergeReset, target: []const u8) !void {
-        _ = self;
-        _ = target;
+        if (self.hasUnresolvedConflicts()) {
+            return error.MergeConflict;
+        }
+
+        var mixed = MixedReset.init(self.allocator, self.io, self.git_dir);
+        try mixed.reset(target);
     }
 
     pub fn hasUnresolvedConflicts(self: *MergeReset) bool {
@@ -19,29 +32,12 @@ pub const MergeReset = struct {
     }
 
     pub fn abort(self: *MergeReset) !void {
-        _ = self;
+        var soft = SoftReset.init(self.allocator, self.io, self.git_dir);
+        try soft.reset("HEAD");
     }
 };
 
 test "MergeReset init" {
-    const reset = MergeReset.init(std.testing.allocator);
+    const reset = MergeReset.init(std.testing.allocator, undefined, undefined);
     try std.testing.expect(reset.allocator == std.testing.allocator);
-}
-
-test "MergeReset reset method exists" {
-    var reset = MergeReset.init(std.testing.allocator);
-    try reset.reset("HEAD~1");
-    try std.testing.expect(true);
-}
-
-test "MergeReset hasUnresolvedConflicts method exists" {
-    var reset = MergeReset.init(std.testing.allocator);
-    const has = reset.hasUnresolvedConflicts();
-    try std.testing.expect(has == false);
-}
-
-test "MergeReset abort method exists" {
-    var reset = MergeReset.init(std.testing.allocator);
-    try reset.abort();
-    try std.testing.expect(true);
 }

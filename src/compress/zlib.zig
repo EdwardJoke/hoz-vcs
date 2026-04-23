@@ -17,7 +17,7 @@ pub const Zlib = struct {
             if (offset >= data.len) return error.CompressionFailed;
 
             while (offset < data.len) {
-                const byte = data[offset];
+                _ = data[offset];
                 offset += 1;
 
                 if (offset + 1 >= data.len) return error.CompressionFailed;

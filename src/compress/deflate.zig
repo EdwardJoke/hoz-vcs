@@ -7,10 +7,10 @@ pub fn store(data: []const u8, allocator: std.mem.Allocator) ![]u8 {
     const maxusize = std.math.maxInt(usize);
 
     const blocks = @divTrunc(data.len, 65535) + 1;
-    const (overhead, overflow1) = @mulWithOverflow(blocks, 5);
+    const overhead, const overflow1 = @mulWithOverflow(blocks, 5);
     if (overflow1 != 0) return error.InputTooLarge;
 
-    const (output_len, overflow2) = @addWithOverflow(data.len, overhead);
+    const output_len, const overflow2 = @addWithOverflow(data.len, overhead);
     if (overflow2 != 0) return error.InputTooLarge;
 
     if (output_len > maxusize - 4) return error.InputTooLarge;

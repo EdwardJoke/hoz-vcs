@@ -58,7 +58,7 @@ pub const BranchLister = struct {
         }
 
         const prefix = if (self.options.all) "" else "refs/heads/";
-        const refs = self.ref_store.list(prefix) catch |_| &.{};
+        const refs = self.ref_store.list(prefix) catch @as([]const Ref, &.{});
 
         for (refs) |ref| {
             const full_name = ref.name;
@@ -66,7 +66,7 @@ pub const BranchLister = struct {
                 continue;
             }
 
-            var branch_name = full_name["refs/heads/".len..];
+            const branch_name = full_name["refs/heads/".len..];
 
             if (self.options.pattern) |pattern| {
                 if (!self.matchesPattern(branch_name, pattern)) {
@@ -106,7 +106,7 @@ pub const BranchLister = struct {
 
         self.head_target = self.getHeadTarget();
 
-        const refs = self.ref_store.list("refs/heads/") catch |_| &.{};
+        const refs = self.ref_store.list("refs/heads/") catch @as([]const Ref, &.{});
 
         for (refs) |ref| {
             const full_name = ref.name;
@@ -177,7 +177,7 @@ pub const BranchLister = struct {
         };
     }
 
-    fn getBranchInfoFromRef(self: *BranchLister, ref: Ref, is_current: bool) !BranchInfo {
+    fn getBranchInfoFromRef(_: *BranchLister, ref: Ref, is_current: bool) !BranchInfo {
         const full_name = ref.name;
         const branch_name = if (std.mem.startsWith(u8, full_name, "refs/heads/"))
             full_name["refs/heads/".len..]
@@ -262,7 +262,7 @@ test "BranchLister init with options" {
 
 test "BranchLister list method exists" {
     var ref_store: RefStore = undefined;
-    var options = ListOptions{};
+    const options = ListOptions{};
     var lister = BranchLister.init(std.testing.allocator, &ref_store, options);
 
     const result = try lister.list();
@@ -271,7 +271,7 @@ test "BranchLister list method exists" {
 
 test "BranchLister listCurrent method exists" {
     var ref_store: RefStore = undefined;
-    var options = ListOptions{};
+    const options = ListOptions{};
     var lister = BranchLister.init(std.testing.allocator, &ref_store, options);
 
     const result = try lister.listCurrent();
@@ -281,7 +281,7 @@ test "BranchLister listCurrent method exists" {
 
 test "BranchLister filterBranches method exists" {
     var ref_store: RefStore = undefined;
-    var options = ListOptions{};
+    const options = ListOptions{};
     var lister = BranchLister.init(std.testing.allocator, &ref_store, options);
 
     const result = try lister.filterBranches("feature/*");

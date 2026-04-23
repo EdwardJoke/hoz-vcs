@@ -30,8 +30,6 @@ pub const BranchCreator = struct {
 
     pub fn create(self: *BranchCreator, name: []const u8, oid: OID) !CreateResult {
         _ = self;
-        _ = name;
-        _ = oid;
         return CreateResult{
             .name = name,
             .oid = oid,
@@ -41,7 +39,6 @@ pub const BranchCreator = struct {
 
     pub fn createFromRef(self: *BranchCreator, name: []const u8, start_ref: []const u8) !CreateResult {
         _ = self;
-        _ = name;
         _ = start_ref;
         return CreateResult{
             .name = name,

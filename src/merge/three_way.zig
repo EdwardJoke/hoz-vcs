@@ -119,12 +119,45 @@ pub const ThreeWayMerger = struct {
         };
     }
 
-    pub fn mergeBlobs(self: *ThreeWayMerger, ancestor_oid: OID, ours_oid: OID, theirs_oid: OID) !ThreeWayResult {
-        _ = self;
-        _ = ancestor_oid;
-        _ = ours_oid;
-        _ = theirs_oid;
-        return ThreeWayResult{ .success = true, .has_conflicts = false, .chunks = &.{} };
+    pub fn mergeBlobs(self: *ThreeWayMerger, io: std.Io, git_dir: std.Io.Dir, ancestor_oid: OID, ours_oid: OID, theirs_oid: OID) !ThreeWayResult {
+        const allocator = self.allocator;
+
+        const ancestor_content = try self.readBlobContent(io, git_dir, ancestor_oid);
+        defer allocator.free(ancestor_content);
+
+        const ours_content = try self.readBlobContent(io, git_dir, ours_oid);
+        defer allocator.free(ours_content);
+
+        const theirs_content = try self.readBlobContent(io, git_dir, theirs_oid);
+        defer allocator.free(theirs_content);
+
+        return try self.merge(ancestor_content, ours_content, theirs_content);
+    }
+
+    fn readBlobContent(self: *ThreeWayMerger, io: std.Io, git_dir: std.Io.Dir, oid: OID) ![]const u8 {
+        const hex = oid.toHex();
+        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
+        defer self.allocator.free(obj_path);
+
+        const content = git_dir.readFileAlloc(io, obj_path, self.allocator, .limited(65536)) catch {
+            return error.BlobNotFound;
+        };
+
+        const decompressed = try decompressZlib(self.allocator, content);
+        defer self.allocator.free(decompressed);
+
+        const parsed = try self.stripBlobHeader(decompressed);
+        return parsed;
+    }
+
+    fn decompressZlib(allocator: std.mem.Allocator, compressed: []const u8) ![]const u8 {
+        const decompressed = try std.compress.zlib.decompress(allocator, compressed);
+        return decompressed;
+    }
+
+    fn stripBlobHeader(self: *ThreeWayMerger, data: []const u8) ![]const u8 {
+        const null_pos = std.mem.indexOf(u8, data, "\x00") orelse return data;
+        return data[null_pos + 1 ..];
     }
 };
 

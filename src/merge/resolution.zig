@@ -6,7 +6,7 @@ pub const ResolutionStrategy = enum {
     theirs,
     accept_ours,
     accept_theirs,
-    union,
+    union_merge,
     concat,
 };
 
@@ -31,7 +31,6 @@ pub const ConflictResolver = struct {
 
     pub fn resolve(self: *ConflictResolver, path: []const u8) !ResolutionResult {
         _ = self;
-        _ = path;
         return ResolutionResult{ .resolved = true, .path = path, .strategy_used = .ours };
     }
 

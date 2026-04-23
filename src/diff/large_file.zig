@@ -82,8 +82,6 @@ pub const LargeFileDiffProcessor = struct {
         new_text: []const u8,
         diff_result: *result.DiffResult,
     ) !void {
-        _ = self;
-
         const old_lines = try self.splitIntoLines(old_text);
         defer self.allocator.free(old_lines);
         const new_lines = try self.splitIntoLines(new_text);
@@ -121,9 +119,9 @@ pub const LargeFileDiffProcessor = struct {
         new_text: []const u8,
         diff_result: *result.DiffResult,
     ) !void {
-        var old_chunks = try self.createChunks(old_text);
+        const old_chunks = try self.createChunks(old_text);
         defer self.disposeChunks(old_chunks);
-        var new_chunks = try self.createChunks(new_text);
+        const new_chunks = try self.createChunks(new_text);
         defer self.disposeChunks(new_chunks);
 
         var all_edits = std.ArrayList(myers.Edit).init(self.allocator);
@@ -239,7 +237,6 @@ pub const LargeFileDiffProcessor = struct {
     }
 
     fn disposeChunks(self: *LargeFileDiffProcessor, chunks: []DiffChunk) void {
-        _ = self;
         self.allocator.free(chunks);
     }
 
@@ -269,10 +266,6 @@ pub const LargeFileDiffProcessor = struct {
         old_lines: []const []const u8,
         new_lines: []const []const u8,
     ) ![]const result.Hunk {
-        _ = self;
-        _ = old_lines;
-        _ = new_lines;
-
         if (edits.len == 0) {
             return &.{};
         }
@@ -355,13 +348,16 @@ pub const LargeFileDiffProcessor = struct {
             const content: []const u8 = switch (edit.operation) {
                 .equal => if (edit.old_line > 0 and edit.old_line <= old_lines.len)
                     old_lines[edit.old_line - 1]
-                else "",
+                else
+                    "",
                 .delete => if (edit.old_line > 0 and edit.old_line <= old_lines.len)
                     old_lines[edit.old_line - 1]
-                else "",
+                else
+                    "",
                 .insert => if (edit.new_line > 0 and edit.new_line <= new_lines.len)
                     new_lines[edit.new_line - 1]
-                else "",
+                else
+                    "",
             };
 
             try lines.append(.{
@@ -408,7 +404,7 @@ test "LargeFileDiffProcessor init" {
 }
 
 test "LargeFileDiffProcessor needsStreaming" {
-    var processor = LargeFileDiffProcessor.init(std.testing.allocator, .{ .streaming_threshold = 1024 });
+    const processor = LargeFileDiffProcessor.init(std.testing.allocator, .{ .streaming_threshold = 1024 });
 
     try std.testing.expect(!processor.needsStreaming("small", "small"));
     try std.testing.expect(processor.needsStreaming("a" ** 2000, "b" ** 2000));
@@ -460,10 +456,10 @@ test "LargeFileDiffProcessor processLargeFile standard mode" {
         .streaming_threshold = 100_000,
     });
 
-    const result = try processor.processLargeFile("hello\n", "hello\nworld\n");
-    defer result.deinit();
+    const diff_result = try processor.processLargeFile("hello\n", "hello\nworld\n");
+    defer diff_result.deinit();
 
-    try std.testing.expect(result.stats.files_changed > 0 or result.stats.insertions > 0);
+    try std.testing.expect(diff_result.stats.files_changed > 0 or diff_result.stats.insertions > 0);
 }
 
 test "LargeFileDiffProcessor processLargeFile streaming mode" {
@@ -482,7 +478,7 @@ test "LargeFileDiffProcessor processLargeFile streaming mode" {
 }
 
 test "LargeFileDiffProcessor getStats" {
-    var processor = LargeFileDiffProcessor.init(std.testing.allocator, .{});
+    const processor = LargeFileDiffProcessor.init(std.testing.allocator, .{});
     const stats = processor.getStats();
 
     try std.testing.expectEqual(@as(u64, 0), stats.total_bytes_processed);

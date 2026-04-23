@@ -154,7 +154,7 @@ test "MarkerGenerator init with options" {
 }
 
 test "MarkerGenerator generateMarkers method exists" {
-    var gen = MarkerGenerator.init(std.testing.allocator, .{});
+    const gen = MarkerGenerator.init(std.testing.allocator, .{});
     try std.testing.expect(gen.allocator != undefined);
 }
 

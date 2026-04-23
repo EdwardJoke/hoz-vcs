@@ -21,6 +21,11 @@ const Revert = @import("revert.zig").Revert;
 const CherryPick = @import("cherry_pick.zig").CherryPick;
 const Bundle = @import("bundle.zig").Bundle;
 const Notes = @import("notes.zig").Notes;
+const Reset = @import("reset.zig").Reset;
+const ResetMode = @import("reset.zig").ResetMode;
+const Branch = @import("branch.zig").Branch;
+const Checkout = @import("checkout.zig").Checkout;
+const Stash = @import("stash.zig").Stash;
 
 pub const CommandDispatcher = struct {
     allocator: std.mem.Allocator,
@@ -72,6 +77,14 @@ pub const CommandDispatcher = struct {
             try self.runBundle(args);
         } else if (std.mem.eql(u8, cmd, "notes")) {
             try self.runNotes(args);
+        } else if (std.mem.eql(u8, cmd, "reset")) {
+            try self.runReset(args);
+        } else if (std.mem.eql(u8, cmd, "branch")) {
+            try self.runBranch(args);
+        } else if (std.mem.eql(u8, cmd, "checkout")) {
+            try self.runCheckout(args);
+        } else if (std.mem.eql(u8, cmd, "stash")) {
+            try self.runStash(args);
         } else {
             var out = Output.init(self.writer, self.style, self.allocator);
             try out.errorMessage("Unknown command: {s}", .{cmd});
@@ -310,7 +323,7 @@ pub const CommandDispatcher = struct {
     }
 
     fn runRevert(self: *CommandDispatcher, args: []const []const u8) !void {
-        var revert = Revert.init(self.allocator, self.writer, self.style);
+        var revert = Revert.init(self.allocator, &self.io, self.writer, self.style);
         if (args.len > 1) {
             try revert.run(args[1..]);
         } else {
@@ -319,7 +332,7 @@ pub const CommandDispatcher = struct {
     }
 
     fn runCherryPick(self: *CommandDispatcher, args: []const []const u8) !void {
-        var cp = CherryPick.init(self.allocator, self.writer, self.style);
+        var cp = CherryPick.init(self.allocator, &self.io, self.writer, self.style);
         if (args.len > 1) {
             try cp.run(args[1..]);
         } else {
@@ -339,6 +352,119 @@ pub const CommandDispatcher = struct {
         const action = if (args.len > 1) args[1] else "show";
         const object = if (args.len > 2) args[2] else null;
         try notes.run(action, object);
+    }
+
+    fn runReset(self: *CommandDispatcher, args: []const []const u8) !void {
+        var reset = Reset.init(self.allocator, self.io, self.writer, self.style);
+        var target: []const u8 = "HEAD";
+
+        var i: usize = 0;
+        while (i < args.len) : (i += 1) {
+            const arg = args[i];
+            if (std.mem.eql(u8, arg, "--soft") or std.mem.eql(u8, arg, "-S")) {
+                reset.mode = .soft;
+            } else if (std.mem.eql(u8, arg, "--mixed") or std.mem.eql(u8, arg, "-M")) {
+                reset.mode = .mixed;
+            } else if (std.mem.eql(u8, arg, "--hard") or std.mem.eql(u8, arg, "-H")) {
+                reset.mode = .hard;
+            } else if (std.mem.eql(u8, arg, "--merge") or std.mem.eql(u8, arg, "-m")) {
+                reset.mode = .merge;
+            } else if (!std.mem.startsWith(u8, arg, "-") and target.len == 4) {
+                target = arg;
+            }
+        }
+
+        try reset.run(target);
+    }
+
+    fn runBranch(self: *CommandDispatcher, args: []const []const u8) !void {
+        var branch = Branch.init(self.allocator, self.io, self.writer, self.style);
+
+        for (args) |arg| {
+            if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--delete")) {
+                branch.action = .delete;
+            } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--move")) {
+                branch.action = .rename;
+            } else if (std.mem.eql(u8, arg, "-D")) {
+                branch.action = .delete;
+            } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--list")) {
+                branch.action = .list;
+            } else if (!std.mem.startsWith(u8, arg, "-") and branch.new_branch_name == null) {
+                branch.new_branch_name = arg;
+                branch.action = .create;
+            } else if (!std.mem.startsWith(u8, arg, "-") and branch.old_branch_name == null and branch.action == .rename) {
+                branch.old_branch_name = arg;
+            }
+        }
+
+        try branch.run();
+    }
+
+    fn runCheckout(self: *CommandDispatcher, args: []const []const u8) !void {
+        var checkout = Checkout.init(self.allocator, self.io, self.writer, self.style);
+
+        for (args) |arg| {
+            if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--force")) {
+                checkout.options.strategy = .force;
+                checkout.options.force = true;
+            } else if (std.mem.eql(u8, arg, "-b")) {
+                checkout.options.create_branch = true;
+            } else if (std.mem.eql(u8, arg, "-B")) {
+                checkout.options.force_create_branch = true;
+            } else if (std.mem.eql(u8, arg, "--detach")) {
+                checkout.options.detach = true;
+            } else if (std.mem.eql(u8, arg, "--track")) {
+                checkout.options.track = "";
+            } else if (!std.mem.startsWith(u8, arg, "-") and checkout.target == null) {
+                checkout.target = arg;
+            }
+        }
+
+        try checkout.run();
+    }
+
+    fn runStash(self: *CommandDispatcher, args: []const []const u8) !void {
+        var stash = Stash.init(self.allocator, self.io, self.writer, self.style);
+
+        var i: usize = 0;
+        while (i < args.len) : (i += 1) {
+            const arg = args[i];
+            if (std.mem.eql(u8, arg, "save")) {
+                stash.action = .save;
+            } else if (std.mem.eql(u8, arg, "list")) {
+                stash.action = .list;
+            } else if (std.mem.eql(u8, arg, "pop")) {
+                stash.action = .pop;
+            } else if (std.mem.eql(u8, arg, "apply")) {
+                stash.action = .apply;
+            } else if (std.mem.eql(u8, arg, "drop")) {
+                stash.action = .drop;
+            } else if (std.mem.eql(u8, arg, "show")) {
+                stash.action = .show;
+            } else if (std.mem.eql(u8, arg, "branch")) {
+                stash.action = .branch;
+            } else if (std.mem.eql(u8, arg, "--include-untracked") or std.mem.eql(u8, arg, "-u")) {
+                stash.options.include_untracked = true;
+            } else if (std.mem.eql(u8, arg, "--only-untracked") or std.mem.eql(u8, arg, "-U")) {
+                stash.options.only_untracked = true;
+            } else if (std.mem.eql(u8, arg, "--keep-index") or std.mem.eql(u8, arg, "-k")) {
+                stash.options.keep_index = true;
+            } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--message")) {
+                if (i + 1 < args.len) {
+                    i += 1;
+                    stash.message = args[i];
+                }
+            } else if (!std.mem.startsWith(u8, arg, "-")) {
+                const index = std.fmt.parseInt(u32, arg, 10) catch 0;
+                if (stash.stash_index == null and index > 0) {
+                    stash.stash_index = index;
+                } else if (stash.action == .branch) {
+                    stash.message = arg;
+                }
+            }
+        }
+
+        try stash.run();
     }
 };
 
