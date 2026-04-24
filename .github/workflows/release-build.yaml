@@ -29,19 +29,19 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Build release
-        run: zig build -Doptimize=ReleaseSafe -Dtarget=native
+      - name: Build native
+        run: zig build -Doptimize=ReleaseSafe
 
       - name: Build Linux x86_64
         if: matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64'
         run: |
-          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-gnu
+          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-musl
           tar -czvf hoz-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz zig-out/bin/hoz
 
       - name: Build Linux aarch64
         if: matrix.os == 'ubuntu-latest' && matrix.arch == 'aarch64'
         run: |
-          zig build -Doptimize=ReleaseSafe -Dtarget=aarch64-linux-gnu
+          zig build -Doptimize=ReleaseSafe -Dtarget=aarch64-linux-musl
           tar -czvf hoz-${{ steps.version.outputs.VERSION }}-linux-aarch64.tar.gz zig-out/bin/hoz
 
       - name: Build macOS x86_64
