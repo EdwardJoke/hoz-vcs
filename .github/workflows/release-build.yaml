@@ -10,7 +10,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
         arch: [x86_64, aarch64]
         exclude:
           - os: windows-latest
@@ -30,13 +30,13 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Build Linux x86_64
-        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64'
+        if: matrix.os == 'macos-latest' && matrix.arch == 'x86_64'
         run: |
           zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-musl
           tar -czvf hoz-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz zig-out/bin/hoz
 
       - name: Build Linux aarch64
-        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'aarch64'
+        if: matrix.os == 'macos-latest' && matrix.arch == 'aarch64'
         run: |
           zig build -Doptimize=ReleaseSafe -Dtarget=aarch64-linux-musl
           tar -czvf hoz-${{ steps.version.outputs.VERSION }}-linux-aarch64.tar.gz zig-out/bin/hoz
