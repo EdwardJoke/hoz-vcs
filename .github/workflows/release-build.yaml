@@ -32,13 +32,13 @@ jobs:
       - name: Build Linux x86_64
         if: matrix.os == 'macos-latest' && matrix.arch == 'x86_64'
         run: |
-          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-musl
+          zig build -Doptimize=ReleaseSafe -Dtarget=x86_64-linux-musl -Dlink-libc
           tar -czvf hoz-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz zig-out/bin/hoz
 
       - name: Build Linux aarch64
         if: matrix.os == 'macos-latest' && matrix.arch == 'aarch64'
         run: |
-          zig build -Doptimize=ReleaseSafe -Dtarget=aarch64-linux-musl
+          zig build -Doptimize=ReleaseSafe -Dtarget=aarch64-linux-musl -Dlink-libc
           tar -czvf hoz-${{ steps.version.outputs.VERSION }}-linux-aarch64.tar.gz zig-out/bin/hoz
 
       - name: Build macOS x86_64
