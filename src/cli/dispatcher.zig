@@ -26,6 +26,15 @@ const ResetMode = @import("reset.zig").ResetMode;
 const Branch = @import("branch.zig").Branch;
 const Checkout = @import("checkout.zig").Checkout;
 const Stash = @import("stash.zig").Stash;
+const Tag = @import("tag.zig").Tag;
+const Reflog = @import("reflog.zig").Reflog;
+const Clean = @import("clean.zig").Clean;
+const Rebase = @import("rebase.zig").Rebase;
+const Merge = @import("merge.zig").Merge;
+const Worktree = @import("worktree.zig").Worktree;
+const Restore = @import("restore.zig").Restore;
+const CatFile = @import("cat_file.zig").CatFile;
+const HashObject = @import("hash_object.zig").HashObject;
 
 pub const CommandDispatcher = struct {
     allocator: std.mem.Allocator,
@@ -85,6 +94,24 @@ pub const CommandDispatcher = struct {
             try self.runCheckout(args);
         } else if (std.mem.eql(u8, cmd, "stash")) {
             try self.runStash(args);
+        } else if (std.mem.eql(u8, cmd, "tag")) {
+            try self.runTag(args);
+        } else if (std.mem.eql(u8, cmd, "reflog")) {
+            try self.runReflog(args);
+        } else if (std.mem.eql(u8, cmd, "clean")) {
+            try self.runClean(args);
+        } else if (std.mem.eql(u8, cmd, "rebase")) {
+            try self.runRebase(args);
+        } else if (std.mem.eql(u8, cmd, "merge")) {
+            try self.runMerge(args);
+        } else if (std.mem.eql(u8, cmd, "worktree")) {
+            try self.runWorktree(args);
+        } else if (std.mem.eql(u8, cmd, "restore")) {
+            try self.runRestore(args);
+        } else if (std.mem.eql(u8, cmd, "cat-file")) {
+            try self.runCatFile(args);
+        } else if (std.mem.eql(u8, cmd, "hash-object")) {
+            try self.runHashObject(args);
         } else {
             var out = Output.init(self.writer, self.style, self.allocator);
             try out.errorMessage("Unknown command: {s}", .{cmd});
@@ -323,7 +350,14 @@ pub const CommandDispatcher = struct {
     }
 
     fn runRevert(self: *CommandDispatcher, args: []const []const u8) !void {
-        var revert = Revert.init(self.allocator, &self.io, self.writer, self.style);
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch {
+            try self.writer.print("error: not a git repository (or any parent up to mount point): .git\n", .{});
+            return;
+        };
+        defer git_dir.close(self.io);
+
+        var revert = Revert.init(self.allocator, &self.io, git_dir, self.writer, self.style);
         if (args.len > 1) {
             try revert.run(args[1..]);
         } else {
@@ -332,7 +366,14 @@ pub const CommandDispatcher = struct {
     }
 
     fn runCherryPick(self: *CommandDispatcher, args: []const []const u8) !void {
-        var cp = CherryPick.init(self.allocator, &self.io, self.writer, self.style);
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch {
+            try self.writer.print("error: not a git repository (or any parent up to mount point): .git\n", .{});
+            return;
+        };
+        defer git_dir.close(self.io);
+
+        var cp = CherryPick.init(self.allocator, &self.io, git_dir, self.writer, self.style);
         if (args.len > 1) {
             try cp.run(args[1..]);
         } else {
@@ -380,7 +421,9 @@ pub const CommandDispatcher = struct {
     fn runBranch(self: *CommandDispatcher, args: []const []const u8) !void {
         var branch = Branch.init(self.allocator, self.io, self.writer, self.style);
 
-        for (args) |arg| {
+        var i: usize = 0;
+        while (i < args.len) : (i += 1) {
+            const arg = args[i];
             if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--delete")) {
                 branch.action = .delete;
             } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--move")) {
@@ -389,9 +432,21 @@ pub const CommandDispatcher = struct {
                 branch.action = .delete;
             } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--list")) {
                 branch.action = .list;
+            } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--set-upstream-to")) {
+                branch.action = .set_upstream;
+                i += 1;
+                if (i < args.len) {
+                    branch.upstream_name = args[i];
+                }
+            } else if (std.mem.eql(u8, arg, "--unset-upstream")) {
+                branch.action = .unset_upstream;
+            } else if (!std.mem.startsWith(u8, arg, "-") and branch.upstream_name != null and branch.new_branch_name == null) {
+                branch.new_branch_name = arg;
             } else if (!std.mem.startsWith(u8, arg, "-") and branch.new_branch_name == null) {
                 branch.new_branch_name = arg;
-                branch.action = .create;
+                if (branch.action != .set_upstream and branch.action != .unset_upstream) {
+                    branch.action = .create;
+                }
             } else if (!std.mem.startsWith(u8, arg, "-") and branch.old_branch_name == null and branch.action == .rename) {
                 branch.old_branch_name = arg;
             }
@@ -465,6 +520,73 @@ pub const CommandDispatcher = struct {
         }
 
         try stash.run();
+    }
+
+    fn runTag(self: *CommandDispatcher, args: []const []const u8) !void {
+        var tag = Tag.init(self.allocator, self.io, self.writer, self.style);
+        try tag.run(args);
+    }
+
+    fn runReflog(self: *CommandDispatcher, args: []const []const u8) !void {
+        var reflog = Reflog.init(self.allocator, self.io, self.writer, self.style);
+        try reflog.run(args);
+    }
+
+    fn runClean(self: *CommandDispatcher, args: []const []const u8) !void {
+        var clean = Clean.init(self.allocator, self.io, self.writer, self.style);
+        try clean.run(args);
+    }
+
+    fn runRebase(self: *CommandDispatcher, args: []const []const u8) !void {
+        var rebase = Rebase.init(self.allocator, self.io, self.writer, self.style);
+        try rebase.run(args);
+    }
+
+    fn runMerge(self: *CommandDispatcher, args: []const []const u8) !void {
+        var merge = Merge.init(self.allocator, self.io, self.writer, self.style);
+        try merge.run(args);
+    }
+
+    fn runWorktree(self: *CommandDispatcher, args: []const []const u8) !void {
+        var worktree = Worktree.init(self.allocator, self.io, self.writer, self.style);
+        try worktree.run(args);
+    }
+
+    fn runRestore(self: *CommandDispatcher, args: []const []const u8) !void {
+        var restore = Restore.init(self.allocator, self.io, self.writer, self.style);
+
+        var i: usize = 0;
+        while (i < args.len) : (i += 1) {
+            const arg = args[i];
+            if (std.mem.eql(u8, arg, "--staged")) {
+                restore.action = .staged;
+            } else if (std.mem.eql(u8, arg, "--source")) {
+                restore.action = .source;
+                i += 1;
+                if (i < args.len) {
+                    restore.source = args[i];
+                }
+            } else if (!std.mem.startsWith(u8, arg, "-")) {
+                var path_list = try std.ArrayList([]const u8).initCapacity(self.allocator, 16);
+                while (i < args.len and !std.mem.startsWith(u8, args[i], "-")) : (i += 1) {
+                    try path_list.append(self.allocator, args[i]);
+                }
+                restore.paths = try path_list.toOwnedSlice(self.allocator);
+                i -= 1;
+            }
+        }
+
+        try restore.run();
+    }
+
+    fn runCatFile(self: *CommandDispatcher, args: []const []const u8) !void {
+        var cat_file = CatFile.init(self.allocator, self.io, self.writer, self.style);
+        try cat_file.run(args);
+    }
+
+    fn runHashObject(self: *CommandDispatcher, args: []const []const u8) !void {
+        var hash_object = HashObject.init(self.allocator, self.io, self.writer, self.style);
+        try hash_object.run(args);
     }
 };
 
