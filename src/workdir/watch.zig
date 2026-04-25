@@ -265,6 +265,21 @@ pub const WatchManager = struct {
         }
     }
 
+    pub fn removeWatcher(self: *WatchManager, watcher: *DirectoryWatcher) bool {
+        var iter = self.watchers.iterator();
+        while (iter.next()) |entry| {
+            if (entry.value == watcher) {
+                const key = entry.key;
+                watcher.stop();
+                self.allocator.destroy(watcher);
+                _ = self.watchers.remove(key);
+                self.allocator.free(key);
+                return true;
+            }
+        }
+        return false;
+    }
+
     pub fn getEvents(self: *WatchManager, path: []const u8) ![]WatchEvent {
         if (self.watchers.get(path)) |watcher| {
             return watcher.readEvents();

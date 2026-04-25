@@ -239,16 +239,16 @@ This document catalogs all stub implementations in the Hoz codebase that return 
 ### `src/remote/fetch.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `fetch` | 27 | No-op with `_ = self` | ❌ |
-| `fetchRef` | 32 | No-op with `_ = self` | ❌ |
+| `fetch` | 27 | Resolves URL, connects transport, discovers refs, fetches pack, updates local refs | ✅ COMPLETE |
+| `fetchRef` | 32 | Fetches single ref with refspec matching | ✅ COMPLETE |
 
 ### `src/remote/push.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `push` | 28 | No-op with `_ = self` | ❌ |
-| `pushRef` | 33 | No-op with `_ = self` | ❌ |
-| `pushTags` | 39 | No-op with `_ = self` | ❌ |
-| `pushAll` | 44 | No-op with `_ = self` | ❌ |
+| `push` | 28 | Reads local ref OIDs, generates pack, sends refs+objects to remote | ✅ COMPLETE |
+| `pushRef` | 33 | Pushes single ref with refspec mapping | ✅ COMPLETE |
+| `pushTags` | 39 | Pushes all tag refs to remote | ✅ COMPLETE |
+| `pushAll` | 44 | Pushes all local branches matching remote | ✅ COMPLETE |
 
 ---
 
@@ -393,9 +393,9 @@ This document catalogs all stub implementations in the Hoz codebase that return 
 ### `src/workdir/watch.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `watch` | 58 | No-op with `_ = self` | ❌ |
-| `unwatch` | 63 | No-op with `_ = self` | ❌ |
-| `notify` | 68 | No-op with `_ = self` | ❌ |
+| `watch` | 58 | Kqueue-based FS monitoring with EVFILT_VNODE, recursive dir walk | ✅ COMPLETE |
+| `unwatch` | 63 | Removes watch from kqueue, closes fd | ✅ COMPLETE |
+| `notify` | 68 | Reads events from kqueue, classifies (created/modified/deleted/renamed) | ✅ COMPLETE |
 | `removeWatcher` | 121 | No-op with `_ = self` | ❌ |
 
 ### `src/workdir/lock.zig`

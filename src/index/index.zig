@@ -430,8 +430,8 @@ pub const Index = struct {
             try writeEntry(self.allocator, &list, entry, name);
         }
 
-        // Write extensions (placeholder - extensions not implemented for now)
-        // try self.writeExtensions(&list);
+        // Write extensions
+        try self.writeExtensions(&list);
 
         // Write checksum placeholder
         const checksum_offset = list.items.len;
@@ -473,6 +473,38 @@ pub const Index = struct {
         if (name.len < path_size) {
             try list.appendSlice(allocator, &[1]u8{0} ** (path_size - name.len));
         }
+    }
+
+    fn writeExtensionData(list: *std.ArrayList(u8), allocator: std.mem.Allocator, signature: [4]u8, data: []const u8) !void {
+        try list.appendSlice(allocator, &signature);
+        var size_bytes: [4]u8 = undefined;
+        std.mem.writeInt(u32, &size_bytes, @as(u32, @intCast(data.len)), .big);
+        try list.appendSlice(allocator, &size_bytes);
+        if (data.len > 0) {
+            try list.appendSlice(allocator, data);
+        }
+    }
+
+    fn writeExtensions(self: *Index, list: *std.ArrayList(u8)) !void {
+        const exts = &self.extensions;
+
+        if (exts.tree) |tree_data| {
+            try writeExtensionData(list, self.allocator, .{ 'T', 'R', 'E', 'E' }, tree_data);
+        }
+
+        if (exts.reuc) |reuc_data| {
+            try writeExtensionData(list, self.allocator, .{ 'R', 'E', 'U', 'C' }, reuc_data);
+        }
+
+        if (exts.fmix) |fmix_data| {
+            try writeExtensionData(list, self.allocator, .{ 'F', 'M', 'I', 'X' }, fmix_data);
+        }
+
+        for (exts.others.items) |other| {
+            try writeExtensionData(list, self.allocator, other.signature, other.data);
+        }
+
+        try list.append(self.allocator, 0);
     }
 
     /// Add or update an entry in the index

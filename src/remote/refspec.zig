@@ -30,8 +30,8 @@ pub const RefspecParser = struct {
         if (std.mem.eql(u8, remaining, "tags")) {
             tags = true;
             return Refspec{
-                .source = try self.allocator.dupe(u8, "tags"),
-                .destination = try self.allocator.dupe(u8, "tags"),
+                .source = try self.allocator.dupe(u8, "refs/tags/*"),
+                .destination = try self.allocator.dupe(u8, "refs/tags/*"),
                 .force = force,
                 .tags = tags,
             };
@@ -45,6 +45,8 @@ pub const RefspecParser = struct {
             source = remaining;
             destination = remaining;
         }
+
+        if (source.len == 0) return error.EmptyRefspec;
 
         return Refspec{
             .source = try self.allocator.dupe(u8, source),
@@ -108,23 +110,81 @@ test "RefspecParser init" {
     try std.testing.expect(parser.allocator == std.testing.allocator);
 }
 
-test "RefspecParser parse method exists" {
+test "RefspecParser parse basic" {
+    var parser = RefspecParser.init(std.testing.allocator);
+    const refspec = try parser.parse("refs/heads/main:refs/remotes/origin/main");
+    try std.testing.expectEqualStrings("refs/heads/main", refspec.source);
+    try std.testing.expectEqualStrings("refs/remotes/origin/main", refspec.destination);
+    try std.testing.expect(refspec.force == false);
+}
+
+test "RefspecParser parse force" {
+    var parser = RefspecParser.init(std.testing.allocator);
+    const refspec = try parser.parse("+refs/heads/main:refs/remotes/origin/main");
+    try std.testing.expect(refspec.force == true);
+    try std.testing.expectEqualStrings("refs/heads/main", refspec.source);
+}
+
+test "RefspecParser parse wildcard" {
     var parser = RefspecParser.init(std.testing.allocator);
     const refspec = try parser.parse("+refs/heads/*:refs/remotes/origin/*");
-    try std.testing.expectEqualStrings("", refspec.source);
+    try std.testing.expectEqualStrings("refs/heads/*", refspec.source);
+    try std.testing.expectEqualStrings("refs/remotes/origin/*", refspec.destination);
+    try std.testing.expect(refspec.force == true);
 }
 
-test "RefspecParser parseMultiple method exists" {
+test "RefspecParser parse no colon" {
     var parser = RefspecParser.init(std.testing.allocator);
-    const refspecs = try parser.parseMultiple(&.{"+refs/heads/*:refs/remotes/origin/*"});
-    _ = refspecs;
-    try std.testing.expect(parser.allocator != undefined);
+    const refspec = try parser.parse("refs/heads/main");
+    try std.testing.expectEqualStrings("refs/heads/main", refspec.source);
+    try std.testing.expectEqualStrings("refs/heads/main", refspec.destination);
 }
 
-test "RefspecParser expand method exists" {
+test "RefspecParser parse tags" {
     var parser = RefspecParser.init(std.testing.allocator);
-    const refspec = Refspec{ .source = "", .destination = "", .force = false, .tags = false };
+    const refspec = try parser.parse("tags");
+    try std.testing.expect(refspec.tags == true);
+    try std.testing.expectEqualStrings("refs/tags/*", refspec.source);
+}
+
+test "RefspecParser parseMultiple" {
+    var parser = RefspecParser.init(std.testing.allocator);
+    const refspecs = try parser.parseMultiple(&.{
+        "refs/heads/main:refs/remotes/origin/main",
+        "+refs/heads/*:refs/remotes/origin/*",
+    });
+    defer {
+        for (refspecs) |r| {
+            parser.allocator.free(r.source);
+            parser.allocator.free(r.destination);
+        }
+        parser.allocator.free(refspecs);
+    }
+    try std.testing.expectEqual(@as(usize, 2), refspecs.len);
+    try std.testing.expect(refspecs[1].force == true);
+}
+
+test "RefspecParser expand wildcard" {
+    var parser = RefspecParser.init(std.testing.allocator);
+    const refspec = Refspec{ .source = "refs/heads/*", .destination = "refs/remotes/origin/*", .force = false, .tags = false };
+    const expanded = try parser.expand(refspec, &.{ "refs/heads/main", "refs/heads/develop" });
+    defer {
+        for (expanded) |e| parser.allocator.free(e);
+        parser.allocator.free(expanded);
+    }
+    try std.testing.expectEqual(@as(usize, 2), expanded.len);
+    try std.testing.expectEqualStrings("refs/remotes/origin/main", expanded[0]);
+    try std.testing.expectEqualStrings("refs/remotes/origin/develop", expanded[1]);
+}
+
+test "RefspecParser expand exact match" {
+    var parser = RefspecParser.init(std.testing.allocator);
+    const refspec = Refspec{ .source = "refs/heads/main", .destination = "refs/remotes/origin/main", .force = false, .tags = false };
     const expanded = try parser.expand(refspec, &.{"refs/heads/main"});
-    _ = expanded;
-    try std.testing.expect(parser.allocator != undefined);
+    defer {
+        for (expanded) |e| parser.allocator.free(e);
+        parser.allocator.free(expanded);
+    }
+    try std.testing.expectEqual(@as(usize, 1), expanded.len);
+    try std.testing.expectEqualStrings("refs/remotes/origin/main", expanded[0]);
 }

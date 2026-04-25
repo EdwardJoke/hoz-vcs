@@ -389,10 +389,8 @@ pub const CommandDispatcher = struct {
     }
 
     fn runNotes(self: *CommandDispatcher, args: []const []const u8) !void {
-        var notes = Notes.init(self.allocator, self.writer, self.style);
-        const action = if (args.len > 1) args[1] else "show";
-        const object = if (args.len > 2) args[2] else null;
-        try notes.run(action, object);
+        var notes = Notes.init(self.allocator, self.io, self.writer, self.style);
+        try notes.run(args);
     }
 
     fn runReset(self: *CommandDispatcher, args: []const []const u8) !void {
