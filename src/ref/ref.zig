@@ -1,7 +1,7 @@
 //! Reference system for Hoz
 //! Handles both direct refs (point to OID) and symbolic refs (point to other refs)
 const std = @import("std");
-const Oid = @import("../object/oid.zig").Oid;
+const OID = @import("../object/oid.zig").OID;
 const util = @import("../util/error.zig");
 
 pub const RefError = error{
@@ -10,7 +10,35 @@ pub const RefError = error{
     SymrefTargetNotFound,
     SymrefCycleDetected,
     IoError,
-} || std.fs.File.ReadError || std.fs.File.WriteError;
+    FileNotFound,
+    PermissionDenied,
+    ReadOnlyFile,
+    Unexpected,
+    AccessDenied,
+    FileBusy,
+    FileSystem,
+    IsDir,
+    NotDir,
+    SymLinkLoop,
+    NameTooLong,
+    BadPathName,
+    NetworkNotFound,
+    ReadOnlyFileSystem,
+    SystemResources,
+    Canceled,
+    NoSpaceLeft,
+    DeviceBusy,
+    NoDevice,
+    FileTooBig,
+    ProcessFdQuotaExceeded,
+    SystemFdQuotaExceeded,
+    PathAlreadyExists,
+    PipeBusy,
+    AntivirusInterference,
+    FileLocksUnsupported,
+    WouldBlock,
+    WriteFailed,
+};
 
 pub const RefType = enum {
     direct, // Points directly to an OID (e.g., refs/heads/main)
@@ -24,12 +52,12 @@ pub const Ref = struct {
     target: Target,
 
     pub const Target = union(RefType) {
-        direct: Oid,
+        direct: OID,
         symbolic: []const u8,
     };
 
     /// Create a direct ref (points to an OID)
-    pub fn directRef(name: []const u8, oid: Oid) Ref {
+    pub fn directRef(name: []const u8, oid: OID) Ref {
         return .{
             .name = name,
             .ref_type = .direct,
@@ -48,11 +76,11 @@ pub const Ref = struct {
 
     /// Get the resolved OID for this ref (follows symbolic refs)
     /// Note: This requires a ReferenceStore to resolve
-    pub fn getOid(self: Ref) ?Oid {
-        switch (self.target) {
-            .direct => |oid| return oid,
-            .symbolic => return null,
-        }
+    pub fn getOid(self: Ref) ?OID {
+        return switch (self.ref_type) {
+            .direct => self.target.direct,
+            .symbolic => null,
+        };
     }
 
     /// Check if this is a direct reference
@@ -93,7 +121,36 @@ pub const Ref = struct {
 };
 
 /// Shortcut for creating a direct reference to a commit
-pub fn ref(name: []const u8, oid: Oid) Ref {
+pub fn ref(name: []const u8, oid: OID) Ref {
+    return .{
+        .name = name,
+        .ref_type = .direct,
+        .target = .{ .direct = oid },
+    };
+}
+
+/// Parse a ref from its string content (either OID or symbolic ref)
+pub fn parse(name: []const u8, content: []const u8) !Ref {
+    if (std.mem.startsWith(u8, content, "ref: ")) {
+        const target = content["ref: ".len..];
+        return Ref.symbolicRef(name, target);
+    }
+
+    // Try to parse as OID
+    const oid = try OID.fromHex(content);
+    return Ref.directRef(name, oid);
+}
+
+/// Parse a ref from its string content with depth tracking
+pub fn parseRef(name: []const u8, content: []const u8, depth: usize) !Ref {
+    _ = depth;
+    if (std.mem.startsWith(u8, content, "ref: ")) {
+        const target = content["ref: ".len..];
+        return Ref.symbolicRef(name, target);
+    }
+
+    // Try to parse as OID
+    const oid = try OID.fromHex(content);
     return Ref.directRef(name, oid);
 }
 
@@ -105,7 +162,7 @@ pub fn symref(name: []const u8, target: []const u8) Ref {
 // TESTS
 test "Ref direct ref" {
     const oid_str = "abc123def4567890123456789012345678901";
-    const oid = try Oid.parse(oid_str);
+    const oid = try OID.fromHex(oid_str);
     const r = Ref.directRef("refs/heads/main", oid);
 
     try std.testing.expect(r.isDirect());
@@ -142,7 +199,7 @@ test "Ref isValidName invalid names" {
 
 test "Ref getOid direct" {
     const oid_str = "abc123def4567890123456789012345678901";
-    const oid = try Oid.parse(oid_str);
+    const oid = try OID.fromHex(oid_str);
     const r = Ref.directRef("refs/heads/main", oid);
 
     const result = r.getOid();

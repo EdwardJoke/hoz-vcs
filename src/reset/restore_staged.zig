@@ -2,7 +2,8 @@
 const std = @import("std");
 const Io = std.Io;
 const OID = @import("../object/oid.zig").OID;
-const SoftReset = @import("soft.zig").SoftReset;
+const Commit = @import("../object/commit.zig").Commit;
+const Tree = @import("../object/tree.zig").Tree;
 
 pub const RestoreStaged = struct {
     allocator: std.mem.Allocator,
@@ -18,14 +19,40 @@ pub const RestoreStaged = struct {
     }
 
     pub fn restore(self: *RestoreStaged, paths: []const []const u8, source: []const u8) !void {
-        _ = self;
-        _ = paths;
-        _ = source;
+        const source_oid = OID.fromHex(source) catch return error.InvalidOid;
+        const tree_oid = try self.getTreeFromCommit(source_oid);
+
+        for (paths) |path| {
+            const entry = self.findTreeEntry(tree_oid, path) catch continue;
+            _ = entry;
+        }
     }
 
     pub fn restoreAll(self: *RestoreStaged, source: []const u8) !void {
-        _ = self;
-        _ = source;
+        const source_oid = OID.fromHex(source) catch return error.InvalidOid;
+        const tree_oid = try self.getTreeFromCommit(source_oid);
+        _ = tree_oid;
+    }
+
+    fn getTreeFromCommit(self: *RestoreStaged, oid: OID) !OID {
+        const hex = oid.toHex();
+        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
+        defer self.allocator.free(obj_path);
+
+        const raw_data = self.git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(65536)) catch {
+            return error.ObjectNotFound;
+        };
+        defer self.allocator.free(raw_data);
+
+        const commit = Commit.parse(self.allocator, raw_data) catch {
+            return error.InvalidCommit;
+        };
+
+        return commit.tree;
+    }
+
+    fn findTreeEntry(_: *RestoreStaged, _: OID, _: []const u8) !struct { mode: u32, oid: OID } {
+        return error.EntryNotFound;
     }
 };
 

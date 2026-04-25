@@ -92,27 +92,25 @@ pub const Tree = struct {
     /// Format: "tree <size>\n<entry>\n<entry>..."
     /// Each entry: "<mode> <name>\x00<oid_bytes>"
     pub fn serialize(self: Tree, allocator: std.mem.Allocator) ![]u8 {
-        var buffer = std.ArrayList(u8).initCapacity(allocator, 256);
+        var buffer = try std.ArrayList(u8).initCapacity(allocator, 256);
         defer buffer.deinit(allocator);
 
         // Build entries
         for (self.entries) |entry| {
-            // Write mode and name
-            try buffer.appendSlice(&modeToStr(entry.mode));
-            try buffer.append(' ');
-            try buffer.appendSlice(entry.name);
-            try buffer.append(0);
+            try buffer.appendSlice(allocator, &modeToStr(entry.mode));
+            try buffer.append(allocator, ' ');
+            try buffer.appendSlice(allocator, entry.name);
+            try buffer.append(allocator, 0);
 
-            // Write OID (20 bytes)
-            try buffer.appendSlice(&entry.oid.bytes);
+            try buffer.appendSlice(allocator, &entry.oid.bytes);
         }
 
         // Now wrap with tree header
         const content = buffer.items;
-        const size_str = try std.fmt.allocPrint(allocator, "{}", .{content.len});
+        const size_str = try std.fmt.allocPrint(allocator, "{d}", .{content.len});
         defer allocator.free(size_str);
 
-        const header = try std.fmt.allocPrint(allocator, "tree {}\x00", .{size_str});
+        const header = try std.fmt.allocPrint(allocator, "tree {s}\x00", .{size_str});
         defer allocator.free(header);
 
         var result = try allocator.alloc(u8, header.len + content.len);

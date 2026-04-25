@@ -54,7 +54,7 @@ pub const BranchLister = struct {
                     try branches.append(self.allocator, info);
                 }
             }
-            return branches.toOwnedSlice();
+            return try branches.toOwnedSlice(self.allocator);
         }
 
         const prefix = if (self.options.all) "" else "refs/heads/";
@@ -86,7 +86,7 @@ pub const BranchLister = struct {
             try branches.append(self.allocator, info);
         }
 
-        return branches.toOwnedSlice();
+        return try branches.toOwnedSlice(self.allocator);
     }
 
     pub fn listCurrent(self: *BranchLister) !?BranchInfo {

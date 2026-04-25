@@ -108,8 +108,7 @@ pub const PackReceiver = struct {
     }
 
     pub fn indexPack(self: *PackReceiver, pack_data: []const u8) !void {
-        _ = self;
-        _ = pack_data;
+        if (!try self.verifyPack(pack_data)) return error.InvalidPack;
     }
 
     pub fn receiveAndStore(self: *PackReceiver, io: Io, allocator: std.mem.Allocator, git_dir: []const u8, pack_data: []const u8) !u32 {

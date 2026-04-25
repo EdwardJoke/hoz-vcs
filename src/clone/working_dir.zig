@@ -267,7 +267,12 @@ pub const WorkingDirCloner = struct {
     }
 
     pub fn setupWorktree(self: *WorkingDirCloner) !void {
-        _ = self;
+        const cwd = std.Io.Dir.cwd();
+        cwd.createDirPath(self.io, ".git") catch {};
+        cwd.createDirPath(self.io, ".git/objects") catch {};
+        cwd.createDirPath(self.io, ".git/refs") catch {};
+        cwd.createDirPath(self.io, ".git/refs/heads") catch {};
+        try cwd.writeFile(self.io, .{ .sub_path = ".git/HEAD", .data = "ref: refs/heads/main\n" });
     }
 };
 

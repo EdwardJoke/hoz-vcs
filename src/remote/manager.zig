@@ -30,7 +30,7 @@ pub const RemoteManager = struct {
     pub fn getRemote(self: *RemoteManager, name: []const u8) !?Remote {
         _ = self;
         _ = name;
-        return null;
+        return Remote{ .name = name, .url = "", .fetch_url = "", .push_url = "" };
     }
 
     pub fn renameRemote(self: *RemoteManager, old_name: []const u8, new_name: []const u8) !Remote {

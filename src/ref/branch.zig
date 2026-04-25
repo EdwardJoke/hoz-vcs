@@ -107,7 +107,7 @@ pub const BranchManager = struct {
             const trimmed = std.mem.trim(u8, line, " \t");
             if (trimmed.len > 0 and !std.mem.startsWith(u8, trimmed, "#")) {
                 var parts = std.mem.splitScalar(u8, trimmed, '=');
-                if (const key = parts.next()) {
+                if (parts.next()) |key| {
                     const value = parts.rest();
                     const trimmed_key = std.mem.trim(u8, key, " \t");
                     const trimmed_value = std.mem.trim(u8, value, " \t");
@@ -122,13 +122,10 @@ pub const BranchManager = struct {
 
     fn writeConfigValue(self: BranchManager, config_key: []const u8, value: []const u8) !void {
         const config_path = ".git/config";
-        var existing_content = self.git_dir.readFileAlloc(self.io, config_path, self.allocator, .limited(65536)) catch null;
+        const existing_content = self.git_dir.readFileAlloc(self.io, config_path, self.allocator, .limited(65536)) catch null;
         defer if (existing_content) |c| self.allocator.free(c);
 
-        var content_to_write: []const u8 = "";
-        if (existing_content) |c| {
-            content_to_write = c;
-        }
+        const content_to_write: []const u8 = if (existing_content) |c| c else "";
 
         var lines = std.mem.splitScalar(u8, content_to_write, '\n');
         var new_lines = std.ArrayList(u8).init(self.allocator);
@@ -157,7 +154,7 @@ pub const BranchManager = struct {
                 }
                 if (in_branch_section) {
                     var parts = std.mem.splitScalar(u8, trimmed, '=');
-                    if (const key = parts.next()) {
+                    if (parts.next()) |key| {
                         const trimmed_key = std.mem.trim(u8, key, " \t");
                         if (std.mem.eql(u8, trimmed_key, config_key)) {
                             found = true;
@@ -213,9 +210,9 @@ pub const BranchManager = struct {
 
         if (std.mem.startsWith(u8, upstream, "refs/remotes/")) {
             const rest = upstream["refs/remotes/".len..];
-            if (const slash_idx = std.mem.indexOf(u8, rest, "/")) {
+            if (std.mem.indexOf(u8, rest, "/")) |slash_idx| {
                 const remote = rest[0..slash_idx];
-                const branch = rest[slash_idx + 1..];
+                const branch = rest[slash_idx + 1 ..];
                 try self.writeConfigValue(remote_key, remote);
                 const merge_ref = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{branch});
                 defer self.allocator.free(merge_ref);
@@ -263,7 +260,6 @@ pub const BranchManager = struct {
             const commit_data = self.readCommitData(oid) catch {
                 continue;
             };
-            defer self.allocator.free(commit_data);
 
             for (commit_data.parents) |parent_oid| {
                 if (parent_oid.eql(upstream_oid)) {
@@ -287,7 +283,6 @@ pub const BranchManager = struct {
             const commit_data = self.readCommitData(oid) catch {
                 continue;
             };
-            defer self.allocator.free(commit_data);
 
             for (commit_data.parents) |parent_oid| {
                 if (parent_oid.eql(local_oid)) {
@@ -302,15 +297,18 @@ pub const BranchManager = struct {
         return .{ .ahead = ahead, .behind = behind };
     }
 
-    fn readCommitData(self: BranchManager, oid: Oid) ![]const u8 {
+    fn readCommitData(self: BranchManager, oid: Oid) !Commit {
         const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{
-            hex[0..2], hex[2..40]
-        });
+        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..40] });
         defer self.allocator.free(obj_path);
 
-        return self.git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(65536)) catch {
+        const raw_data = self.git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(65536)) catch {
             return error.ObjectNotFound;
+        };
+        defer self.allocator.free(raw_data);
+
+        return Commit.parse(self.allocator, raw_data) catch {
+            return error.InvalidCommit;
         };
     }
 

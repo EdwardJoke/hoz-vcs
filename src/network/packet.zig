@@ -49,7 +49,7 @@ pub const PacketEncoder = struct {
 
     pub fn encodeFlush(self: *PacketEncoder) []const u8 {
         _ = self;
-        return &[0]u8{};
+        return "0000";
     }
 
     pub fn encodeDelim(self: *PacketEncoder) ![]u8 {

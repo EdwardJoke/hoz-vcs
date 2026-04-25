@@ -9,13 +9,16 @@ pub const WorktreeInteg = struct {
     }
 
     pub fn createInitialWorktree(self: *WorktreeInteg, path: []const u8) !void {
+        const cwd = std.Io.Dir.cwd();
+        cwd.createDirPath(undefined, path) catch {};
         _ = self;
-        _ = path;
     }
 
     pub fn setupHead(self: *WorktreeInteg, ref: []const u8) !void {
-        _ = self;
-        _ = ref;
+        const cwd = std.Io.Dir.cwd();
+        const head_content = try std.fmt.allocPrint(self.allocator, "ref: {s}\n", .{ref});
+        defer self.allocator.free(head_content);
+        try cwd.writeFile(undefined, .{ .sub_path = ".git/HEAD", .data = head_content });
     }
 };
 

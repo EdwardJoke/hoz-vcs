@@ -126,6 +126,113 @@ pub const IgnoreFilter = struct {
     }
 };
 
+pub const GitIgnore = struct {
+    allocator: std.mem.Allocator,
+    patterns: std.ArrayList([]const u8),
+
+    pub fn init(allocator: std.mem.Allocator) GitIgnore {
+        return .{
+            .allocator = allocator,
+            .patterns = std.ArrayList([]const u8).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *GitIgnore) void {
+        for (self.patterns.items) |pattern| {
+            self.allocator.free(pattern);
+        }
+        self.patterns.deinit();
+    }
+
+    pub fn shouldIgnore(self: *GitIgnore, path: []const u8) bool {
+        for (self.patterns.items) |pattern| {
+            if (self.matchPattern(pattern, path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn checkIgnore(self: *GitIgnore, path: []const u8) ?[]const u8 {
+        for (self.patterns.items) |pattern| {
+            if (self.matchPattern(pattern, path)) {
+                return pattern;
+            }
+        }
+        return null;
+    }
+
+    pub fn checkIgnoreRecursive(self: *GitIgnore, path: []const u8) ?[]const u8 {
+        var current_path: []const u8 = path;
+        while (true) {
+            if (self.checkIgnore(current_path)) |pattern| {
+                return pattern;
+            }
+            const last_slash = std.mem.lastIndexOfScalar(u8, current_path, '/');
+            if (last_slash == null) break;
+            current_path = current_path[0..last_slash.?];
+        }
+        return null;
+    }
+
+    pub fn addIgnoreRule(self: *GitIgnore, pattern: []const u8) !void {
+        const owned = try self.allocator.dupe(u8, pattern);
+        try self.patterns.append(owned);
+    }
+
+    pub fn removeIgnoreRule(self: *GitIgnore, pattern: []const u8) bool {
+        for (self.patterns.items, 0..) |p, i| {
+            if (std.mem.eql(u8, p, pattern)) {
+                self.allocator.free(p);
+                _ = self.patterns.orderedRemove(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn matchPattern(self: *GitIgnore, pattern: []const u8, path: []const u8) bool {
+        _ = self;
+
+        if (std.mem.startsWith(u8, pattern, "!")) {
+            return false;
+        }
+
+        if (std.mem.endsWith(u8, pattern, "/")) {
+            const dir_pattern = pattern[0 .. pattern.len - 1];
+            return std.mem.startsWith(u8, path, dir_pattern) or std.mem.eql(u8, path, dir_pattern);
+        }
+
+        if (std.mem.startsWith(u8, pattern, "**/")) {
+            const suffix = pattern[3..];
+            return std.mem.endsWith(u8, path, suffix) or std.mem.indexOf(u8, path, suffix) != null;
+        }
+
+        if (std.mem.endsWith(u8, pattern, "/**")) {
+            const prefix = pattern[0 .. pattern.len - 3];
+            return std.mem.startsWith(u8, path, prefix);
+        }
+
+        if (std.mem.startsWith(u8, pattern, "*")) {
+            const suffix = pattern[1..];
+            return std.mem.endsWith(u8, path, suffix);
+        }
+
+        if (std.mem.endsWith(u8, pattern, "*")) {
+            const prefix = pattern[0 .. pattern.len - 1];
+            return std.mem.startsWith(u8, path, prefix);
+        }
+
+        if (std.mem.indexOf(u8, pattern, "*")) |star_idx| {
+            const prefix = pattern[0..star_idx];
+            const suffix = pattern[star_idx + 1 ..];
+            return std.mem.startsWith(u8, path, prefix) and std.mem.endsWith(u8, path, suffix);
+        }
+
+        return std.mem.eql(u8, path, pattern) or std.mem.endsWith(u8, path, pattern) or std.mem.indexOf(u8, path, pattern) != null;
+    }
+};
+
 test "IgnoreFilter init" {
     const filter = IgnoreFilter.init();
     try std.testing.expectEqual(false, filter.ignore_whitespace_changes);

@@ -91,16 +91,31 @@ pub const ConfigWriter = struct {
     }
 
     pub fn write(self: *ConfigWriter, path: []const u8, entries: []const struct { key: []const u8, value: []const u8 }) !void {
-        _ = self;
-        _ = path;
-        _ = entries;
+        var buf = std.ArrayList(u8).init(self.allocator);
+        defer buf.deinit();
+
+        for (entries) |entry| {
+            try buf.writer().print("{s} = {s}\n", .{ entry.key, entry.value });
+        }
+
+        const cwd = Io.Dir.cwd();
+        try cwd.writeFile(self.allocator, path, buf.items, .{});
     }
 
     pub fn formatEntry(self: *ConfigWriter, key: []const u8, value: []const u8) ![]const u8 {
+        return std.fmt.allocPrint(self.allocator, "{s} = {s}", .{ key, value });
+    }
+
+    pub fn getBool(self: *ConfigWriter, value: []const u8) ?bool {
         _ = self;
-        _ = key;
-        _ = value;
-        return "";
+        const trimmed = std.mem.trim(u8, value, " \t");
+        if (std.mem.eql(u8, trimmed, "true") or std.mem.eql(u8, trimmed, "1") or std.mem.eql(u8, trimmed, "yes")) {
+            return true;
+        }
+        if (std.mem.eql(u8, trimmed, "false") or std.mem.eql(u8, trimmed, "0") or std.mem.eql(u8, trimmed, "no")) {
+            return false;
+        }
+        return null;
     }
 };
 

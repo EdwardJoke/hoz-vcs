@@ -64,7 +64,7 @@ pub fn runCredentialHelper(allocator: std.mem.Allocator, io: Io, protocol: []con
     defer allocator.free(request);
 
     try child.stdin.?.writeStreamingAll(io, request);
-    child.stdin.?.close();
+    child.stdin.?.close(io);
 
     const term = try child.wait(io);
     switch (term) {
@@ -78,17 +78,8 @@ pub fn runCredentialHelper(allocator: std.mem.Allocator, io: Io, protocol: []con
     defer stdout_file.close(io);
 
     var buf: [4096]u8 = undefined;
-    var result = std.ArrayList(u8).empty;
-    errdefer result.deinit(allocator);
-
     var reader = stdout_file.reader(io, &buf);
-    while (true) {
-        const n = try reader.read();
-        if (n == 0) break;
-        try result.appendSlice(allocator, buf[0..n]);
-    }
-
-    const output = try result.toOwnedSlice(allocator);
+    const output = try reader.interface.allocRemaining(allocator, .limited(65536));
 
     var username: ?[]const u8 = null;
     var password: ?[]u8 = null;
@@ -114,25 +105,24 @@ pub fn runCredentialHelper(allocator: std.mem.Allocator, io: Io, protocol: []con
 }
 
 pub fn getEnvCredential(allocator: std.mem.Allocator, protocol: []const u8, host: []const u8) ?CredentialHelperResult {
+    _ = allocator;
     _ = host;
     if (std.mem.eql(u8, protocol, "https")) {
-        if (std.process.getEnvVarOwned(allocator, "HTTPS_PROXY")) |proxy| {
-            defer allocator.free(proxy);
+        if (std.c.getenv("HTTPS_PROXY")) |_| {
             return CredentialHelperResult{
                 .username = null,
                 .password = null,
             };
         }
     } else if (std.mem.eql(u8, protocol, "http")) {
-        if (std.process.getEnvVarOwned(allocator, "HTTP_PROXY")) |proxy| {
-            defer allocator.free(proxy);
+        if (std.c.getenv("HTTP_PROXY")) |_| {
             return CredentialHelperResult{
                 .username = null,
                 .password = null,
             };
         }
     }
-    if (std.process.getEnvVarOwned(allocator, "GIT_ASKPASS")) |_| {
+    if (std.c.getenv("GIT_ASKPASS")) |_| {
         return CredentialHelperResult{
             .username = null,
             .password = null,

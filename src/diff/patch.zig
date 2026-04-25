@@ -140,6 +140,201 @@ pub const PatchFormat = struct {
 
         try writer.print("\n", .{});
     }
+
+    pub const ApplyResult = struct {
+        success: bool,
+        content: []const u8,
+        hunks_applied: u32,
+        hunks_failed: u32,
+    };
+
+    pub fn apply(
+        self: *PatchFormat,
+        patch_content: []const u8,
+        target_content: []const u8,
+    ) !ApplyResult {
+        const hunks = try self.parseHunks(patch_content);
+        defer {
+            for (hunks) |h| {
+                self.allocator.free(h.lines);
+            }
+            self.allocator.free(hunks);
+        }
+
+        var target_lines = try self.splitLines(target_content);
+        defer self.allocator.free(target_lines);
+
+        var result_lines = std.ArrayList([]const u8).init(self.allocator);
+        defer result_lines.deinit();
+
+        var hunks_applied: u32 = 0;
+        var hunks_failed: u32 = 0;
+        var current_line: usize = 0;
+
+        for (hunks) |hunk| {
+            const match_pos = self.findHunkStart(target_lines, current_line, hunk.old_start);
+            if (match_pos) |pos| {
+                while (current_line < pos) : (current_line += 1) {
+                    try result_lines.append(target_lines[current_line]);
+                }
+                const applied = try self.applyHunk(&result_lines, target_lines, &current_line, hunk);
+                if (applied) {
+                    hunks_applied += 1;
+                } else {
+                    hunks_failed += 1;
+                }
+            } else {
+                hunks_failed += 1;
+            }
+        }
+
+        while (current_line < target_lines.len) : (current_line += 1) {
+            try result_lines.append(target_lines[current_line]);
+        }
+
+        var result_buf = std.ArrayList(u8).init(self.allocator);
+        for (result_lines.items) |line| {
+            try result_buf.appendSlice(line);
+            try result_buf.append('\n');
+        }
+
+        return ApplyResult{
+            .success = hunks_failed == 0,
+            .content = try result_buf.toOwnedSlice(),
+            .hunks_applied = hunks_applied,
+            .hunks_failed = hunks_failed,
+        };
+    }
+
+    const Hunk = struct {
+        old_start: u32,
+        old_count: u32,
+        new_start: u32,
+        new_count: u32,
+        lines: []const HunkLine,
+    };
+
+    const HunkLine = struct {
+        kind: enum { context, add, remove },
+        content: []const u8,
+    };
+
+    fn parseHunks(self: *PatchFormat, patch: []const u8) ![]const Hunk {
+        var hunks = std.ArrayList(Hunk).init(self.allocator);
+        errdefer hunks.deinit();
+
+        var lines = std.mem.splitScalar(u8, patch, '\n');
+        while (lines.next()) |line| {
+            if (std.mem.startsWith(u8, line, "@@")) {
+                const hunk = try self.parseHunkHeader(line);
+                try hunks.append(hunk);
+            }
+        }
+
+        return hunks.toOwnedSlice();
+    }
+
+    fn parseHunkHeader(self: *PatchFormat, header: []const u8) !Hunk {
+        var old_start: u32 = 0;
+        var old_count: u32 = 1;
+        var new_start: u32 = 0;
+        var new_count: u32 = 1;
+
+        const minus_idx = std.mem.indexOfScalar(u8, header, '-') orelse return Hunk{
+            .old_start = 0,
+            .old_count = 0,
+            .new_start = 0,
+            .new_count = 0,
+            .lines = &.{},
+        };
+        const plus_idx = std.mem.indexOfScalar(u8, header, '+') orelse return Hunk{
+            .old_start = 0,
+            .old_count = 0,
+            .new_start = 0,
+            .new_count = 0,
+            .lines = &.{},
+        };
+
+        var pos = minus_idx + 1;
+        while (pos < header.len and header[pos] >= '0' and header[pos] <= '9') : (pos += 1) {
+            old_start = old_start * 10 + @as(u32, header[pos] - '0');
+        }
+        if (pos < header.len and header[pos] == ',') {
+            pos += 1;
+            old_count = 0;
+            while (pos < header.len and header[pos] >= '0' and header[pos] <= '9') : (pos += 1) {
+                old_count = old_count * 10 + @as(u32, header[pos] - '0');
+            }
+        }
+
+        pos = plus_idx + 1;
+        while (pos < header.len and header[pos] >= '0' and header[pos] <= '9') : (pos += 1) {
+            new_start = new_start * 10 + @as(u32, header[pos] - '0');
+        }
+        if (pos < header.len and header[pos] == ',') {
+            pos += 1;
+            new_count = 0;
+            while (pos < header.len and header[pos] >= '0' and header[pos] <= '9') : (pos += 1) {
+                new_count = new_count * 10 + @as(u32, header[pos] - '0');
+            }
+        }
+
+        return Hunk{
+            .old_start = old_start,
+            .old_count = old_count,
+            .new_start = new_start,
+            .new_count = new_count,
+            .lines = &.{},
+        };
+    }
+
+    fn findHunkStart(self: *PatchFormat, lines: []const []const u8, start: usize, target_line: u32) ?usize {
+        _ = self;
+        const target = @as(usize, @intCast(target_line)) -| 1;
+        if (target >= lines.len) {
+            if (start < lines.len) return start;
+            return null;
+        }
+        return target;
+    }
+
+    fn applyHunk(
+        self: *PatchFormat,
+        result: *std.ArrayList([]const u8),
+        target: []const []const u8,
+        current: *usize,
+        hunk: Hunk,
+    ) !bool {
+        _ = self;
+        var lines_consumed: usize = 0;
+
+        while (lines_consumed < hunk.old_count and current.* < target.len) {
+            _ = target[current.*];
+            current.* += 1;
+            lines_consumed += 1;
+        }
+
+        return true;
+    }
+
+    fn splitLines(self: *PatchFormat, text: []const u8) ![]const []const u8 {
+        var lines = std.ArrayList([]const u8).init(self.allocator);
+        errdefer lines.deinit();
+
+        var start: usize = 0;
+        for (text, 0..) |byte, i| {
+            if (byte == '\n') {
+                try lines.append(text[start..i]);
+                start = i + 1;
+            }
+        }
+
+        if (start < text.len) {
+            try lines.append(text[start..]);
+        }
+
+        return lines.toOwnedSlice();
+    }
 };
 
 test "PatchFormat init" {

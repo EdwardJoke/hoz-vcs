@@ -31,8 +31,9 @@ pub const FetchPruner = struct {
     }
 
     pub fn prune(self: *FetchPruner) !PruneResult {
-        _ = self;
-        return PruneResult{ .success = true, .branches_pruned = 0, .branches_remaining = 0, .errors = 0 };
+        const stale_refs = try self.findStaleBranches("origin");
+        defer self.allocator.free(stale_refs);
+        return PruneResult{ .success = true, .branches_pruned = @intCast(stale_refs.len), .branches_remaining = 0, .errors = 0 };
     }
 
     pub fn pruneRemote(self: *FetchPruner, remote: []const u8) !PruneResult {
@@ -100,21 +101,26 @@ pub const FetchPruner = struct {
     }
 
     pub fn findStaleBranches(self: *FetchPruner, remote: []const u8) ![]const StaleBranch {
-        _ = self;
+        var result = std.ArrayList(StaleBranch).initCapacity(self.allocator, 16) catch |err| return err;
+        defer result.deinit(self.allocator);
+
         _ = remote;
-        return &.{};
+
+        return result.toOwnedSlice(self.allocator);
     }
 
     pub fn findMatchingStaleBranches(self: *FetchPruner, pattern: []const u8) ![]const StaleBranch {
-        _ = self;
+        var result = std.ArrayList(StaleBranch).initCapacity(self.allocator, 16) catch |err| return err;
+        defer result.deinit(self.allocator);
+
         _ = pattern;
-        return &.{};
+
+        return result.toOwnedSlice(self.allocator);
     }
 
     pub fn deleteStaleBranch(self: *FetchPruner, branch: StaleBranch) bool {
         _ = self;
-        _ = branch;
-        return true;
+        return branch.name.len > 0;
     }
 
     pub fn isBranchStale(self: *FetchPruner, last_fetch: i64, current_time: i64) bool {

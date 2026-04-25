@@ -189,8 +189,7 @@ pub const SSHProtocol = struct {
     }
 
     pub fn formatCommand(self: *const SSHProtocol) []const u8 {
-        _ = self;
-        return "git-upload-pack";
+        return self.command;
     }
 };
 
@@ -208,11 +207,10 @@ pub const HTTPProtocol = struct {
     }
 
     pub fn fetch(self: *HTTPProtocol, service: []const u8) !HTTPResponse {
-        _ = self;
         _ = service;
         return HTTPResponse{
             .status = 200,
-            .body = &.{},
+            .body = self.url[0..0],
         };
     }
 };
@@ -236,12 +234,11 @@ pub const SmartProtocol = struct {
     }
 
     pub fn negotiate(self: *SmartProtocol, have: []const []const u8, want: []const []const u8) !SmartNegotiationResult {
-        _ = self;
         _ = have;
         _ = want;
         return SmartNegotiationResult{
             .common_refs = &.{},
-            .ready = false,
+            .ready = self.done,
         };
     }
 };

@@ -33,8 +33,8 @@ pub const Zlib = struct {
         } else if (data[0] == 0x78) {
             offset += 2;
 
-            var result = std.ArrayList(u8).init(allocator);
-            errdefer result.deinit();
+            var result = try std.ArrayList(u8).initCapacity(allocator, data.len);
+            errdefer result.deinit(allocator);
 
             while (offset < data.len) {
                 const byte = data[offset];
@@ -46,7 +46,7 @@ pub const Zlib = struct {
                     offset += 2;
 
                     if (offset + len > data.len) return error.CompressionFailed;
-                    try result.appendSlice(data[offset .. offset + len]);
+                    try result.appendSlice(allocator, data[offset .. offset + len]);
                     offset += len;
                 } else {
                     const block_type = (byte >> 0) & 0x03;
@@ -58,7 +58,7 @@ pub const Zlib = struct {
                         offset += 2;
 
                         if (offset + len > data.len) return error.CompressionFailed;
-                        try result.appendSlice(data[offset .. offset + len]);
+                        try result.appendSlice(allocator, data[offset .. offset + len]);
                         offset += len;
                     } else if (block_type == 0x01 or block_type == 0x02) {
                         return error.UnsupportedCompression;
@@ -70,7 +70,7 @@ pub const Zlib = struct {
                 if (offset >= data.len) break;
             }
 
-            return result.toOwnedSlice();
+            return result.toOwnedSlice(allocator);
         }
 
         return error.UnsupportedCompression;

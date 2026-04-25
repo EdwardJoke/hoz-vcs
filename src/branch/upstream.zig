@@ -168,7 +168,7 @@ test "BranchUpstream init with options" {
 
 test "BranchUpstream setUpstream method exists" {
     var ref_store: RefStore = undefined;
-    var options = UpstreamOptions{};
+    const options = UpstreamOptions{};
     var upstream = BranchUpstream.init(std.testing.allocator, &ref_store, options);
 
     const result = try upstream.setUpstream("feature", "refs/remotes/origin/feature");
@@ -177,7 +177,7 @@ test "BranchUpstream setUpstream method exists" {
 
 test "BranchUpstream getUpstream method exists" {
     var ref_store: RefStore = undefined;
-    var options = UpstreamOptions{};
+    const options = UpstreamOptions{};
     var upstream = BranchUpstream.init(std.testing.allocator, &ref_store, options);
 
     const result = try upstream.getUpstream("main");
@@ -187,7 +187,7 @@ test "BranchUpstream getUpstream method exists" {
 
 test "BranchUpstream unsetUpstream method exists" {
     var ref_store: RefStore = undefined;
-    var options = UpstreamOptions{};
+    const options = UpstreamOptions{};
     var upstream = BranchUpstream.init(std.testing.allocator, &ref_store, options);
 
     const result = try upstream.unsetUpstream("feature");
@@ -196,7 +196,7 @@ test "BranchUpstream unsetUpstream method exists" {
 
 test "BranchUpstream getMergeConfig method exists" {
     var ref_store: RefStore = undefined;
-    var options = UpstreamOptions{};
+    const options = UpstreamOptions{};
     var upstream = BranchUpstream.init(std.testing.allocator, &ref_store, options);
 
     const result = try upstream.getMergeConfig("main");

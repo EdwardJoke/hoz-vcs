@@ -21,16 +21,16 @@ pub const TreeBuilder = struct {
     entries: std.ArrayList(tree_mod.TreeEntry),
     subtrees: std.AutoHashMap([]const u8, *TreeBuilder),
 
-    pub fn init(allocator: std.mem.Allocator) TreeBuilder {
+    pub fn init(allocator: std.mem.Allocator) !TreeBuilder {
         return .{
             .allocator = allocator,
-            .entries = std.ArrayList(tree_mod.TreeEntry).init(allocator),
+            .entries = try std.ArrayList(tree_mod.TreeEntry).initCapacity(allocator, 0),
             .subtrees = std.AutoHashMap([]const u8, *TreeBuilder).init(allocator),
         };
     }
 
     pub fn deinit(self: *TreeBuilder) void {
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
         var it = self.subtrees.iterator();
         while (it.next()) |entry| {
             entry.value_ptr.*.deinit();
@@ -42,7 +42,7 @@ pub const TreeBuilder = struct {
 
     pub fn addIndexEntry(self: *TreeBuilder, entry: IndexEntry, name: []const u8) !void {
         const mode = self.modeFromIndexEntry(entry);
-        try self.entries.append(.{
+        try self.entries.append(self.allocator, .{
             .mode = mode,
             .oid = entry.oid,
             .name = try self.allocator.dupe(u8, name),
@@ -50,7 +50,7 @@ pub const TreeBuilder = struct {
     }
 
     pub fn addEntry(self: *TreeBuilder, mode: tree_mod.Mode, oid: OID, name: []const u8) !void {
-        try self.entries.append(.{
+        try self.entries.append(self.allocator, .{
             .mode = mode,
             .oid = oid,
             .name = try self.allocator.dupe(u8, name),
@@ -82,7 +82,7 @@ pub const TreeBuilder = struct {
 
     fn sortEntries(self: *TreeBuilder, entries: []tree_mod.TreeEntry) ![]const tree_mod.TreeEntry {
         _ = self;
-        std.mem.sort(tree_mod.TreeEntry, @constCast(entries), {}, tree_mod.compareTreeEntries);
+        std.mem.sort(tree_mod.TreeEntry, @constCast(entries), {}, compareTreeEntries);
         return entries;
     }
 
@@ -103,7 +103,7 @@ pub fn buildTreeFromIndex(
     allocator: std.mem.Allocator,
     index: Index,
 ) !tree_mod.Tree {
-    var builder = TreeBuilder.init(allocator);
+    var builder = try TreeBuilder.init(allocator);
     errdefer builder.deinit();
 
     for (index.entries.items, index.entry_names.items) |entry, name| {
@@ -118,7 +118,7 @@ pub fn buildSubtree(
     entries: []const tree_mod.TreeEntry,
     prefix: []const u8,
 ) !tree_mod.Tree {
-    var builder = TreeBuilder.init(allocator);
+    var builder = try TreeBuilder.init(allocator);
     errdefer builder.deinit();
 
     for (entries) |entry| {
@@ -137,7 +137,7 @@ test "TreeBuilder initializes correctly" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var builder = TreeBuilder.init(gpa.allocator());
+    var builder = try TreeBuilder.init(gpa.allocator());
     defer builder.deinit();
 
     try std.testing.expectEqual(@as(usize, 0), builder.entries.items.len);
@@ -147,7 +147,7 @@ test "TreeBuilder adds entry correctly" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var builder = TreeBuilder.init(gpa.allocator());
+    var builder = try TreeBuilder.init(gpa.allocator());
     defer builder.deinit();
 
     const oid: [20]u8 = [_]u8{0} ** 20;
@@ -160,7 +160,7 @@ test "TreeBuilder build creates tree" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var builder = TreeBuilder.init(gpa.allocator());
+    var builder = try TreeBuilder.init(gpa.allocator());
     defer builder.deinit();
 
     const oid: [20]u8 = [_]u8{0} ** 20;
@@ -175,7 +175,7 @@ test "TreeBuilder addIndexEntry works" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var builder = TreeBuilder.init(gpa.allocator());
+    var builder = try TreeBuilder.init(gpa.allocator());
     defer builder.deinit();
 
     const entry = IndexEntry{
@@ -221,7 +221,7 @@ test "buildTreeFromIndex creates tree from index" {
     defer index.deinit();
 
     const oid: [20]u8 = [_]u8{1} ** 20;
-    try index.entries.append(.{
+    try index.entries.append(gpa.allocator(), .{
         .ctime_sec = 0,
         .ctime_nsec = 0,
         .mtime_sec = 0,
@@ -235,7 +235,7 @@ test "buildTreeFromIndex creates tree from index" {
         .oid = oid,
         .flags = 0,
     });
-    try index.entry_names.append("test.txt");
+    try index.entry_names.append(gpa.allocator(), "test.txt");
 
     const tree = try buildTreeFromIndex(gpa.allocator(), index);
     try std.testing.expectEqual(@as(usize, 1), tree.entries.len);

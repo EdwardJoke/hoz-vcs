@@ -38,7 +38,7 @@ pub const Pull = struct {
         try self.output.infoMessage("From {s}", .{remote});
         try self.output.infoMessage(" * branch {s} -> FETCH_HEAD", .{upstream});
 
-        const fetch_result = try self.doFetch(remote, upstream);
+        const fetch_result = try self.doFetch(git_dir, remote, upstream);
 
         if (fetch_result.heads_updated > 0 or fetch_result.tags_updated > 0) {
             try self.output.infoMessage("Updating {d}..{d}", .{ fetch_result.heads_updated, fetch_result.tags_updated });
@@ -107,8 +107,8 @@ pub const Pull = struct {
         return try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{branch});
     }
 
-    fn doFetch(self: *Pull, remote: []const u8, refspec: []const u8) !fetch_mod.FetchResult {
-        var fetcher = fetch_mod.FetchFetcher.init(self.allocator, .{
+    fn doFetch(self: *Pull, git_dir: []const u8, remote: []const u8, refspec: []const u8) !fetch_mod.FetchResult {
+        var fetcher = fetch_mod.FetchFetcher.init(self.allocator, self.io, git_dir, .{
             .remote = remote,
             .refspecs = &.{refspec},
         });

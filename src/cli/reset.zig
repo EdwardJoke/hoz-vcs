@@ -31,8 +31,9 @@ pub const Reset = struct {
     }
 
     pub fn run(self: *Reset, target: []const u8) !void {
-        const git_dir = Io.Dir.openDirAbsolute(self.io, ".git", .{}) catch {
-            try self.output.errorMessage("Not a hoz repository", .{});
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch {
+            try self.output.errorMessage("Not in a git repository", .{});
             return;
         };
         defer git_dir.close(self.io);
@@ -58,13 +59,11 @@ pub const Reset = struct {
     fn runMixed(self: *Reset, git_dir: Io.Dir, target: []const u8) !void {
         var mixed_reset = MixedReset.init(self.allocator, self.io, git_dir);
         try mixed_reset.reset(target);
-        try mixed_reset.clearIndex();
     }
 
     fn runHard(self: *Reset, git_dir: Io.Dir, target: []const u8) !void {
         var hard_reset = HardReset.init(self.allocator, self.io, git_dir);
         try hard_reset.reset(target);
-        try hard_reset.resetTree(target);
     }
 
     fn runMerge(self: *Reset, git_dir: Io.Dir, target: []const u8) !void {

@@ -70,7 +70,33 @@ pub const BareCloner = struct {
         }
     }
 
-    pub fn setupRemoteTrackingRefs(_: *BareCloner, _: []const u8) !void {}
+    pub fn setupRemoteTrackingRefs(self: *BareCloner, git_dir: []const u8) !void {
+        const cwd = std.Io.Dir.cwd();
+        const refs_remotes = try std.fs.path.join(self.allocator, &.{ git_dir, "refs", "remotes", "origin" });
+        defer self.allocator.free(refs_remotes);
+
+        cwd.createDirPath(self.io, refs_remotes) catch {};
+
+        const head_path = try std.fs.path.join(self.allocator, &.{ git_dir, "HEAD" });
+        defer self.allocator.free(head_path);
+
+        const head_content = cwd.readFileAlloc(self.io, head_path, self.allocator, .limited(256)) catch return;
+        defer self.allocator.free(head_content);
+
+        if (std.mem.startsWith(u8, head_content, "ref: refs/heads/")) {
+            const branch_name = std.mem.trim(u8, head_content["ref: refs/heads/".len..], " \n");
+            const branch_ref = try std.fs.path.join(self.allocator, &.{ git_dir, "refs", "heads", branch_name });
+            defer self.allocator.free(branch_ref);
+
+            const oid_content = cwd.readFileAlloc(self.io, branch_ref, self.allocator, .limited(64)) catch return;
+            defer self.allocator.free(oid_content);
+
+            const tracking_ref = try std.fs.path.join(self.allocator, &.{ refs_remotes, branch_name });
+            defer self.allocator.free(tracking_ref);
+
+            try cwd.writeFile(self.io, .{ .sub_path = tracking_ref, .data = std.mem.trim(u8, oid_content, " \n") });
+        }
+    }
 
     fn fetchAndSetupRefs(self: *BareCloner, url: []const u8, git_dir: []const u8, depth: u32) !void {
         var t = transport.Transport.init(self.allocator, self.io, .{ .url = url });

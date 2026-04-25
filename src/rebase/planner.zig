@@ -39,8 +39,8 @@ pub const RebasePlanner = struct {
     pub fn plan(self: *RebasePlanner, upstream: OID, branch: OID) !RebasePlan {
         const target_upstream = self.options.onto orelse upstream;
 
-        var commits = std.ArrayList(OID).init(self.allocator);
-        errdefer commits.deinit();
+        var commits = std.ArrayList(OID).initCapacity(self.allocator, 16) catch return error.OutOfMemory;
+        errdefer commits.deinit(self.allocator);
 
         if (self.options.root) {
             try self.collectRootCommits(&commits, branch, target_upstream);
@@ -56,7 +56,7 @@ pub const RebasePlanner = struct {
             try self.groupSquashCommits(&commits);
         }
 
-        const commits_slice = try commits.toOwnedSlice();
+        const commits_slice = try commits.toOwnedSlice(self.allocator);
         return RebasePlan{
             .upstream = target_upstream,
             .branch = branch,
@@ -69,10 +69,10 @@ pub const RebasePlanner = struct {
         var visited = std.AutoHashMap(OID, void).init(self.allocator);
         defer visited.deinit();
 
-        var to_visit = std.ArrayList(OID).init(self.allocator);
-        defer to_visit.deinit();
+        var to_visit = std.ArrayList(OID).initCapacity(self.allocator, 16) catch return;
+        defer to_visit.deinit(self.allocator);
 
-        try to_visit.append(branch);
+        try to_visit.append(self.allocator, branch);
         try visited.put(branch, {});
 
         while (to_visit.pop()) |current_oid| {
@@ -83,16 +83,16 @@ pub const RebasePlanner = struct {
             };
             defer self.allocator.free(commit_data);
 
-            const commit = Commit.parse(commit_data) catch {
+            const commit = Commit.parse(self.allocator, commit_data) catch {
                 continue;
             };
 
-            try commits.append(current_oid);
+            try commits.append(self.allocator, current_oid);
 
             for (commit.parents) |parent_oid| {
                 if (!visited.contains(parent_oid)) {
                     try visited.put(parent_oid, {});
-                    try to_visit.append(parent_oid);
+                    try to_visit.append(self.allocator, parent_oid);
                 }
             }
         }
@@ -102,10 +102,10 @@ pub const RebasePlanner = struct {
         var visited = std.AutoHashMap(OID, void).init(self.allocator);
         defer visited.deinit();
 
-        var to_visit = std.ArrayList(OID).init(self.allocator);
-        defer to_visit.deinit();
+        var to_visit = std.ArrayList(OID).initCapacity(self.allocator, 16) catch return;
+        defer to_visit.deinit(self.allocator);
 
-        try to_visit.append(branch);
+        try to_visit.append(self.allocator, branch);
         try visited.put(branch, {});
 
         while (to_visit.pop()) |current_oid| {
@@ -116,43 +116,43 @@ pub const RebasePlanner = struct {
             };
             defer self.allocator.free(commit_data);
 
-            const commit = Commit.parse(commit_data) catch {
+            const commit = Commit.parse(self.allocator, commit_data) catch {
                 continue;
             };
 
-            try commits.append(current_oid);
+            try commits.append(self.allocator, current_oid);
 
             for (commit.parents) |parent_oid| {
                 if (!visited.contains(parent_oid)) {
                     try visited.put(parent_oid, {});
-                    try to_visit.append(parent_oid);
+                    try to_visit.append(self.allocator, parent_oid);
                 }
             }
         }
     }
 
     fn filterEmptyCommits(self: *RebasePlanner, commits: *std.ArrayList(OID)) !void {
-        var filtered = std.ArrayList(OID).init(self.allocator);
-        defer filtered.deinit();
+        var filtered = std.ArrayList(OID).initCapacity(self.allocator, 16) catch return;
+        defer filtered.deinit(self.allocator);
 
         for (commits.items) |oid| {
             const commit_data = self.readCommitData(oid) catch {
-                try filtered.append(oid);
+                try filtered.append(self.allocator, oid);
                 continue;
             };
             defer self.allocator.free(commit_data);
 
-            const commit = Commit.parse(commit_data) catch {
-                try filtered.append(oid);
+            const commit = Commit.parse(self.allocator, commit_data) catch {
+                try filtered.append(self.allocator, oid);
                 continue;
             };
 
             if (commit.message.len > 0) {
-                try filtered.append(oid);
+                try filtered.append(self.allocator, oid);
             }
         }
 
-        commits.deinit();
+        commits.deinit(self.allocator);
         commits.* = filtered;
     }
 
@@ -163,9 +163,7 @@ pub const RebasePlanner = struct {
 
     fn readCommitData(self: *RebasePlanner, oid: OID) ![]const u8 {
         const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{
-            hex[0..2], hex[2..]
-        });
+        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
         defer self.allocator.free(obj_path);
 
         return self.git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(65536)) catch {
@@ -173,17 +171,17 @@ pub const RebasePlanner = struct {
         };
     }
 
-    pub fn getNextCommit(self: *RebasePlanner, plan: *RebasePlan) ?OID {
+    pub fn getNextCommit(self: *RebasePlanner, rebase_plan: *RebasePlan) ?OID {
         _ = self;
-        if (plan.current >= plan.commits.len) return null;
-        const oid = plan.commits[plan.current];
-        plan.current += 1;
+        if (rebase_plan.current >= rebase_plan.commits.len) return null;
+        const oid = rebase_plan.commits[rebase_plan.current];
+        rebase_plan.current += 1;
         return oid;
     }
 
-    pub fn isComplete(self: *RebasePlanner, plan: *const RebasePlan) bool {
+    pub fn isComplete(self: *RebasePlanner, rebase_plan: *const RebasePlan) bool {
         _ = self;
-        return plan.current >= plan.commits.len;
+        return rebase_plan.current >= rebase_plan.commits.len;
     }
 };
 

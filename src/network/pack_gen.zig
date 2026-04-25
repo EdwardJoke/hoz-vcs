@@ -253,7 +253,6 @@ pub const PackGenerator = struct {
         var lines = std.mem.splitScalar(u8, data, '\n');
         while (lines.next()) |line| {
             if (std.mem.startsWith(u8, line, "tree ")) {
-                // Extract tree OID (40 hex chars after "tree ")
                 const tree_part = line[5..];
                 var end: usize = 0;
                 while (end < tree_part.len and std.ascii.isHex(tree_part[end])) : (end += 1) {}

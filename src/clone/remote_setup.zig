@@ -19,24 +19,52 @@ pub const RemoteSetup = struct {
     }
 
     pub fn setupRemote(self: *RemoteSetup, name: []const u8, url: []const u8) !void {
-        _ = self;
-        _ = name;
-        _ = url;
-        return error.NotImplemented;
+        const config_content = try std.fmt.allocPrint(self.allocator,
+            \\[remote "{s}"]
+            \\    url = {s}
+            \\    fetch = +refs/heads/*:refs/remotes/{s}/*
+        , .{ name, url, name });
+        defer self.allocator.free(config_content);
+
+        const cwd = std.Io.Dir.cwd();
+        try cwd.writeFile(undefined, .{ .sub_path = ".git/config", .data = config_content });
     }
 
     pub fn addFetchRefspec(self: *RemoteSetup, remote_name: []const u8, refspec: []const u8) !void {
-        _ = self;
-        _ = remote_name;
-        _ = refspec;
-        return error.NotImplemented;
+        const config_line = try std.fmt.allocPrint(self.allocator, "fetch = {s}", .{refspec});
+        defer self.allocator.free(config_line);
+
+        const cwd = std.Io.Dir.cwd();
+        const config_content = cwd.readFileAlloc(undefined, ".git/config", self.allocator, .limited(64 * 1024)) catch "";
+        defer if (config_content.len > 0) self.allocator.free(config_content);
+
+        var new_content = std.ArrayList(u8).initCapacity(self.allocator, 1024) catch |err| return err;
+        defer new_content.deinit(self.allocator);
+
+        if (config_content.len > 0) {
+            try new_content.appendSlice(self.allocator, config_content);
+        }
+
+        try new_content.writer().print("\n[remote \"{s}\"]\n    {s}\n", .{ remote_name, config_line });
+
+        try cwd.writeFile(undefined, .{ .sub_path = ".git/config", .data = new_content.items });
     }
 
     pub fn setUrl(self: *RemoteSetup, remote_name: []const u8, url: []const u8) !void {
-        _ = self;
-        _ = remote_name;
-        _ = url;
-        return error.NotImplemented;
+        const cwd = std.Io.Dir.cwd();
+        const config_content = cwd.readFileAlloc(undefined, ".git/config", self.allocator, .limited(64 * 1024)) catch "";
+        defer if (config_content.len > 0) self.allocator.free(config_content);
+
+        var new_content = std.ArrayList(u8).initCapacity(self.allocator, 1024) catch |err| return err;
+        defer new_content.deinit(self.allocator);
+
+        if (config_content.len > 0) {
+            try new_content.appendSlice(self.allocator, config_content);
+        }
+
+        try new_content.writer().print("\n[remote \"{s}\"]\n    url = {s}\n", .{ remote_name, url });
+
+        try cwd.writeFile(undefined, .{ .sub_path = ".git/config", .data = new_content.items });
     }
 };
 

@@ -342,6 +342,12 @@ pub const Index = struct {
         var checksum: [20]u8 = undefined;
         @memcpy(&checksum, data[data.len - 20 .. data.len]);
 
+        // Verify checksum
+        const content_hash = sha1.sha1(data[0 .. data.len - 20]);
+        if (!std.mem.eql(u8, &checksum, &content_hash)) {
+            return error.IndexChecksumMismatch;
+        }
+
         return Index{
             .allocator = allocator,
             .entries = entries,

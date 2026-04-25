@@ -1,8 +1,8 @@
 //! Stash Show - Show stash diff
 const std = @import("std");
 const Io = std.Io;
-const OID = @import("../object/oid.zig").OID;
-const StashLister = @import("list.zig").StashLister;
+const stash_list = @import("list.zig");
+const StashLister = stash_list.StashLister;
 
 pub const ShowOptions = struct {
     index: u32 = 0,
@@ -65,16 +65,19 @@ pub const StashShower = struct {
         };
     }
 
-    fn formatStashDiff(_: *StashShower, entry: StashEntry) ![]const u8 {
-        return std.fmt.allocPrint(std.heap.page_allocator, "stash@{d}} ({s}) {s}\n", .{
+    fn formatStashDiff(self: *StashShower, entry: StashEntry) ![]const u8 {
+        const oid_hex = entry.oid.toHex();
+        return std.fmt.allocPrint(self.allocator, "stash@{{{d}}}\nbranch: {s}\ndate: {s}\noid: {s}\nmessage: {s}\n", .{
             entry.index,
             entry.branch,
             entry.date,
+            &oid_hex,
+            entry.message,
         });
     }
 };
 
-const StashEntry = StashLister.StashEntry;
+const StashEntry = stash_list.StashEntry;
 
 test "ShowOptions default values" {
     const options = ShowOptions{};

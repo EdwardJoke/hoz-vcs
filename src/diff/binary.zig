@@ -118,6 +118,44 @@ pub const BinaryDetection = struct {
         _ = new_path;
         return "Binary";
     }
+
+    pub fn detectBinary(self: *BinaryDetection, content: []const u8) BinaryResult {
+        return self.detect(content);
+    }
+
+    pub fn formatBinary(self: *BinaryDetection, path: []const u8, content: []const u8) ![]const u8 {
+        _ = content;
+        const result = self.detect(content);
+        if (result.is_binary) {
+            return try std.fmt.allocPrint(self.allocator, "Binary files {s} and {s} differ\n", .{ path, path });
+        }
+        return try std.fmt.allocPrint(self.allocator, "{s} is a text file\n", .{path});
+    }
+
+    pub fn renderBinary(self: *BinaryDetection, old_path: []const u8, new_path: []const u8, old_content: []const u8, new_content: []const u8) ![]const u8 {
+        const old_result = self.detect(old_content);
+        const new_result = self.detect(new_content);
+
+        if (old_result.is_binary and new_result.is_binary) {
+            return try std.fmt.allocPrint(self.allocator, "Binary files {s} and {s} differ\n", .{ old_path, new_path });
+        } else if (old_result.is_binary) {
+            return try std.fmt.allocPrint(self.allocator, "Binary file {s} changed to text file {s}\n", .{ old_path, new_path });
+        } else if (new_result.is_binary) {
+            return try std.fmt.allocPrint(self.allocator, "Text file {s} changed to binary file {s}\n", .{ old_path, new_path });
+        }
+
+        return try std.fmt.allocPrint(self.allocator, "Both files are text files\n", .{});
+    }
+
+    pub fn textOrBinary(self: *BinaryDetection, content: []const u8) enum { text, binary } {
+        const result = self.detect(content);
+        return if (result.is_binary) .binary else .text;
+    }
+
+    pub fn isBinary(self: *BinaryDetection, content: []const u8) bool {
+        const result = self.detect(content);
+        return result.is_binary;
+    }
 };
 
 pub const KNOWN_BINARY_EXTENSIONS = [_][]const u8{

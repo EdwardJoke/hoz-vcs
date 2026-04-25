@@ -15,12 +15,17 @@ pub const FetchRefsUpdater = struct {
 
     pub fn updateRefs(self: *FetchRefsUpdater) !FetchRefsResult {
         _ = self;
+        const cwd = std.Io.Dir.cwd();
+        const refs_path = ".git/refs/heads";
+        cwd.createDirPath(undefined, refs_path) catch {};
         return FetchRefsResult{ .success = true, .refs_updated = 0 };
     }
 
     pub fn updateRemoteRefs(self: *FetchRefsUpdater, remote: []const u8) !FetchRefsResult {
-        _ = self;
-        _ = remote;
+        const cwd = std.Io.Dir.cwd();
+        const refs_path = try std.fmt.allocPrint(self.allocator, ".git/refs/remotes/{s}", .{remote});
+        defer self.allocator.free(refs_path);
+        cwd.createDirPath(undefined, refs_path) catch {};
         return FetchRefsResult{ .success = true, .refs_updated = 0 };
     }
 };

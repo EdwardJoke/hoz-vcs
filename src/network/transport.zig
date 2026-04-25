@@ -83,7 +83,7 @@ pub const Transport = struct {
             return;
         }
 
-        if (runCredentialHelper(self.allocator, self.io, protocol_str, parsed.host)) |creds| {
+        if (try runCredentialHelper(self.allocator, self.io, protocol_str, parsed.host)) |creds| {
             defer {
                 if (creds.password) |p| self.allocator.free(p);
             }
@@ -280,8 +280,8 @@ pub const Transport = struct {
     }
 
     fn fetchRefsGeneric(self: *Transport) ![]const refs.RemoteRef {
-        _ = self;
-        return &.{};
+        const result = try self.allocator.alloc(refs.RemoteRef, 0);
+        return result;
     }
 
     pub fn fetchPack(self: *Transport, wants: []const []const u8, haves: []const []const u8) ![]u8 {
@@ -404,10 +404,10 @@ pub const Transport = struct {
     }
 
     fn fetchPackGeneric(self: *Transport, wants: []const []const u8, haves: []const []const u8) ![]u8 {
-        _ = self;
         _ = wants;
         _ = haves;
-        return &.{};
+        const result = try self.allocator.alloc(u8, 0);
+        return result;
     }
 
     fn httpGet(self: *Transport, url: []const u8, auth: ?[]const u8) ![]u8 {
@@ -744,15 +744,15 @@ pub const HttpTransport = struct {
     }
 
     pub fn request(self: *HttpTransport, path: []const u8, service: []const u8) ![]u8 {
-        _ = self;
         _ = path;
         _ = service;
-        return &[0]u8{};
+        const result = try self.allocator.alloc(u8, 0);
+        return result;
     }
 
     pub fn fetchRefs(self: *HttpTransport) ![]const refs.RemoteRef {
-        _ = self;
-        return &.{};
+        const result = try self.allocator.alloc(refs.RemoteRef, 0);
+        return result;
     }
 };
 

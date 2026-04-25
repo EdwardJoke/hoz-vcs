@@ -28,12 +28,13 @@ pub const SoftReset = struct {
 
         const trimmed = std.mem.trim(u8, head_ref, " \n\r");
         if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const ref_path = trimmed[5..];
+            const ref_path = std.mem.trim(u8, trimmed[5..], " \n\r");
             const commit_oid = try self.git_dir.readFileAlloc(self.io, ref_path, self.allocator, .limited(256));
             defer self.allocator.free(commit_oid);
-            return std.mem.trim(u8, commit_oid, " \n\r");
+            const resolved = std.mem.trim(u8, commit_oid, " \n\r");
+            return self.allocator.dupe(u8, resolved);
         }
-        return trimmed;
+        return self.allocator.dupe(u8, trimmed);
     }
 
     fn resolveTarget(self: *SoftReset, spec: []const u8) !OID {
@@ -51,7 +52,9 @@ pub const SoftReset = struct {
         }
 
         if (std.mem.eql(u8, spec, "HEAD")) {
-            return try self.resolveTarget(try self.getHeadCommit());
+            const head_commit = try self.getHeadCommit();
+            defer self.allocator.free(head_commit);
+            return try self.resolveTarget(head_commit);
         }
 
         if (std.mem.eql(u8, spec, "FETCH_HEAD")) {
@@ -67,12 +70,23 @@ pub const SoftReset = struct {
     }
 
     fn updateHEAD(self: *SoftReset, oid: OID) !void {
-        const head_path = "HEAD";
         const hex = oid.toHex();
         const content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{hex});
         defer self.allocator.free(content);
 
-        self.git_dir.writeFile(self.io, .{ .sub_path = head_path, .data = content }) catch {};
+        const head_data = self.git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch null;
+        defer if (head_data) |buf| self.allocator.free(buf);
+
+        if (head_data) |buf| {
+            const trimmed = std.mem.trim(u8, buf, " \n\r");
+            if (std.mem.startsWith(u8, trimmed, "ref: ")) {
+                const ref_path = std.mem.trim(u8, trimmed[5..], " \n\r");
+                try self.git_dir.writeFile(self.io, .{ .sub_path = ref_path, .data = content });
+                return;
+            }
+        }
+
+        try self.git_dir.writeFile(self.io, .{ .sub_path = "HEAD", .data = content });
     }
 };
 

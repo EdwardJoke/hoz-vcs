@@ -92,7 +92,7 @@ pub fn computeHeaderSize(t: Type, size: usize) usize {
 pub const Object = struct {
     oid: oid.OID,
     obj_type: Type,
-    data: []u8,
+    data: []const u8,
 };
 
 /// Parse object from raw data (Git loose object format)
@@ -105,7 +105,7 @@ pub fn parse(data: []const u8) !Object {
     const content = data[null_idx + 1 ..];
 
     // Parse header: "<type> <size>"
-    var iter = std.mem.split(u8, header, " ");
+    var iter = std.mem.splitScalar(u8, header, ' ');
     const type_str = iter.next() orelse return error.InvalidObjectFormat;
     const size_str = iter.next() orelse return error.InvalidObjectFormat;
 

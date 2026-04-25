@@ -10,6 +10,7 @@ pub const SshTransport = struct {
     key_path: ?[]const u8,
     agent_forward: bool,
     io: Io,
+    connected: bool,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, host: []const u8) SshTransport {
         return .{
@@ -20,6 +21,7 @@ pub const SshTransport = struct {
             .username = null,
             .key_path = null,
             .agent_forward = false,
+            .connected = false,
         };
     }
 
@@ -40,11 +42,13 @@ pub const SshTransport = struct {
     }
 
     pub fn connect(self: *SshTransport) !void {
-        _ = self;
+        if (self.connected) return;
+        self.connected = true;
     }
 
     pub fn disconnect(self: *SshTransport) void {
-        _ = self;
+        if (!self.connected) return;
+        self.connected = false;
     }
 
     pub fn fetchRefs(self: *SshTransport, path: []const u8) ![]const u8 {

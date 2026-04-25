@@ -101,7 +101,8 @@ pub fn oidFromBytes(bytes: []const u8) OID {
 
 /// Compute OID from content (the core Git operation)
 pub fn oidFromContent(content: []const u8) OID {
-    return sha1.sha1(content);
+    const hash = sha1.sha1(content);
+    return oidFromBytes(&hash);
 }
 
 /// Compare two OIDs

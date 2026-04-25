@@ -1,7 +1,8 @@
 //! Stash Branch - Create branch from stash
 const std = @import("std");
 const Io = std.Io;
-const StashLister = @import("list.zig").StashLister;
+const stash_list = @import("list.zig");
+const StashLister = stash_list.StashLister;
 
 pub const BranchOptions = struct {
     index: u32 = 0,
@@ -54,6 +55,27 @@ pub const StashBrancher = struct {
             };
         }
 
+        const branch_ref = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{branch_name});
+        defer self.allocator.free(branch_ref);
+
+        if (!self.options.force) {
+            const existing = self.git_dir.openFile(self.io, branch_ref, .{}) catch null;
+            if (existing) |file| {
+                file.close(self.io);
+                return BranchResult{
+                    .success = false,
+                    .branch_name = branch_name,
+                    .message = try std.fmt.allocPrint(self.allocator, "branch '{s}' already exists", .{branch_name}),
+                };
+            }
+        }
+
+        try self.git_dir.createDirPath(self.io, "refs/heads");
+        const oid_hex = target_entry.?.oid.toHex();
+        const ref_content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{&oid_hex});
+        defer self.allocator.free(ref_content);
+        try self.git_dir.writeFile(self.io, .{ .sub_path = branch_ref, .data = ref_content });
+
         return BranchResult{
             .success = true,
             .branch_name = branch_name,
@@ -62,7 +84,7 @@ pub const StashBrancher = struct {
     }
 };
 
-const StashEntry = StashLister.StashEntry;
+const StashEntry = stash_list.StashEntry;
 
 test "BranchOptions default values" {
     const options = BranchOptions{};

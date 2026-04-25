@@ -6,6 +6,16 @@ const OutputStyle = @import("output.zig").OutputStyle;
 const StashSaver = @import("../stash/save.zig").StashSaver;
 const StashLister = @import("../stash/list.zig").StashLister;
 const SaveOptions = @import("../stash/save.zig").SaveOptions;
+const StashPopper = @import("../stash/pop.zig").StashPopper;
+const PopOptions = @import("../stash/pop.zig").PopOptions;
+const StashApplier = @import("../stash/apply.zig").StashApplier;
+const ApplyOptions = @import("../stash/apply.zig").ApplyOptions;
+const StashDropper = @import("../stash/drop.zig").StashDropper;
+const DropOptions = @import("../stash/drop.zig").DropOptions;
+const StashShower = @import("../stash/show.zig").StashShower;
+const ShowOptions = @import("../stash/show.zig").ShowOptions;
+const StashBrancher = @import("../stash/branch.zig").StashBrancher;
+const BranchOptions = @import("../stash/branch.zig").BranchOptions;
 
 pub const StashAction = enum {
     save,
@@ -39,8 +49,9 @@ pub const Stash = struct {
     }
 
     pub fn run(self: *Stash) !void {
-        const git_dir = Io.Dir.openDirAbsolute(self.io, ".git", .{}) catch {
-            try self.output.errorMessage("Not a hoz repository", .{});
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch {
+            try self.output.errorMessage("Not in a git repository", .{});
             return;
         };
         defer git_dir.close(self.io);
@@ -48,11 +59,11 @@ pub const Stash = struct {
         switch (self.action) {
             .save => try self.runSave(git_dir),
             .list => try self.runList(git_dir),
-            .pop => try self.runPop(),
-            .apply => try self.runApply(),
-            .drop => try self.runDrop(),
-            .show => try self.runShow(),
-            .branch => try self.runBranch(),
+            .pop => try self.runPop(git_dir),
+            .apply => try self.runApply(git_dir),
+            .drop => try self.runDrop(git_dir),
+            .show => try self.runShow(git_dir),
+            .branch => try self.runBranch(git_dir),
         }
     }
 
@@ -83,38 +94,63 @@ pub const Stash = struct {
         try self.output.successMessage("{d} stash entries", .{entries.len});
     }
 
-    fn runPop(self: *Stash) !void {
+    fn runPop(self: *Stash, git_dir: Io.Dir) !void {
         const index = self.stash_index orelse 0;
-        try self.output.infoMessage("Popping stash@{{{d}}}", .{index});
-        try self.output.successMessage("Stash pop completed", .{});
+        var popper = StashPopper.init(self.allocator, self.io, git_dir, PopOptions{ .index = index });
+        const result = try popper.pop();
+        if (result.success) {
+            try self.output.successMessage("{s}", .{result.message orelse "Stash pop completed"});
+        } else {
+            try self.output.errorMessage("{s}", .{result.message orelse "Stash pop failed"});
+        }
     }
 
-    fn runApply(self: *Stash) !void {
+    fn runApply(self: *Stash, git_dir: Io.Dir) !void {
         const index = self.stash_index orelse 0;
-        try self.output.infoMessage("Applying stash@{{{d}}}", .{index});
-        try self.output.successMessage("Stash apply completed", .{});
+        var applier = StashApplier.init(self.allocator, self.io, git_dir, ApplyOptions{ .index = index });
+        const result = try applier.apply();
+        if (result.success) {
+            try self.output.successMessage("{s}", .{result.message orelse "Stash apply completed"});
+        } else {
+            try self.output.errorMessage("{s}", .{result.message orelse "Stash apply failed"});
+        }
     }
 
-    fn runDrop(self: *Stash) !void {
+    fn runDrop(self: *Stash, git_dir: Io.Dir) !void {
         const index = self.stash_index orelse 0;
-        try self.output.infoMessage("Dropping stash@{{{d}}}", .{index});
-        try self.output.successMessage("Stash drop completed", .{});
+        var dropper = StashDropper.init(self.allocator, self.io, git_dir, DropOptions{ .index = index });
+        const result = try dropper.drop();
+        if (result.success) {
+            try self.output.successMessage("{s}", .{result.message orelse "Stash drop completed"});
+        } else {
+            try self.output.errorMessage("{s}", .{result.message orelse "Stash drop failed"});
+        }
     }
 
-    fn runShow(self: *Stash) !void {
+    fn runShow(self: *Stash, git_dir: Io.Dir) !void {
         const index = self.stash_index orelse 0;
-        try self.output.infoMessage("Stash@{{{d}}}:", .{index});
-        try self.output.infoMessage("(stash show placeholder)", .{});
+        var shower = StashShower.init(self.allocator, self.io, git_dir, ShowOptions{ .index = index });
+        const result = try shower.show();
+        if (result.success) {
+            try self.output.infoMessage("{s}", .{result.diff_output});
+        } else {
+            try self.output.errorMessage("{s}", .{result.message orelse "Stash show failed"});
+        }
     }
 
-    fn runBranch(self: *Stash) !void {
+    fn runBranch(self: *Stash, git_dir: Io.Dir) !void {
         if (self.message) |branch_name| {
-            try self.output.infoMessage("Creating branch from stash: {s}", .{branch_name});
+            const index = self.stash_index orelse 0;
+            var brancher = StashBrancher.init(self.allocator, self.io, git_dir, BranchOptions{ .index = index });
+            const result = try brancher.createBranch(branch_name);
+            if (result.success) {
+                try self.output.successMessage("{s}", .{result.message orelse "Branch created from stash"});
+            } else {
+                try self.output.errorMessage("{s}", .{result.message orelse "Failed to create branch from stash"});
+            }
         } else {
             try self.output.errorMessage("Branch name required", .{});
-            return;
         }
-        try self.output.successMessage("Branch created from stash", .{});
     }
 };
 

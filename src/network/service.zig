@@ -10,23 +10,23 @@ pub const ServiceType = enum {
 pub const ServiceHandler = struct {
     allocator: std.mem.Allocator,
     service_type: ServiceType,
+    running: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, service_type: ServiceType) ServiceHandler {
         return .{ .allocator = allocator, .service_type = service_type };
     }
 
     pub fn start(self: *ServiceHandler, host: []const u8) !void {
-        _ = self;
         _ = host;
+        self.running = true;
     }
 
     pub fn stop(self: *ServiceHandler) void {
-        _ = self;
+        self.running = false;
     }
 
     pub fn isRunning(self: *ServiceHandler) bool {
-        _ = self;
-        return false;
+        return self.running;
     }
 };
 

@@ -1,6 +1,7 @@
 //! Merge Three-Way - Three-way merge algorithm
 const std = @import("std");
 const OID = @import("../object/oid.zig").OID;
+const compress_mod = @import("../compress/zlib.zig");
 
 pub const ThreeWayOptions = struct {
     favor: enum { normal, ours, theirs } = .normal,
@@ -151,11 +152,12 @@ pub const ThreeWayMerger = struct {
     }
 
     fn decompressZlib(allocator: std.mem.Allocator, compressed: []const u8) ![]const u8 {
-        const decompressed = try std.compress.zlib.decompress(allocator, compressed);
+        const decompressed = try compress_mod.Zlib.decompress(compressed, allocator);
         return decompressed;
     }
 
     fn stripBlobHeader(self: *ThreeWayMerger, data: []const u8) ![]const u8 {
+        _ = self;
         const null_pos = std.mem.indexOf(u8, data, "\x00") orelse return data;
         return data[null_pos + 1 ..];
     }

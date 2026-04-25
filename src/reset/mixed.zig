@@ -23,8 +23,9 @@ pub const MixedReset = struct {
         try self.clearIndex();
     }
 
-    pub fn clearIndex(_: *MixedReset) !void {
-        return;
+    pub fn clearIndex(self: *MixedReset) !void {
+        self.git_dir.deleteFile(self.io, "index") catch {};
+        try self.git_dir.writeFile(self.io, .{ .sub_path = "index", .data = "" });
     }
 };
 

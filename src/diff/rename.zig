@@ -245,6 +245,73 @@ pub const RenameDetection = struct {
 
         return best;
     }
+
+    pub const FilePair = struct {
+        path: []const u8,
+        content: []const u8,
+    };
+
+    pub const RenamePair = struct {
+        old_path: []const u8,
+        new_path: []const u8,
+        similarity: f64,
+    };
+
+    pub fn detectRenames(
+        self: *RenameDetection,
+        old_files: []const FilePair,
+        new_files: []const FilePair,
+    ) ![]RenamePair {
+        var renames = std.ArrayList(RenamePair).init(self.allocator);
+        errdefer renames.deinit();
+
+        var matched_old = std.AutoHashMap(usize, void).init(self.allocator);
+        defer matched_old.deinit();
+
+        var matched_new = std.AutoHashMap(usize, void).init(self.allocator);
+        defer matched_new.deinit();
+
+        for (new_files, 0..) |new_file, new_idx| {
+            var best_old_idx: ?usize = null;
+            var best_similarity: f64 = 0.0;
+
+            for (old_files, 0..) |old_file, old_idx| {
+                if (matched_old.contains(old_idx)) continue;
+
+                if (std.mem.eql(u8, old_file.path, new_file.path)) {
+                    best_old_idx = old_idx;
+                    best_similarity = 1.0;
+                    break;
+                }
+
+                const result = try self.detectRename(
+                    old_file.path,
+                    new_file.path,
+                    old_file.content,
+                    new_file.content,
+                );
+
+                if (result.similarity > best_similarity) {
+                    best_similarity = result.similarity;
+                    best_old_idx = old_idx;
+                }
+            }
+
+            if (best_old_idx) |old_idx| {
+                if (best_similarity >= self.config.threshold) {
+                    try renames.append(.{
+                        .old_path = old_files[old_idx].path,
+                        .new_path = new_file.path,
+                        .similarity = best_similarity,
+                    });
+                    try matched_old.put(old_idx, {});
+                    try matched_new.put(new_idx, {});
+                }
+            }
+        }
+
+        return renames.toOwnedSlice();
+    }
 };
 
 test "RenameDetection init" {

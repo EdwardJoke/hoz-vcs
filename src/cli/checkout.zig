@@ -24,8 +24,9 @@ pub const Checkout = struct {
     }
 
     pub fn run(self: *Checkout) !void {
-        const git_dir = Io.Dir.openDirAbsolute(self.io, ".git", .{}) catch {
-            try self.output.errorMessage("Not a hoz repository", .{});
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch {
+            try self.output.errorMessage("Not in a git repository", .{});
             return;
         };
         defer git_dir.close(self.io);

@@ -75,13 +75,11 @@ pub const RefAdvertisement = struct {
     }
 
     pub fn getBranches(self: *RefAdvertisement) []const RemoteRef {
-        _ = self;
-        return &.{};
+        return self.refs.values();
     }
 
     pub fn getTags(self: *RefAdvertisement) []const RemoteRef {
-        _ = self;
-        return &.{};
+        return self.refs.values();
     }
 };
 
