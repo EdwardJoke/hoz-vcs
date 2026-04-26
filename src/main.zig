@@ -40,6 +40,9 @@ pub const Command = enum {
     show,
     help,
     version,
+    switch_cmd,
+    bisect,
+    config,
 };
 
 const CommandInfo = struct {
@@ -73,6 +76,9 @@ const ALL_COMMANDS = [_]CommandInfo{
     .{ .name = "show", .description = "Show various types of objects" },
     .{ .name = "cat-file", .description = "Provide content or type information" },
     .{ .name = "hash-object", .description = "Compute object ID" },
+    .{ .name = "switch", .description = "Switch branches", .aliases = &.{} },
+    .{ .name = "bisect", .description = "Binary search for bugs", .aliases = &.{} },
+    .{ .name = "config", .description = "Get and set repository options", .aliases = &.{} },
 };
 
 fn findCommand(name: []const u8) ?Command {
@@ -107,6 +113,9 @@ fn findCommand(name: []const u8) ?Command {
     if (std.mem.eql(u8, name, "cat_file")) return .cat_file;
     if (std.mem.eql(u8, name, "hash-object")) return .hash_object;
     if (std.mem.eql(u8, name, "hash_object")) return .hash_object;
+    if (std.mem.eql(u8, name, "switch")) return .switch_cmd;
+    if (std.mem.eql(u8, name, "bisect")) return .bisect;
+    if (std.mem.eql(u8, name, "config")) return .config;
     return null;
 }
 

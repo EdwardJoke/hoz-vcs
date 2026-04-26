@@ -1,9 +1,10 @@
 //! Bisect Log - Visualize bisect progress
 const std = @import("std");
+const Io = std.Io;
 
 pub const BisectLog = struct {
     allocator: std.mem.Allocator,
-    entries: std.ArrayList(BisectLogEntry),
+    entries: std.ArrayListUnmanaged(BisectLogEntry),
 
     pub const BisectLogEntry = struct {
         commit: []const u8,
@@ -14,16 +15,16 @@ pub const BisectLog = struct {
     pub fn init(allocator: std.mem.Allocator) BisectLog {
         return .{
             .allocator = allocator,
-            .entries = std.ArrayList(BisectLogEntry).init(allocator),
+            .entries = .empty,
         };
     }
 
     pub fn deinit(self: *BisectLog) void {
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 
     pub fn addEntry(self: *BisectLog, commit: []const u8, status: []const u8, msg: []const u8) !void {
-        try self.entries.append(BisectLogEntry{
+        try self.entries.append(self.allocator, BisectLogEntry{
             .commit = commit,
             .status = status,
             .message = msg,
@@ -58,7 +59,7 @@ test "BisectLog formatLog" {
     defer log.deinit();
     try log.addEntry("abc123", "good", "test passed");
     var buf: [256]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try log.formatLog(fbs.writer());
+    var writer: Io.Writer = .fixed(&buf);
+    try log.formatLog(&writer.interface);
     try std.testing.expect(true);
 }

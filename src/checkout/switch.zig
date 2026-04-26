@@ -32,7 +32,7 @@ pub const BranchSwitcher = struct {
         };
     }
 
-    pub fn switch(self: *BranchSwitcher, branch: []const u8) !SwitchResult {
+    pub fn @"switch"(self: *BranchSwitcher, branch: []const u8) !SwitchResult {
         _ = self;
         _ = branch;
         return SwitchResult{
@@ -125,7 +125,7 @@ test "BranchSwitcher init sets allocator" {
 test "BranchSwitcher switch method exists" {
     var ref_store: RefStore = undefined;
     const options = SwitchOptions{};
-    var switcher = BranchSwitcher.init(std.testing.allocator, &ref_store, options);
+    const switcher = BranchSwitcher.init(std.testing.allocator, &ref_store, options);
 
     try std.testing.expect(switcher.allocator == std.testing.allocator);
 }
@@ -133,7 +133,7 @@ test "BranchSwitcher switch method exists" {
 test "BranchSwitcher createAndSwitch method exists" {
     var ref_store: RefStore = undefined;
     const options = SwitchOptions{};
-    var switcher = BranchSwitcher.init(std.testing.allocator, &ref_store, options);
+    const switcher = BranchSwitcher.init(std.testing.allocator, &ref_store, options);
 
     try std.testing.expect(switcher.allocator == std.testing.allocator);
 }
@@ -141,7 +141,7 @@ test "BranchSwitcher createAndSwitch method exists" {
 test "BranchSwitcher detachHead method exists" {
     var ref_store: RefStore = undefined;
     const options = SwitchOptions{};
-    var switcher = BranchSwitcher.init(std.testing.allocator, &ref_store, options);
+    const switcher = BranchSwitcher.init(std.testing.allocator, &ref_store, options);
 
     try std.testing.expect(switcher.allocator == std.testing.allocator);
 }

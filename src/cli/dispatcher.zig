@@ -35,6 +35,12 @@ const Worktree = @import("worktree.zig").Worktree;
 const Restore = @import("restore.zig").Restore;
 const CatFile = @import("cat_file.zig").CatFile;
 const HashObject = @import("hash_object.zig").HashObject;
+const LsFiles = @import("ls_files.zig").LsFiles;
+const LsTree = @import("ls_tree.zig").LsTree;
+const ShowRef = @import("show_ref.zig").ShowRef;
+const Switch = @import("switch.zig").Switch;
+const Bisect = @import("bisect.zig").Bisect;
+const Config = @import("config.zig").Config;
 
 pub const CommandDispatcher = struct {
     allocator: std.mem.Allocator,
@@ -112,6 +118,18 @@ pub const CommandDispatcher = struct {
             try self.runCatFile(args);
         } else if (std.mem.eql(u8, cmd, "hash-object")) {
             try self.runHashObject(args);
+        } else if (std.mem.eql(u8, cmd, "ls-files")) {
+            try self.runLsFiles(args);
+        } else if (std.mem.eql(u8, cmd, "ls-tree")) {
+            try self.runLsTree(args);
+        } else if (std.mem.eql(u8, cmd, "show-ref")) {
+            try self.runShowRef(args);
+        } else if (std.mem.eql(u8, cmd, "switch")) {
+            try self.runSwitch(args);
+        } else if (std.mem.eql(u8, cmd, "bisect")) {
+            try self.runBisect(args);
+        } else if (std.mem.eql(u8, cmd, "config")) {
+            try self.runConfig(args);
         } else {
             var out = Output.init(self.writer, self.style, self.allocator);
             try out.errorMessage("Unknown command: {s}", .{cmd});
@@ -344,7 +362,7 @@ pub const CommandDispatcher = struct {
     }
 
     fn runShow(self: *CommandDispatcher, args: []const []const u8) !void {
-        var show = Show.init(self.allocator, self.writer, self.style);
+        var show = Show.init(self.allocator, self.io, self.writer, self.style);
         const object = if (args.len > 1) args[1] else null;
         try show.run(object);
     }
@@ -382,7 +400,7 @@ pub const CommandDispatcher = struct {
     }
 
     fn runBundle(self: *CommandDispatcher, args: []const []const u8) !void {
-        var bundle = Bundle.init(self.allocator, self.writer, self.style);
+        var bundle = Bundle.init(self.allocator, self.io, self.writer, self.style);
         const action = if (args.len > 1) args[1] else "create";
         const file = if (args.len > 2) args[2] else null;
         try bundle.run(action, file);
@@ -585,6 +603,36 @@ pub const CommandDispatcher = struct {
     fn runHashObject(self: *CommandDispatcher, args: []const []const u8) !void {
         var hash_object = HashObject.init(self.allocator, self.io, self.writer, self.style);
         try hash_object.run(args);
+    }
+
+    fn runLsFiles(self: *CommandDispatcher, args: []const []const u8) !void {
+        var ls_files = LsFiles.init(self.allocator, self.io, self.writer, self.style);
+        try ls_files.run(args);
+    }
+
+    fn runLsTree(self: *CommandDispatcher, args: []const []const u8) !void {
+        var ls_tree = LsTree.init(self.allocator, self.io, self.writer, self.style);
+        try ls_tree.run(args);
+    }
+
+    fn runShowRef(self: *CommandDispatcher, args: []const []const u8) !void {
+        var show_ref = ShowRef.init(self.allocator, self.io, self.writer, self.style);
+        try show_ref.run(args);
+    }
+
+    fn runSwitch(self: *CommandDispatcher, args: []const []const u8) !void {
+        var switch_cmd = Switch.init(self.allocator, self.io, self.writer, self.style);
+        try switch_cmd.run(args);
+    }
+
+    fn runBisect(self: *CommandDispatcher, args: []const []const u8) !void {
+        var bisect_cmd = Bisect.init(self.allocator, self.io, self.writer, self.style);
+        try bisect_cmd.run(args);
+    }
+
+    fn runConfig(self: *CommandDispatcher, args: []const []const u8) !void {
+        var config_cmd = Config.init(self.allocator, self.io, self.writer, self.style);
+        try config_cmd.run(args);
     }
 };
 

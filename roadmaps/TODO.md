@@ -594,3 +594,41 @@ These Git commands have no CLI implementation at all:
 - ✅ COMPLETE = Functioning, verified with `zig build`
 - ⚠️ CLI works = CLI command works but underlying function returns stub data
 - ❌ = Not implemented / stub only
+
+---
+
+## What's Missing or Stubbed (the gaps)
+
+### 🔴 Critical Gaps (not 100% compatible):
+
+| Area | Problem | Impact |
+|------|---------|--------|
+| Smart HTTP protocol | `transport.zig:282` `fetchRefsGeneric()` falls back to returning `&[0]u8{}`; line 406 `fetchPackGeneric()` same | fetch / push / pull / clone from remotes won't actually transfer data over HTTP |
+| Pack protocol (sideband) | Pack recv has real header validation but `pack_recv.zig:210-448` multiple `_ = self` on progress/delta resolution | Large repos may fail during unpack |
+| SSH transport | `ssh.zig:44-49` just sets/clears a connected flag — no actual ssh exec | git@host:repo URLs non-functional |
+
+### 🟡 Missing Git Commands (~15 common ones):
+
+| Missing Command | Use Case Priority |
+|-----------------|---|
+| `git bisect` | Medium — debugging |
+| `git config` (CLI) | **High** — user config management (read/write module exists but no CLI entry) |
+| `git describe` | Low — tagging workflows |
+| `git grep` | Medium — search |
+| `git mv` | Low — rename convenience |
+| `git shortlog` | Low — release notes |
+| `git format-patch` | Medium — email workflows |
+| `git fsck` | **High** — integrity checking |
+| `git submodule` | Low — monorepos |
+| `git filter-repo` | Low — history rewriting |
+| `git blame` | **High** — line annotation |
+| `git archive` | Low — distribution |
+| `git rerere` | Low — conflict reuse |
+| `git cherry` | Low — patch management |
+| `git stash apply` (separate from pop) | Already covered by stash |
+
+### 🟢 Minor / Cosmetic:
+
+- Many `_ = self` in deinit/format functions — harmless, just unused parameters
+- `final/` benchmark/profiler modules use fake timing loops (by design — they're scaffolding)
+- Some format functions in log.zig have `_ = self` on optional formatting fields
