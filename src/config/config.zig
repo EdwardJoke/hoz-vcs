@@ -82,8 +82,9 @@ pub const Config = struct {
     }
 
     pub fn unset(self: *Config, key: []const u8) void {
-        _ = self;
-        _ = key;
+        if (self.entries.fetchRemove(key)) |kv| {
+            self.allocator.free(kv.value);
+        }
     }
 };
 
@@ -112,4 +113,15 @@ test "Config set and get" {
     defer config.deinit();
     try config.set("user.name", "Test User");
     try std.testing.expectEqualStrings("Test User", config.get("user.name").?);
+}
+
+test "Config unset removes entry" {
+    const allocator = std.testing.allocator;
+    var config = Config.init(allocator);
+    defer config.deinit();
+    try config.set("user.name", "Test User");
+    try std.testing.expect(config.get("user.name") != null);
+
+    config.unset("user.name");
+    try std.testing.expect(config.get("user.name") == null);
 }

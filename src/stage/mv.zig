@@ -28,21 +28,43 @@ pub const StagerMover = struct {
     }
 
     pub fn move(self: *StagerMover, source: []const u8, dest: []const u8) !MoveResult {
-        _ = self;
-        _ = source;
-        _ = dest;
-        return MoveResult{
-            .renamed = 0,
-            .errors = 0,
+        if (self.options.dry_run) {
+            return .{ .renamed = 1, .errors = 0 };
+        }
+
+        const src_idx = self.index.findEntry(source) orelse {
+            return .{ .renamed = 0, .errors = 1 };
         };
+
+        if (!self.options.force and self.index.findEntry(dest) != null) {
+            return .{ .renamed = 0, .errors = 1 };
+        }
+
+        const entry = self.index.getEntry(src_idx) orelse {
+            return .{ .renamed = 0, .errors = 1 };
+        };
+
+        try self.index.removeEntry(source);
+
+        const dest_owned = try self.allocator.dupe(u8, dest);
+        try self.index.addEntry(entry, dest_owned);
+
+        return .{ .renamed = 1, .errors = 0 };
     }
 
     pub fn moveMultiple(self: *StagerMover, moves: []const struct { from: []const u8, to: []const u8 }) !MoveResult {
-        _ = self;
-        _ = moves;
-        return MoveResult{
-            .renamed = 0,
-            .errors = 0,
+        var total_renamed: u32 = 0;
+        var total_errors: u32 = 0;
+
+        for (moves) |m| {
+            const result = try self.move(m.from, m.to);
+            total_renamed += result.renamed;
+            total_errors += result.errors;
+        }
+
+        return .{
+            .renamed = total_renamed,
+            .errors = total_errors,
         };
     }
 };
@@ -64,43 +86,37 @@ test "MoveResult structure" {
 }
 
 test "StagerMover init" {
-    var index: Index = undefined;
+    var index = Index.init(std.testing.allocator);
+    defer index.deinit();
     const mover = StagerMover.init(std.testing.allocator, &index);
 
     try std.testing.expect(mover.allocator == std.testing.allocator);
 }
 
 test "StagerMover init with index" {
-    var index: Index = undefined;
+    var index = Index.init(std.testing.allocator);
+    defer index.deinit();
     const mover = StagerMover.init(std.testing.allocator, &index);
 
     try std.testing.expect(mover.index == &index);
 }
 
-test "StagerMover move method exists" {
-    var index: Index = undefined;
-    const mover = StagerMover.init(std.testing.allocator, &index);
+test "StagerMover dry_run returns success" {
+    var index = Index.init(std.testing.allocator);
+    defer index.deinit();
+    var mover = StagerMover.init(std.testing.allocator, &index);
+    mover.options.dry_run = true;
 
     const result = try mover.move("old.txt", "new.txt");
-    try std.testing.expect(result.renamed >= 0);
+    try std.testing.expectEqual(@as(u32, 1), result.renamed);
 }
 
-test "StagerMover moveMultiple method exists" {
-    var index: Index = undefined;
-    const mover = StagerMover.init(std.testing.allocator, &index);
+test "StagerMover missing source returns error" {
+    var index = Index.init(std.testing.allocator);
+    defer index.deinit();
+    var mover = StagerMover.init(std.testing.allocator, &index);
 
-    const moves = &.{
-        .{ .from = "a.txt", .to = "b.txt" },
-        .{ .from = "c.txt", .to = "d.txt" },
-    };
-    const result = try mover.moveMultiple(moves);
-    try std.testing.expect(result.renamed >= 0);
-}
-
-test "StagerMover options access" {
-    var index: Index = undefined;
-    const mover = StagerMover.init(std.testing.allocator, &index);
-
-    try std.testing.expect(mover.options.cached == false);
-    try std.testing.expect(mover.options.force == false);
+    const result = try mover.move("nonexistent.txt", "new.txt");
+    try std.testing.expectEqual(@as(u32, 0), result.renamed);
+    try std.testing.expectEqual(@as(u32, 1), result.errors);
 }

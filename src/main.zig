@@ -52,6 +52,9 @@ pub const Command = enum {
     archive,
     rev_parse,
     write_tree,
+    cherry_pick,
+    revert,
+    notes,
 };
 
 const CommandInfo = struct {
@@ -97,6 +100,9 @@ const ALL_COMMANDS = [_]CommandInfo{
     .{ .name = "archive", .description = "Create archive from tree object", .aliases = &.{} },
     .{ .name = "rev-parse", .description = "Parse and resolve revision identifiers", .aliases = &.{} },
     .{ .name = "write-tree", .description = "Create tree object from index", .aliases = &.{} },
+    .{ .name = "cherry-pick", .description = "Apply changes from existing commits", .aliases = &.{} },
+    .{ .name = "revert", .description = "Revert some existing commits", .aliases = &.{} },
+    .{ .name = "notes", .description = "Add or inspect object notes", .aliases = &.{} },
 };
 
 fn findCommand(name: []const u8) ?Command {
@@ -143,6 +149,9 @@ fn findCommand(name: []const u8) ?Command {
     if (std.mem.eql(u8, name, "archive")) return .archive;
     if (std.mem.eql(u8, name, "rev-parse") or std.mem.eql(u8, name, "rev_parse")) return .rev_parse;
     if (std.mem.eql(u8, name, "write-tree") or std.mem.eql(u8, name, "write_tree")) return .write_tree;
+    if (std.mem.eql(u8, name, "cherry-pick")) return .cherry_pick;
+    if (std.mem.eql(u8, name, "revert")) return .revert;
+    if (std.mem.eql(u8, name, "notes")) return .notes;
     return null;
 }
 

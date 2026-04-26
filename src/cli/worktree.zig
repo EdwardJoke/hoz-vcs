@@ -112,7 +112,7 @@ pub const Worktree = struct {
         const repo_path = ".git";
 
         _ = cwd;
-        var adder = WorktreeAdder.init(self.allocator, repo_path);
+        var adder = WorktreeAdder.init(self.allocator, repo_path, self.io);
         adder.add(path.?, branch orelse "main", commit) catch {
             try self.output.errorMessage("Failed to create worktree", .{});
             return;
@@ -121,12 +121,8 @@ pub const Worktree = struct {
         try self.output.successMessage("Created worktree at {s}", .{path.?});
     }
 
-    fn runList(self: *Worktree, git_dir: Io.Dir) !void {
-        _ = git_dir;
-
-        const repo_path = ".git";
-
-        var lister = WorktreeLister.init(self.allocator, repo_path);
+    fn runList(self: *Worktree, _: Io.Dir) !void {
+        var lister = WorktreeLister.init(self.allocator, self.io);
         const worktrees = lister.list() catch {
             try self.output.infoMessage("No worktrees found", .{});
             return;

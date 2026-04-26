@@ -195,11 +195,62 @@ pub const PruneResult = struct {
 };
 
 pub fn pruneRemote(self: *RemoteManager, name: []const u8, options: PruneOptions) !PruneResult {
-    _ = self;
-    _ = name;
-    _ = options;
-    return PruneResult{
+    if (self.git_dir_path == null) return PruneResult{ .pruned_refs = &.{}, .dry_run = options.dry_run };
+    const git_dir = self.git_dir_path.?;
+
+    const remotes_dir = try std.fmt.allocPrint(self.allocator, "{s}/refs/remotes/{s}", .{ git_dir, name });
+    defer self.allocator.free(remotes_dir);
+
+    var pruned = std.ArrayList([]const u8).init(self.allocator);
+    errdefer {
+        for (pruned.items) |p| self.allocator.free(p);
+        pruned.deinit(self.allocator);
+    }
+
+    const cwd = Io.Dir.cwd();
+    var walker = cwd.walk(self.io, remotes_dir) catch return PruneResult{
         .pruned_refs = &.{},
+        .dry_run = options.dry_run,
+    };
+    defer walker.deinit();
+
+    while (walker.next() catch break) |entry| {
+        if (entry.kind != .file) continue;
+
+        const rel_path = entry.path;
+        const ref_name = try std.fmt.allocPrint(self.allocator, "refs/remotes/{s}/{s}", .{ name, rel_path });
+
+        const head_content = cwd.readFileAlloc(self.io, ".git/HEAD", self.allocator, .limited(256)) catch "";
+        defer if (head_content.len > 0) self.allocator.free(head_content);
+
+        var is_orphaned = true;
+        if (std.mem.startsWith(u8, head_content, "ref: ")) {
+            const head_ref = std.mem.trim(u8, head_content[5..], " \t\r\n");
+            const branch_name = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{
+                std.mem.trim(u8, rel_path, " \t\r\n"),
+            });
+            defer self.allocator.free(branch_name);
+
+            if (std.mem.eql(u8, head_ref, branch_name)) {
+                is_orphaned = false;
+            }
+        }
+
+        if (is_orphaned and !options.dry_run) {
+            const full_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ remotes_dir, rel_path });
+            cwd.deleteFile(self.io, full_path) catch {};
+            self.allocator.free(full_path);
+        }
+
+        if (is_orphaned) {
+            try pruned.append(self.allocator, ref_name);
+        } else {
+            self.allocator.free(ref_name);
+        }
+    }
+
+    return PruneResult{
+        .pruned_refs = pruned.toOwnedSlice(self.allocator),
         .dry_run = options.dry_run,
     };
 }

@@ -68,14 +68,91 @@ pub fn isThinPack(data: []const u8) bool {
 }
 
 pub fn getReuseOffsets(data: []const u8) []const u32 {
-    _ = data;
-    return &.{};
+    if (data.len < 12) return &.{};
+    const signature = std.mem.readIntBig(u32, data[0..4]);
+    if (signature != 0x5041434b) return &.{};
+
+    const num_objects =
+        (@as(u32, data[8]) << 24) |
+        (@as(u32, data[9]) << 16) |
+        (@as(u32, data[10]) << 8) |
+        @as(u32, data[11]);
+
+    var offsets = std.ArrayList(u32).initCapacity(std.heap.page_allocator, num_objects);
+    errdefer {
+        for (offsets.items) |*o| _ = o;
+        offsets.deinit(std.heap.page_allocator);
+    }
+
+    var pos: usize = 12;
+    var count: u32 = 0;
+
+    while (count < num_objects and pos < data.len) : (count += 1) {
+        try offsets.append(std.heap.page_allocator, @truncate(pos));
+        const first_byte = data[pos];
+        const obj_type = (first_byte >> 4) & 0x07;
+        if (obj_type == 6 or obj_type == 7) continue;
+
+        var i: usize = 1;
+        while (i < data.len and i < 20) : (i += 1) {
+            if ((data[pos + i] & 0x80) == 0) break;
+        }
+        pos += i + 1;
+    }
+
+    return offsets.toOwnedSlice(std.heap.page_allocator) catch &.{};
 }
 
 pub fn detectThinPack(data: []const u8, options: ThinPackDetection) !bool {
-    _ = data;
-    _ = options;
-    return false;
+    if (!options.enabled) return false;
+    if (data.len < 12) return false;
+
+    const signature = std.mem.readIntBig(u32, data[0..4]);
+    if (signature != 0x5041434b) return false;
+
+    const num_objects =
+        (@as(u32, data[8]) << 24) |
+        (@as(u32, data[9]) << 16) |
+        (@as(u32, data[10]) << 8) |
+        @as(u32, data[11]);
+
+    var pos: usize = 12;
+    var count: u32 = 0;
+    var has_ref_delta: bool = false;
+
+    while (count < num_objects and pos < data.len) : (count += 1) {
+        const first_byte = data[pos];
+        const obj_type_val = (first_byte >> 4) & 0x07;
+
+        if (obj_type_val == 7) {
+            has_ref_delta = true;
+            if (options.missing_base_check) {
+                if (pos + 21 > data.len) return true;
+                const base_oid = data[pos + 1 .. pos + 21];
+                const base_path = try std.fmt.bufPrint(
+                    &[64]u8 undefined,
+                    ".git/objects/{s}/{s}",
+                    .{ base_oid[0..2], base_oid[2..] },
+                );
+                if (std.fs.cwd().openFile(base_path, .{}) catch null == null) {
+                    return true;
+                }
+            }
+        }
+
+        var i: usize = 1;
+        while (pos + i < data.len and i < 20) : (i += 1) {
+            if ((data[pos + i] & 0x80) == 0) break;
+        }
+
+        if (obj_type_val == 7) {
+            pos += i + 1 + 20;
+        } else {
+            pos += i + 1;
+        }
+    }
+
+    return has_ref_delta;
 }
 
 /// Packfile signature: "PACK"

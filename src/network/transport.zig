@@ -703,9 +703,40 @@ pub const Transport = struct {
 
     fn buildPushCapabilities(self: *Transport, caps: *const protocol.ProtocolCapabilities) ![]const u8 {
         _ = self;
-        _ = caps;
-        // Build capability string for push
-        return try std.fmt.allocPrint(std.heap.page_allocator, "report-status side-band-64k agent=hoz/1.0", .{});
+
+        var parts = std.ArrayList([]const u8).initCapacity(std.heap.page_allocator, 8);
+        errdefer {
+            for (parts.items) |p| std.heap.page_allocator.free(p);
+            parts.deinit(std.heap.page_allocator);
+        }
+
+        if (caps.report_status) {
+            try parts.append(std.heap.page_allocator, "report-status");
+        }
+        if (caps.sideband_64k) {
+            try parts.append(std.heap.page_allocator, "side-band-64k");
+        } else if (caps.sideband) {
+            try parts.append(std.heap.page_allocator, "side-band");
+        }
+        if (caps.atomic) {
+            try parts.append(std.heap.page_allocator, "atomic");
+        }
+        if (caps.push_options) {
+            try parts.append(std.heap.page_allocator, "push-options");
+        }
+        if (caps.multi_ack_detailed) {
+            try parts.append(std.heap.page_allocator, "multi_ack_detailed");
+        } else if (caps.multi_ack) {
+            try parts.append(std.heap.page_allocator, "multi_ack");
+        }
+
+        const agent_val = try std.fmt.allocPrint(std.heap.page_allocator, "agent={s}", .{caps.agent});
+        try parts.append(std.heap.page_allocator, agent_val);
+
+        const result = try std.mem.join(std.heap.page_allocator, " ", parts.items);
+        for (parts.items) |p| std.heap.page_allocator.free(p);
+        parts.deinit(std.heap.page_allocator);
+        return result;
     }
 };
 

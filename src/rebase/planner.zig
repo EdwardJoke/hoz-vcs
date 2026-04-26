@@ -157,8 +157,84 @@ pub const RebasePlanner = struct {
     }
 
     fn groupSquashCommits(self: *RebasePlanner, commits: *std.ArrayList(OID)) !void {
-        _ = self;
-        _ = commits;
+        if (commits.items.len < 2) return;
+
+        var i: usize = 1;
+        while (i < commits.items.len) {
+            const oid = commits.items[i];
+            const commit_data = self.readCommitData(oid) catch {
+                i += 1;
+                continue;
+            };
+            defer self.allocator.free(commit_data);
+
+            const commit = Commit.parse(self.allocator, commit_data) catch {
+                i += 1;
+                continue;
+            };
+
+            const first_line = self.firstLine(commit.message);
+            var target_idx: ?usize = null;
+
+            if (self.isSquashOrFixup(first_line)) {
+                const target_subject = self.extractFixupTarget(first_line);
+
+                if (target_subject.len > 0) {
+                    for (commits.items[0..i], 0..) |candidate_oid, j| {
+                        if (oid.eql(candidate_oid)) continue;
+
+                        const candidate_data = self.readCommitData(candidate_oid) catch continue;
+                        defer self.allocator.free(candidate_data);
+
+                        const candidate = Commit.parse(self.allocator, candidate_data) catch continue;
+                        const candidate_subject = self.firstLine(candidate.message);
+
+                        if (self.subjectsMatch(target_subject, candidate_subject)) {
+                            target_idx = j;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (target_idx) |tgt| {
+                const squash_oid = commits.orderedRemove(i);
+                _ = try commits.insert(self.allocator, tgt + 1, squash_oid);
+                i = tgt + 2;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    fn firstLine(_: *RebasePlanner, text: []const u8) []const u8 {
+        if (std.mem.indexOf(u8, text, "\n")) |nl| {
+            return text[0..nl];
+        }
+        return text;
+    }
+
+    fn isSquashOrFixup(_: *RebasePlanner, line: []const u8) bool {
+        const trimmed = std.mem.trim(u8, line, " \t");
+        return std.mem.startsWith(u8, trimmed, "squash! ") or
+            std.mem.startsWith(u8, trimmed, "fixup! ");
+    }
+
+    fn extractFixupTarget(_: *RebasePlanner, line: []const u8) []const u8 {
+        const trimmed = std.mem.trim(u8, line, " \t");
+        if (std.mem.startsWith(u8, trimmed, "squash! ")) {
+            return trimmed["squash! ".len..];
+        }
+        if (std.mem.startsWith(u8, trimmed, "fixup! ")) {
+            return trimmed["fixup! ".len..];
+        }
+        return "";
+    }
+
+    fn subjectsMatch(_: *RebasePlanner, a: []const u8, b: []const u8) bool {
+        const ta = std.mem.trim(u8, a, " \t");
+        const tb = std.mem.trim(u8, b, " \t");
+        return std.mem.eql(u8, ta, tb);
     }
 
     fn readCommitData(self: *RebasePlanner, oid: OID) ![]const u8 {

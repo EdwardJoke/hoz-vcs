@@ -177,12 +177,23 @@ pub const Pull = struct {
     }
 
     fn checkFastForward(self: *Pull, ancestor_oid: oid_mod.OID, descendant_oid: oid_mod.OID) !struct { can_ff: bool } {
-        _ = self;
-        _ = ancestor_oid;
-        _ = descendant_oid;
+        if (ancestor_oid.eql(descendant_oid)) return .{ .can_ff = true };
 
-        // Simplified: assume can fast-forward if we reach here
-        return .{ .can_ff = true };
+        var current = descendant_oid;
+        const max_depth: u32 = 10000;
+        var depth: u32 = 0;
+
+        while (depth < max_depth) : (depth += 1) {
+            if (current.eql(ancestor_oid)) return .{ .can_ff = true };
+
+            const commit_data = self.readCommit(current) catch break;
+            defer self.allocator.free(commit_data);
+
+            const parent_oid = self.extractParent(commit_data) orelse break;
+            current = parent_oid;
+        }
+
+        return .{ .can_ff = false };
     }
 
     fn resolveRef(self: *Pull, git_dir: []const u8, ref: []const u8) !oid_mod.OID {
@@ -197,6 +208,29 @@ pub const Pull = struct {
 
         const trimmed = std.mem.trim(u8, content, " \n\r\t");
         return try oid_mod.OID.fromHex(trimmed);
+    }
+
+    fn readCommit(self: *Pull, oid: oid_mod.OID) ![]const u8 {
+        const oid_hex = oid.toHex();
+        const obj_path = try std.fmt.allocPrint(self.allocator, ".git/objects/{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
+        defer self.allocator.free(obj_path);
+
+        const cwd = Io.Dir.cwd();
+        const file = cwd.openFile(self.io, obj_path, .{}) catch return error.ObjectNotFound;
+        defer file.close(self.io);
+
+        var reader = file.reader(self.io, &.{});
+        return reader.interface.allocRemaining(self.allocator, .limited(1024 * 1024));
+    }
+
+    fn extractParent(_: *Pull, commit_data: []const u8) ?oid_mod.OID {
+        if (std.mem.indexOf(u8, commit_data, "\nparent ")) |idx| {
+            const start = idx + "\nparent ".len;
+            const end = if (std.mem.indexOf(u8, commit_data[start..], "\n")) |nl| start + nl else commit_data.len;
+            const hex = commit_data[start..end];
+            return oid_mod.OID.fromHex(hex) catch null;
+        }
+        return null;
     }
 
     fn fastForwardMerge(self: *Pull, git_dir: []const u8, branch: []const u8, new_oid: oid_mod.OID) !void {

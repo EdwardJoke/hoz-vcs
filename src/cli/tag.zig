@@ -76,7 +76,7 @@ pub const Tag = struct {
 
     fn runList(self: *Tag, git_dir: Io.Dir) !void {
         _ = git_dir;
-        var lister = TagLister.init(self.allocator);
+        var lister = TagLister.init(self.allocator, self.io);
         const tags = try lister.listAll();
         defer self.allocator.free(tags);
 

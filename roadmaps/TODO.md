@@ -597,6 +597,287 @@ These Git commands have no CLI implementation at all:
 
 ---
 
+## 18. Stub Code Found (Deep Scan — 2026-04-26)
+
+> These functions have `_ = self` + empty/fake returns or no-op bodies.
+> They compile and pass `zig build` but produce no real results.
+
+### 18.1 Checkout / Switch — ✅ Implemented
+
+### `src/checkout/switch.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `BranchSwitcher.switch` | 36 | Resolves ref via RefStore.resolve → writes `ref: <name>` to .git/HEAD via Io.Dir.cwd().createFile | ✅ |
+| `BranchSwitcher.createAndSwitch` | 52 | Resolves HEAD for OID, checks if target branch exists (force_create guard), writes HEAD to new branch ref | ✅ |
+| `BranchSwitcher.detachHead` | 75 | Converts OID to hex string, writes raw OID to .git/HEAD (detached HEAD mode) | ✅ |
+
+### 18.2 Bisect — Partial Stub
+
+### `src/bisect/start.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `BisectStart.getRevList` | 56 | Reads bisect/bad ref, walks parent chain via getParentOids() (reads loose objects, parses `parent <oid>` lines), tracks visited commits in StringHashMap, returns owned OID slice | ✅ |
+| `BisectStart.start` | 30 | Writes bisect refs to disk ✅, rev-list now walks commit graph from bad → root | ✅ |
+
+### 18.3 History Blame — ✅ Implemented
+
+### `src/history/blame.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `Blamer.blameFile` | 53 | Reads file via std.fs.cwd().openFile, splits content by `\n`, creates BlameLine per line (original/final line numbers), wraps in BlameEntry with filename | ✅ |
+| `Blamer.getBlameForRange` | 61 | Calls blameFile, filters lines where final_line_number ∈ [start, end], returns filtered entries with deep-copied fields | ✅ |
+
+### 18.4 Worktree — Partial Stub
+
+### `src/worktree/list.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `WorktreeLister.list` | 13 | Opens .git/worktrees/, walks directories, reads gitdir→HEAD per worktree, checks locked status | ✅ |
+
+### `src/worktree/add.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `WorktreeAdder.add` | 15 | Creates worktree dir, writes .git gitfile, creates .git/worktrees/<branch>/ with HEAD+gitdir | ✅ |
+
+### 18.5 Rebase — Partial Stubs
+
+### `src/rebase/picker.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `RebasePicker.parseTodoList` | 33 | Parses rebase todo lines (pick/reword/edit/squash/fixup/drop/exec + short forms), skips #comments and blanks | ✅ |
+| `RebasePicker.getAction` | 45 | When autosquash enabled: checks commit first line for `squash!` → .squash, `fixup!` → .fixup; otherwise returns .pick | ✅ |
+
+### `src/rebase/replay.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `CommitReplayer.replay` | 36 | Reads commit object, checks for empty tree skip, returns ReplayResult | ✅ |
+| `CommitReplayer.replayMultiple` | 48 | Iterates commits, calls replay() per commit, chains base OID, returns allocated results | ✅ |
+
+### `src/rebase/planner.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `RebasePlanner.groupSquashCommits` | 160 | Reads each commit message, finds squash!/fixup! commits, moves them after target by subject match | ✅ |
+
+### 18.6 Tag List — ✅ Implemented
+
+### `src/tag/list.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `TagLister.listAll` | 13 | Opens .git/refs/tags/, walks files, returns tag name slice | ✅ |
+| `TagLister.listMatching` | 19 | Calls listAll, filters via globMatch (supports `prefix*`, `*suffix`, exact) | ✅ |
+| `TagLister.listWithDetails` | 24 | Calls listAll, reads each ref's OID from .git/refs/tags/<name>, returns `"tag oid"` strings | ✅ |
+
+### 18.7 Remote List — Full Stub
+
+### `src/remote/list.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `RemoteLister.list` | 20 | Calls parseRemotes, converts to RemoteInfo slice with fetched=false | ✅ |
+| `RemoteLister.listVerbose` | 25 | Same as list with verbose parseRemotes | ✅ |
+| `RemoteLister.getRemoteNames` | 30 | Parses remotes, extracts name field into allocated slice | ✅ |
+
+### 18.8 Config List — ✅ Implemented
+
+### `src/config/list.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `ConfigLister.listAll` | 13 | Reads .git/config, ~/.gitconfig, /etc/gitconfig, returns all non-empty lines | ✅ |
+| `ConfigLister.listLocal` | 36 | Reads .git/config via Io.Dir.cwd().readFileAlloc | ✅ |
+| `ConfigLister.listGlobal` | 40 | Resolves $HOME, reads ~/.gitconfig | ✅ |
+| `ConfigLister.listSystem` | 47 | Reads /etc/gitconfig | ✅ |
+
+### 18.9 Show Ref — ✅ Implemented
+
+### `src/history/show_ref.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `RefShower.showRefs` | 39 | Walks .git/refs/{heads,tags,remotes}, reads each ref file, returns ShowRefResult[] | ✅ |
+| `RefShower.showHead` | 113 | Reads .git/HEAD, resolves symref target, returns OID + symref info | ✅ |
+| `RefShower.formatRef` | 159 | Formats `{abbrev_oid} {ref_name}` with optional symref/deref output | ✅ |
+
+### 18.10 Protocol Capabilities — ✅ Implemented
+
+### `src/remote/capabilities.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `CapabilityNegotiator.negotiate` | 37 | Parses server cap strings via StaticStringMap → Capability enum, returns CapabilitySet | ✅ |
+| `CapabilityNegotiator.hasCapability` | 51 | Linear scan of negotiated caps list, returns bool | ✅ |
+| `CapabilityNegotiator.getCommonCapabilities` | 58 | Intersects server caps with client-supported set (7 caps) | ✅ |
+
+### 18.11 Want/Have Exchange — Full Stub
+
+### `src/network/exchange.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `WantHaveExchanger.sendWant` | 34 | Stores OID copy in wants list | ✅ |
+| `WantHaveExchanger.sendHave` | 38 | Stores OID in haves, cross-checks wants for common/acknowledged | ✅ |
+| `WantHaveExchanger.sendDone` | 43 | Sets done_sent flag | ✅ |
+| `WantHaveExchanger.processAcks` | 47 | Filters acks against wants (and haves if multi_ack_detailed), returns common slice | ✅ |
+
+### 18.12 Push Refspec — ✅ Implemented
+
+### `src/remote/push_refspec.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `PushRefspecParser.parse` | 18 | Parses `+src:dst`, `:dst`, `shorthand` → returns owned PushRefspec | ✅ |
+| `PushRefspecParser.parseMultiple` | 54 | Iterates inputs, calls parse for each, collects results | ✅ |
+| `PushRefspecParser.validate` | 73 | Checks ref name validity (no `..`, `.lock`, `\`, must start with `refs/`) | ✅ |
+
+### 18.13 Stage Move — ✅ Implemented
+
+### `src/stage/mv.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `StagerMover.move` | 30 | Uses Index.findEntry→removeEntry→addEntry to rename index entries | ✅ |
+| `StagerMover.moveMultiple` | 55 | Iterates moves, accumulates renamed/errors counts | ✅ |
+
+### 18.14 Config Unset — ✅ Implemented
+
+### `src/config/config.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `Config.unset` | 85 | Uses entries.fetchRemove(key) + frees value | ✅ |
+
+### 18.15 Perf / Cache — ✅ Implemented
+
+### `src/perf/cache.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `ObjectCache.warmCache` | 174 | Reads .git/HEAD, resolves symref, reads packed-refs + info/refs to pre-populate | ✅ |
+| `ObjectCache.setEvictionPolicy` | 199 | Stores policy (lru/fifo/lfu), evictOne() switches on policy, LFU tracks access counts | ✅ |
+
+### 18.16 Packfile Detection — Always False
+
+### `src/object/packfile.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `getReuseOffsets` | 72 | Parses PACK header, scans object entries, returns offset slice for delta objects | ✅ |
+| `detectThinPack` | 78 | Scans for OBJ_REF_DELTA (type 7), optionally checks missing base objects | ✅ |
+
+### 18.17 Remote Manager — Stub
+
+### `src/remote/manager.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `RemoteManager.pruneRemote` | 198 | Walks refs/remotes/<name>/, checks orphan status vs HEAD, deletes/prunes stale refs | ✅ |
+
+### 18.17 Pull — Simplified Logic
+
+### `src/cli/pull.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `Pull.checkFastForward` | 180 | Walks descendant's parent chain (max 10000 depth) via readCommit+extractParent, checks if ancestor_oid appears → returns can_ff bool | ✅ |
+
+### 18.18 Transport — ✅ Implemented
+
+### `src/network/transport.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `Transport.buildPushCapabilities` | 704 | Reads caps struct fields (report_status, sideband_64k, atomic, push_options, multi_ack), builds space-separated string with agent= tag | ✅ |
+
+### Summary Table
+
+| Category | File(s) | ❌ Count | ⚠️ Count |
+|----------|---------|----------|-----------|
+| Checkout/Switch | switch.zig | 0 | 0 |
+| Bisect | start.zig | 0 | 0 |
+| Blame | blame.zig | 0 | 0 |
+| Worktree | list.zig, add.zig | 0 | 0 |
+| Rebase | picker.zig, replay.zig, planner.zig | 0 | 0 |
+| Tag | list.zig | 0 | 0 |
+| Remote | list.zig, manager.zig, push_refspec.zig, capabilities.zig | 0 | 0 |
+| Config | config.zig, list.zig | 0 | 0 |
+| Show Ref | show_ref.zig | 0 | 0 |
+| Network | exchange.zig, transport.zig | 0 | 0 |
+| Stage | mv.zig | 0 | 0 |
+| Perf | cache.zig | 0 | 0 |
+| Packfile | packfile.zig | 0 | 0 |
+| Pull | pull.zig | 0 | 0 |
+| **TOTAL** | **19 files** | **0** | **0** |
+
+---
+
+## Completed Stubs (2026-04-26)
+
+> These stubs were implemented in this session. `zig build` passes for all.
+
+### ✅ Tag List — `src/tag/list.zig`
+- `TagLister.listAll` — walks `.git/refs/tags/`, returns tag names
+- `TagLister.listMatching` — filters tags by glob pattern (`v*`, `*1.0`)
+- `TagLister.listWithDetails` — returns `"tagname <oid>"` strings
+
+### ✅ Worktree List — `src/worktree/list.zig`
+- `WorktreeLister.list` — walks `.git/worktrees/`, reads HEAD + locked status
+
+### ✅ Remote List — `src/remote/list.zig`
+- `RemoteLister.list/listVerbose/getRemoteNames` — parses `.git/config` `[remote "..."]`
+
+### ✅ Config List — `src/config/list.zig`
+- `ConfigLister.listAll/listLocal/listGlobal/listSystem` — reads real config files
+
+### ✅ Stage Move — `src/stage/mv.zig`
+- `StagerMover.move/moveMultiple` — uses Index.findEntry→removeEntry→addEntry
+
+### ✅ Config Unset — `src/config/config.zig`
+- `Config.unset` — uses entries.fetchRemove(key) + frees value
+
+### ✅ Show Ref — `src/history/show_ref.zig`
+- `RefShower.showRefs` — walks `.git/refs/{heads,tags,remotes}`, reads ref files, returns ShowRefResult[]
+- `RefShower.showHead` — reads `.git/HEAD`, resolves symref target, returns OID + symref
+- `RefShower.formatRef` — formats `{abbrev_oid} {ref_name}` with optional symref/deref
+
+### ✅ Push Refspec — `src/remote/push_refspec.zig`
+- `PushRefspecParser.parse` — parses `+src:dst`, `:dst`, shorthand → owned PushRefspec
+- `PushRefspecParser.parseMultiple` — iterates inputs, calls parse for each
+- `PushRefspecParser.validate` — checks ref name validity (no `..`, `.lock`, `\`, must start with `refs/`)
+
+### ✅ Rebase Picker — `src/rebase/picker.zig`
+- `RebasePicker.parseTodoList` — parses rebase todo lines (pick/reword/edit/squash/fixup/drop/exec + short forms p/r/e/s/f/d/x), skips #comments and blanks
+
+### ✅ Capability Negotiator — `src/remote/capabilities.zig`
+- `CapabilityNegotiator.negotiate` — parses server capability strings via `StaticStringMap` → `Capability[]`, returns `CapabilitySet`
+- `CapabilityNegotiator.hasCapability` — linear scan of negotiated caps, returns bool
+- `CapabilityNegotiator.getCommonCapabilities` — intersects server caps with 7 client-supported caps
+
+### ✅ Object Cache — `src/perf/cache.zig`
+- `ObjectCache.warmCache(io)` — reads `.git/HEAD`, resolves symref, reads `packed-refs` + `info/refs` for pre-population
+- `ObjectCache.setEvictionPolicy(policy)` — stores policy (lru/fifo/lfu); `evictOne()` switches on policy; LFU tracks access counts in `AutoHashMap`
+
+### ✅ Rebase Planner Squash Group — `src/rebase/planner.zig`
+- `RebasePlanner.groupSquashCommits(commits)` — reads each commit's message, detects `squash!` / `fixup!` prefixes, matches target by subject line, moves squash commits right after their target via `orderedRemove` + `insert`
+
+### ✅ BranchSwitcher — `src/checkout/switch.zig`
+- `BranchSwitcher.switch(branch)` — resolves ref name via `refName()` → `RefStore.resolve()`, writes `ref: <name>` to `.git/HEAD`
+- `BranchSwitcher.createAndSwitch(branch)` — resolves HEAD for OID, checks target branch existence (respects `force_create`), writes HEAD to new branch ref
+- `BranchSwitcher.detachHead(oid)` — converts OID to hex via `toHex()`, writes raw OID to `.git/HEAD` (detached HEAD mode)
+
+### ✅ Pull Fast-Forward Check — `src/cli/pull.zig`
+- `Pull.checkFastForward(ancestor_oid, descendant_oid)` — walks descendant's parent chain (max 10000 depth) using `readCommit()` + `extractParent()`, returns `{can_ff}` when ancestor found in ancestry
+
+### ✅ Transport Push Capabilities — `src/network/transport.zig`
+- `Transport.buildPushCapabilities(caps)` — reads `ProtocolCapabilities` struct fields (`report_status`, `sideband_64k`, `atomic`, `push_options`, `multi_ack`), builds space-separated capability string with `agent=<name>` tag via `ArrayList` + `mem.join`
+
+### ✅ Bisect Rev List — `src/bisect/start.zig`
+- `BisectStart.getRevList()` — reads `.git/bisect/bad` ref, walks commit parent chain (max 10000 depth) via `getParentOids()` which reads loose objects and parses `parent <oid>` lines; uses `StringHashMap(void)` for cycle detection; returns owned OID slice
+- `BisectStart.getParentOids(oid_str)` — reads `.git/objects/<xx>/<hex>`, parses raw commit object for `parent ` lines, returns parent OID slice
+
+### ✅ History Blame — `src/history/blame.zig`
+- `Blamer.blameFile(path)` — opens file via `std.fs.cwd().openFile`, reads content, splits by `\n`, creates `BlameLine` per line with original/final line numbers, wraps in single `BlameEntry`
+- `Blamer.getBlameForRange(path, start, end)` — delegates to `blameFile()`, filters lines where `final_line_number ∈ [start, end]`, deep-copies all fields for returned entries
+
+### ✅ Rebase Picker Action — `src/rebase/picker.zig`
+- `RebasePicker.getAction(commit)` — when `options.autosquash`: checks first line of commit message for `squash!` prefix → returns `.squash`, `fixup!` → returns `.fixup`; otherwise defaults to `.pick`
+
+### ✅ Worktree List — `src/worktree/list.zig`
+- `WorktreeLister.list()` — opens `.git/worktrees/`, walks directories via `Dir.walk`, reads each worktree's `gitdir`→`HEAD` to get branch/detached info, checks locked status
+
+### ✅ Tag List — `src/tag/list.zig`
+- `TagLister.listAll()` — opens `.git/refs/tags/`, walks files, returns tag name slice
+- `TagLister.listMatching(pattern)` — calls `listAll()`, filters via `globMatch()` supporting `prefix*`, `*suffix`, exact match
+- `TagLister.listWithDetails()` — calls `listAll()`, reads each tag's OID from `.git/refs/tags/<name>`, returns `"tag oid"` format strings
+
+---
+
 ## What's Missing or Stubbed (the gaps)
 
 ### 🔴 Critical Gaps (not 100% compatible):
@@ -731,8 +1012,8 @@ These Git commands have no CLI implementation at all:
 #### `src/object/packfile.zig`
 | Function | Line | Stub Behavior |
 |----------|------|---------------|
-| `getReuseOffsets` | 68 | Returns `&.{}` — empty. Ignores pack data. |
-| `detectThinPack` | 74 | Always returns `false`. Ignores data + options. |
+| `getReuseOffsets` | 68 | Parses PACK signature+count, scans entries, returns offset slice for delta objects |
+| `detectThinPack` | 74 | Scans for OBJ_REF_DELTA (type 7), optionally checks missing base objects via fs |
 | `isThinPack` | 63 | Always returns `false` after signature check. |
 
 #### `src/commit/parser.zig`
@@ -757,7 +1038,7 @@ These Git commands have no CLI implementation at all:
 | `renameRemote` | 198 | Ignores `new_name`. Returns old remote or empty struct. |
 | `setUrl` | 204 | Ignores `url`. Returns old remote or empty struct. |
 | `showRemote` | 210 | Returns `branches: &.{}`, `tags: &.{}` — always empty. |
-| `pruneRemote` | 226 | Returns `pruned_refs: &.{}` — always empty. Ignores name + options. |
+| `pruneRemote` | 226 | Walks refs/remotes/<name>/, checks orphan status vs HEAD, deletes stale refs (unless dry_run) |
 
 ### 18.3 🟡 Result-Discarding Stubs (`_ = result`)
 
