@@ -38,9 +38,18 @@ const HashObject = @import("hash_object.zig").HashObject;
 const LsFiles = @import("ls_files.zig").LsFiles;
 const LsTree = @import("ls_tree.zig").LsTree;
 const ShowRef = @import("show_ref.zig").ShowRef;
+const Blame = @import("blame.zig").Blame;
+const Grep = @import("grep.zig").Grep;
+const Describe = @import("describe.zig").Describe;
+const Fsck = @import("fsck.zig").Fsck;
+const FormatPatch = @import("format_patch.zig").FormatPatch;
+const Mv = @import("mv.zig").Mv;
 const Switch = @import("switch.zig").Switch;
 const Bisect = @import("bisect.zig").Bisect;
 const Config = @import("config.zig").Config;
+const Archive = @import("archive.zig").Archive;
+const RevParse = @import("rev_parse.zig").RevParse;
+const WriteTree = @import("write_tree.zig").WriteTree;
 
 pub const CommandDispatcher = struct {
     allocator: std.mem.Allocator,
@@ -130,6 +139,24 @@ pub const CommandDispatcher = struct {
             try self.runBisect(args);
         } else if (std.mem.eql(u8, cmd, "config")) {
             try self.runConfig(args);
+        } else if (std.mem.eql(u8, cmd, "blame")) {
+            try self.runBlame(args);
+        } else if (std.mem.eql(u8, cmd, "grep")) {
+            try self.runGrep(args);
+        } else if (std.mem.eql(u8, cmd, "describe")) {
+            try self.runDescribe(args);
+        } else if (std.mem.eql(u8, cmd, "fsck")) {
+            try self.runFsck(args);
+        } else if (std.mem.eql(u8, cmd, "format-patch") or std.mem.eql(u8, cmd, "format_patch")) {
+            try self.runFormatPatch(args);
+        } else if (std.mem.eql(u8, cmd, "mv")) {
+            try self.runMv(args);
+        } else if (std.mem.eql(u8, cmd, "archive")) {
+            try self.runArchive(args);
+        } else if (std.mem.eql(u8, cmd, "rev-parse") or std.mem.eql(u8, cmd, "rev_parse")) {
+            try self.runRevParse(args);
+        } else if (std.mem.eql(u8, cmd, "write-tree") or std.mem.eql(u8, cmd, "write_tree")) {
+            try self.runWriteTree(args);
         } else {
             var out = Output.init(self.writer, self.style, self.allocator);
             try out.errorMessage("Unknown command: {s}", .{cmd});
@@ -633,6 +660,51 @@ pub const CommandDispatcher = struct {
     fn runConfig(self: *CommandDispatcher, args: []const []const u8) !void {
         var config_cmd = Config.init(self.allocator, self.io, self.writer, self.style);
         try config_cmd.run(args);
+    }
+
+    fn runBlame(self: *CommandDispatcher, args: []const []const u8) !void {
+        var blame_cmd = Blame.init(self.allocator, self.io, self.writer, self.style);
+        try blame_cmd.run(args);
+    }
+
+    fn runGrep(self: *CommandDispatcher, args: []const []const u8) !void {
+        var grep_cmd = Grep.init(self.allocator, self.io, self.writer, self.style);
+        try grep_cmd.run(args);
+    }
+
+    fn runDescribe(self: *CommandDispatcher, args: []const []const u8) !void {
+        var describe_cmd = Describe.init(self.allocator, self.io, self.writer, self.style);
+        try describe_cmd.run(args);
+    }
+
+    fn runFsck(self: *CommandDispatcher, args: []const []const u8) !void {
+        var fsck_cmd = Fsck.init(self.allocator, self.io, self.writer, self.style);
+        try fsck_cmd.run(args);
+    }
+
+    fn runFormatPatch(self: *CommandDispatcher, args: []const []const u8) !void {
+        var fp_cmd = FormatPatch.init(self.allocator, self.io, self.writer, self.style);
+        try fp_cmd.run(args);
+    }
+
+    fn runMv(self: *CommandDispatcher, args: []const []const u8) !void {
+        var mv_cmd = Mv.init(self.allocator, self.io, self.writer, self.style);
+        try mv_cmd.run(args);
+    }
+
+    fn runArchive(self: *CommandDispatcher, args: []const []const u8) !void {
+        var archive_cmd = Archive.init(self.allocator, self.io, self.writer, self.style);
+        try archive_cmd.run(args);
+    }
+
+    fn runRevParse(self: *CommandDispatcher, args: []const []const u8) !void {
+        var revparse_cmd = RevParse.init(self.allocator, self.io, self.writer, self.style);
+        try revparse_cmd.run(args);
+    }
+
+    fn runWriteTree(self: *CommandDispatcher, args: []const []const u8) !void {
+        var writetree_cmd = WriteTree.init(self.allocator, self.io, self.writer, self.style);
+        try writetree_cmd.run(args);
     }
 };
 

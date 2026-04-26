@@ -43,6 +43,15 @@ pub const Command = enum {
     switch_cmd,
     bisect,
     config,
+    blame,
+    grep_cmd,
+    describe,
+    fsck,
+    format_patch,
+    mv,
+    archive,
+    rev_parse,
+    write_tree,
 };
 
 const CommandInfo = struct {
@@ -79,6 +88,15 @@ const ALL_COMMANDS = [_]CommandInfo{
     .{ .name = "switch", .description = "Switch branches", .aliases = &.{} },
     .{ .name = "bisect", .description = "Binary search for bugs", .aliases = &.{} },
     .{ .name = "config", .description = "Get and set repository options", .aliases = &.{} },
+    .{ .name = "blame", .description = "Annotate lines with commit info", .aliases = &.{} },
+    .{ .name = "grep", .description = "Search files tracked by git", .aliases = &.{} },
+    .{ .name = "describe", .description = "Describe commit using tags", .aliases = &.{} },
+    .{ .name = "fsck", .description = "Verify repository integrity", .aliases = &.{} },
+    .{ .name = "format-patch", .description = "Generate patch files from commits", .aliases = &.{} },
+    .{ .name = "mv", .description = "Move or rename files", .aliases = &.{} },
+    .{ .name = "archive", .description = "Create archive from tree object", .aliases = &.{} },
+    .{ .name = "rev-parse", .description = "Parse and resolve revision identifiers", .aliases = &.{} },
+    .{ .name = "write-tree", .description = "Create tree object from index", .aliases = &.{} },
 };
 
 fn findCommand(name: []const u8) ?Command {
@@ -116,6 +134,15 @@ fn findCommand(name: []const u8) ?Command {
     if (std.mem.eql(u8, name, "switch")) return .switch_cmd;
     if (std.mem.eql(u8, name, "bisect")) return .bisect;
     if (std.mem.eql(u8, name, "config")) return .config;
+    if (std.mem.eql(u8, name, "blame")) return .blame;
+    if (std.mem.eql(u8, name, "grep")) return .grep_cmd;
+    if (std.mem.eql(u8, name, "describe")) return .describe;
+    if (std.mem.eql(u8, name, "fsck")) return .fsck;
+    if (std.mem.eql(u8, name, "format-patch") or std.mem.eql(u8, name, "format_patch")) return .format_patch;
+    if (std.mem.eql(u8, name, "mv")) return .mv;
+    if (std.mem.eql(u8, name, "archive")) return .archive;
+    if (std.mem.eql(u8, name, "rev-parse") or std.mem.eql(u8, name, "rev_parse")) return .rev_parse;
+    if (std.mem.eql(u8, name, "write-tree") or std.mem.eql(u8, name, "write_tree")) return .write_tree;
     return null;
 }
 
