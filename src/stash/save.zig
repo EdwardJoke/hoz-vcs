@@ -285,7 +285,24 @@ pub const StashSaver = struct {
         const serialized = try commit.serialize(self.allocator);
         defer self.allocator.free(serialized);
 
-        return oid_mod.oidFromContent(serialized);
+        const oid = oid_mod.oidFromContent(serialized);
+
+        const hex = oid.toHex();
+        const obj_dir = try std.fmt.allocPrint(self.allocator, "objects/{s}", .{hex[0..2]});
+        defer self.allocator.free(obj_dir);
+        self.git_dir.createDirPath(self.io, obj_dir) catch {};
+
+        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
+        defer self.allocator.free(obj_path);
+
+        const compressed = compress_mod.Zlib.compress(serialized, self.allocator) catch {
+            return oid;
+        };
+        defer self.allocator.free(compressed);
+
+        self.git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch {};
+
+        return oid;
     }
 
     fn updateReflog(self: *StashSaver, stash_ref: []const u8, stash_oid: OID, message: []const u8) !void {

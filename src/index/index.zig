@@ -89,7 +89,7 @@ pub const WriteBufferOptions = struct {
 
 pub const TreeCache = struct {
     allocator: std.mem.Allocator,
-    entries: std.StringArrayHashMap(TreeCacheEntry),
+    entries: std.StringArrayHashMapUnmanaged(TreeCacheEntry),
     enabled: bool,
 
     pub const TreeCacheEntry = struct {
@@ -101,13 +101,13 @@ pub const TreeCache = struct {
     pub fn init(allocator: std.mem.Allocator) TreeCache {
         return .{
             .allocator = allocator,
-            .entries = std.StringArrayHashMap(TreeCacheEntry).init(allocator),
+            .entries = .empty,
             .enabled = true,
         };
     }
 
     pub fn deinit(self: *TreeCache) void {
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 
     pub fn get(self: *TreeCache, path: []const u8) ?TreeCacheEntry {
@@ -115,7 +115,7 @@ pub const TreeCache = struct {
     }
 
     pub fn put(self: *TreeCache, path: []const u8, entry: TreeCacheEntry) !void {
-        try self.entries.put(path, entry);
+        try self.entries.put(self.allocator, path, entry);
     }
 
     pub fn invalidate(self: *TreeCache, path: []const u8) void {

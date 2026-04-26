@@ -664,11 +664,41 @@ pub const Transport = struct {
         try cmd_buffer.appendSlice(self.allocator, "git-receive-pack ");
         try cmd_buffer.appendSlice(self.allocator, parsed.path);
 
-        // TODO: Implement SSH push with packfile
-        _ = updates;
-        _ = pack_data;
+        const conn = try self.sshConnect(parsed.host, if (parsed.port > 0) parsed.port else 22);
+        defer conn.close(self.io);
 
-        return error.NotImplemented;
+        try self.sendSshPack(conn, cmd_buffer.items, updates, pack_data);
+        return;
+    }
+
+    fn sshConnect(self: *Transport, host: []const u8, port: u16) !std.Io.net.Stream {
+        const addr = std.Io.net.Address.parseIp4(host, port) catch
+            return error.SshConnectionFailed;
+        const stream = try addr.connect(self.io);
+        return stream;
+    }
+
+    fn sendSshPack(self: *Transport, stream: std.Io.net.Stream, cmd: []const u8, updates: []RefUpdate, pack_data: ?[]const u8) !void {
+        _ = updates;
+
+        var writer = stream.writer(self.io, &{});
+        try writer.interface.writeAll(cmd);
+        try writer.interface.writeAll("\n");
+
+        const read_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &.{});
+
+        const pkt_line_len = reader.interface.read(&read_buf) catch 0;
+        if (pkt_line_len == 0 or read_buf[0] == 0)
+            return error.SshProtocolError;
+
+        if (pack_data) |data| {
+            try writer.interface.writeAll(data);
+        }
+
+        try writer.interface.writeAll("0000");
+
+        _ = reader.interface.read(&read_buf) catch 0;
     }
 
     fn buildPushCapabilities(self: *Transport, caps: *const protocol.ProtocolCapabilities) ![]const u8 {

@@ -50,7 +50,7 @@ pub const TreeCompareResult = struct {
 pub const TreeCompareCache = struct {
     allocator: std.mem.Allocator,
     config: TreeCompareConfig,
-    entries: std.StringArrayHashMap(TreeCompareEntry),
+    entries: std.StringArrayHashMapUnmanaged(TreeCompareEntry),
     hits: u64 = 0,
     misses: u64 = 0,
     evictions: u64 = 0,
@@ -65,7 +65,7 @@ pub const TreeCompareCache = struct {
         return .{
             .allocator = allocator,
             .config = config,
-            .entries = std.StringArrayHashMap(TreeCompareEntry).init(allocator),
+            .entries = .empty,
             .hits = 0,
             .misses = 0,
             .evictions = 0,
@@ -78,7 +78,7 @@ pub const TreeCompareCache = struct {
         while (iter.next()) |entry| {
             self.freeEntry(entry.value_ptr);
         }
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 
     fn freeEntry(self: *TreeCompareCache, entry: *TreeCompareEntry) void {
@@ -129,7 +129,7 @@ pub const TreeCompareCache = struct {
         const key_copy = try self.allocator.dupe(u8, key);
         errdefer self.allocator.free(key_copy);
 
-        try self.entries.put(key_copy, .{
+        try self.entries.put(self.allocator, key_copy, .{
             .result = result,
             .access_time = self.access_counter,
         });

@@ -25,7 +25,7 @@ pub const CacheWarmingOptions = struct {
 
 pub const ObjectCache = struct {
     allocator: std.mem.Allocator,
-    cache: std.StringArrayHashMap(CacheEntry),
+    cache: std.StringArrayHashMapUnmanaged(CacheEntry),
     max_size: usize,
     hits: u64,
     misses: u64,
@@ -39,7 +39,7 @@ pub const ObjectCache = struct {
     pub fn init(allocator: std.mem.Allocator, max_size: usize) ObjectCache {
         return .{
             .allocator = allocator,
-            .cache = std.StringArrayHashMap(CacheEntry).init(allocator),
+            .cache = .empty,
             .max_size = max_size,
             .hits = 0,
             .misses = 0,
@@ -51,7 +51,7 @@ pub const ObjectCache = struct {
         while (iter.next()) |entry| {
             self.allocator.free(entry.value_ptr.data);
         }
-        self.cache.deinit();
+        self.cache.deinit(self.allocator);
     }
 
     pub fn get(self: *ObjectCache, key: []const u8) ?[]const u8 {
@@ -74,7 +74,7 @@ pub const ObjectCache = struct {
         }
 
         const data_copy = try self.allocator.dupe(u8, data);
-        try self.cache.put(key, .{
+        try self.cache.put(self.allocator, key, .{
             .data = data_copy,
             .size = data.len,
             .access_time = @as(u64, @intCast(std.time.timestamp())),

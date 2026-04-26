@@ -227,8 +227,8 @@ pub fn scanWorkDirStatus(
     entry_names: [][]const u8,
 ) !StatusResult {
     _ = dir_path;
-    var statuses = std.ArrayList(WorkDirStatus).init(allocator);
-    errdefer statuses.deinit();
+    var statuses = std.ArrayList(WorkDirStatus).empty;
+    errdefer statuses.deinit(allocator);
 
     var has_changes = false;
 
@@ -237,7 +237,7 @@ pub fn scanWorkDirStatus(
         if (status != .unmodified) {
             has_changes = true;
         }
-        try statuses.append(.{
+        try statuses.append(allocator, .{
             .path = try allocator.dupe(u8, name),
             .status = status,
             .index_entry = entry,
@@ -245,7 +245,7 @@ pub fn scanWorkDirStatus(
     }
 
     return .{
-        .entries = try statuses.toOwnedSlice(),
+        .entries = try statuses.toOwnedSlice(allocator),
         .has_changes = has_changes,
     };
 }

@@ -79,7 +79,7 @@ test "StagerMover init with index" {
 
 test "StagerMover move method exists" {
     var index: Index = undefined;
-    var mover = StagerMover.init(std.testing.allocator, &index);
+    const mover = StagerMover.init(std.testing.allocator, &index);
 
     const result = try mover.move("old.txt", "new.txt");
     try std.testing.expect(result.renamed >= 0);
@@ -87,7 +87,7 @@ test "StagerMover move method exists" {
 
 test "StagerMover moveMultiple method exists" {
     var index: Index = undefined;
-    var mover = StagerMover.init(std.testing.allocator, &index);
+    const mover = StagerMover.init(std.testing.allocator, &index);
 
     const moves = &.{
         .{ .from = "a.txt", .to = "b.txt" },
@@ -99,7 +99,7 @@ test "StagerMover moveMultiple method exists" {
 
 test "StagerMover options access" {
     var index: Index = undefined;
-    var mover = StagerMover.init(std.testing.allocator, &index);
+    const mover = StagerMover.init(std.testing.allocator, &index);
 
     try std.testing.expect(mover.options.cached == false);
     try std.testing.expect(mover.options.force == false);

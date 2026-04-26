@@ -60,17 +60,17 @@ pub const ConfigTypeParser = struct {
 
 pub const Config = struct {
     allocator: std.mem.Allocator,
-    entries: std.StringArrayHashMap([]const u8),
+    entries: std.StringArrayHashMapUnmanaged([]const u8),
 
     pub fn init(allocator: std.mem.Allocator) Config {
         return .{
             .allocator = allocator,
-            .entries = std.StringArrayHashMap([]const u8).init(allocator),
+            .entries = .empty,
         };
     }
 
     pub fn deinit(self: *Config) void {
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 
     pub fn get(self: *Config, key: []const u8) ?[]const u8 {
@@ -78,7 +78,7 @@ pub const Config = struct {
     }
 
     pub fn set(self: *Config, key: []const u8, value: []const u8) !void {
-        try self.entries.put(key, value);
+        try self.entries.put(self.allocator, key, value);
     }
 
     pub fn unset(self: *Config, key: []const u8) void {

@@ -30,7 +30,7 @@ pub const TreeCacheEntry = struct {
 pub const TreeCache = struct {
     allocator: std.mem.Allocator,
     config: TreeCacheConfig,
-    entries: std.StringArrayHashMap(TreeCacheEntry),
+    entries: std.StringArrayHashMapUnmanaged(TreeCacheEntry),
     total_memory: usize = 0,
     hits: u64 = 0,
     misses: u64 = 0,
@@ -41,7 +41,7 @@ pub const TreeCache = struct {
         return .{
             .allocator = allocator,
             .config = config,
-            .entries = std.StringArrayHashMap(TreeCacheEntry).init(allocator),
+            .entries = .empty,
             .total_memory = 0,
             .hits = 0,
             .misses = 0,
@@ -55,7 +55,7 @@ pub const TreeCache = struct {
         while (iter.next()) |entry| {
             self.freeTree(entry.value_ptr);
         }
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 
     fn freeTree(self: *TreeCache, entry: *TreeCacheEntry) void {
@@ -103,7 +103,7 @@ pub const TreeCache = struct {
         }
 
         const entry_size = @sizeOf(TreeCacheEntry) + key.len;
-        try self.entries.put(key, .{
+        try self.entries.put(self.allocator, key, .{
             .tree = tree,
             .access_time = self.access_counter,
             .size_bytes = self.estimateSize(tree),

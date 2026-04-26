@@ -33,7 +33,7 @@ pub const DiffCacheEntry = struct {
 pub const DiffCache = struct {
     allocator: std.mem.Allocator,
     config: DiffCacheConfig,
-    entries: std.StringArrayHashMap(DiffCacheEntry),
+    entries: std.StringArrayHashMapUnmanaged(DiffCacheEntry),
     total_memory: usize = 0,
     hits: u64 = 0,
     misses: u64 = 0,
@@ -44,7 +44,7 @@ pub const DiffCache = struct {
         return .{
             .allocator = allocator,
             .config = config,
-            .entries = std.StringArrayHashMap(DiffCacheEntry).init(allocator),
+            .entries = .empty,
             .total_memory = 0,
             .hits = 0,
             .misses = 0,
@@ -58,7 +58,7 @@ pub const DiffCache = struct {
         while (iter.next()) |entry| {
             self.allocator.free(entry.value_ptr.result_data);
         }
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 
     pub fn computeCacheKey(
@@ -118,7 +118,8 @@ pub const DiffCache = struct {
         const entry_size = @sizeOf(DiffCacheEntry) + key.len + data.len;
 
         while (self.entries.count() >= self.config.max_entries or
-            self.total_memory + data.len > self.config.max_memory_bytes) {
+            self.total_memory + data.len > self.config.max_memory_bytes)
+        {
             try self.evictOldest();
         }
 
@@ -128,7 +129,7 @@ pub const DiffCache = struct {
         const data_copy = try self.allocator.dupe(u8, data);
         errdefer self.allocator.free(data_copy);
 
-        try self.entries.put(key_copy, .{
+        try self.entries.put(self.allocator, key_copy, .{
             .result_data = data_copy,
             .old_content_hash = undefined,
             .new_content_hash = undefined,

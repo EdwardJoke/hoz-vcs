@@ -190,7 +190,7 @@ pub const RefStore = struct {
     /// Returns the resolved Ref with an OID for symbolic refs
     /// Uses visited set to detect cycles (e.g., A->B->C->A)
     pub fn resolve(self: RefStore, name: []const u8) RefError!Ref {
-        var visited = std.AutoHashMap([]const u8, void).init(self.allocator);
+        var visited = std.StringHashMap(void).init(self.allocator);
         defer visited.deinit();
 
         var ref = try self.readWithDepth(name, 0);
@@ -334,7 +334,8 @@ pub const RefStore = struct {
     /// Check if a ref exists
     pub fn exists(self: RefStore, name: []const u8) bool {
         const path = self.refPath(name);
-        return self.git_dir.exists(path);
+        _ = self.git_dir.statFile(self.io, path, .{}) catch return false;
+        return true;
     }
 };
 

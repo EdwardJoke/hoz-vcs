@@ -128,22 +128,19 @@ pub const Tree = struct {
         }
 
         // Parse tree entries from the binary format
-        var entries = std.ArrayList(TreeEntry).init(std.testing.allocator);
-        errdefer entries.deinit();
+        var entries = std.ArrayList(TreeEntry).empty;
+        errdefer entries.deinit(std.testing.allocator);
 
         var pos: usize = 0;
         while (pos < obj.data.len) {
-            // Find space between mode and name
             const space_idx = std.mem.indexOf(u8, obj.data[pos..], " ") orelse break;
             const mode_str = obj.data[pos .. pos + space_idx];
             pos += space_idx + 1;
 
-            // Find null byte between name and OID
             const null_idx = std.mem.indexOf(u8, obj.data[pos..], "\x00") orelse break;
             const name = obj.data[pos .. pos + null_idx];
             pos += null_idx + 1;
 
-            // OID is exactly 20 bytes
             if (pos + 20 > obj.data.len) break;
             const oid_bytes = obj.data[pos .. pos + 20];
             pos += 20;
@@ -151,14 +148,14 @@ pub const Tree = struct {
             const mode = try modeFromStr(mode_str);
             const oid = oid_mod.OID.fromBytes(oid_bytes);
 
-            try entries.append(TreeEntry{
+            try entries.append(std.testing.allocator, TreeEntry{
                 .mode = mode,
                 .oid = oid,
                 .name = name,
             });
         }
 
-        return Tree{ .entries = try entries.toOwnedSlice() };
+        return Tree{ .entries = try entries.toOwnedSlice(std.testing.allocator) };
     }
 };
 

@@ -27,8 +27,14 @@ pub const MergeReset = struct {
     }
 
     pub fn hasUnresolvedConflicts(self: *MergeReset) bool {
-        _ = self;
-        return false;
+        const merge_head = self.git_dir.openFile(self.io, "MERGE_HEAD", .{}) catch return false;
+        defer merge_head.close(self.io);
+        const merge_msg = self.git_dir.openFile(self.io, "MERGE_MSG", .{}) catch {
+            merge_head.close(self.io);
+            return false;
+        };
+        defer merge_msg.close(self.io);
+        return true;
     }
 
     pub fn abort(self: *MergeReset) !void {

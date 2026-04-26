@@ -34,9 +34,9 @@ pub const AuthorOrCommitter = enum {
 pub const DateIndex = struct {
     allocator: std.mem.Allocator,
     config: DateIndexConfig,
-    entries: std.AutoArrayHashMap(oid_mod.OID, i64),
-    buckets: std.AutoArrayHashMap(i64, std.ArrayList(oid_mod.OID)),
-    sorted_by_time: std.ArrayList(CommitTimestamp),
+    entries: std.array_hash_map.Auto(oid_mod.OID, i64),
+    buckets: std.array_hash_map.Auto(i64, std.ArrayListUnmanaged(oid_mod.OID)),
+    sorted_by_time: std.ArrayListUnmanaged(CommitTimestamp),
     is_sorted: bool,
     stats: DateIndexStats,
 
@@ -44,35 +44,35 @@ pub const DateIndex = struct {
         return .{
             .allocator = allocator,
             .config = config,
-            .entries = std.AutoArrayHashMap(oid_mod.OID, i64).init(allocator),
-            .buckets = std.AutoArrayHashMap(i64, std.ArrayList(oid_mod.OID)).init(allocator),
-            .sorted_by_time = std.ArrayList(CommitTimestamp).init(allocator),
+            .entries = .empty,
+            .buckets = .empty,
+            .sorted_by_time = .empty,
             .is_sorted = false,
             .stats = .{},
         };
     }
 
     pub fn deinit(self: *DateIndex) void {
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
 
         var bucket_iter = self.buckets.iterator();
         while (bucket_iter.next()) |entry| {
-            entry.value_ptr.deinit();
+            entry.value_ptr.deinit(self.allocator);
         }
-        self.buckets.deinit();
+        self.buckets.deinit(self.allocator);
 
-        self.sorted_by_time.deinit();
+        self.sorted_by_time.deinit(self.allocator);
     }
 
     pub fn indexCommit(self: *DateIndex, oid: oid_mod.OID, timestamp: i64) !void {
-        try self.entries.put(oid, timestamp);
+        try self.entries.put(self.allocator, oid, timestamp);
 
         const bucket_key = self.getBucketKey(timestamp);
-        var bucket = self.buckets.getOrPut(bucket_key) catch return;
+        var bucket = try self.buckets.getOrPut(self.allocator, bucket_key);
         if (!bucket.found_existing) {
-            bucket.value_ptr.* = std.ArrayList(oid_mod.OID).init(self.allocator);
+            bucket.value_ptr.* = .empty;
         }
-        bucket.value_ptr.append(oid) catch return;
+        try bucket.value_ptr.append(self.allocator, oid);
 
         self.stats.indexed_commits += 1;
         self.is_sorted = false;
@@ -91,8 +91,8 @@ pub const DateIndex = struct {
             return &.{};
         }
 
-        var result = std.ArrayList(oid_mod.OID).init(self.allocator);
-        errdefer result.deinit();
+        var result = std.ArrayListUnmanaged(oid_mod.OID).empty;
+        defer result.deinit(self.allocator);
 
         const start_bucket = self.getBucketKey(start);
         const end_bucket = self.getBucketKey(end);
@@ -103,7 +103,7 @@ pub const DateIndex = struct {
                 for (bucket.items) |oid| {
                     if (self.entries.get(oid)) |ts| {
                         if (ts >= start and ts <= end) {
-                            try result.append(oid);
+                            try result.append(self.allocator, oid);
                         }
                     }
                 }
@@ -111,7 +111,7 @@ pub const DateIndex = struct {
         }
 
         self.stats.range_queries += 1;
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(self.allocator);
     }
 
     pub fn getCommitsAfter(self: *DateIndex, timestamp: i64) ![]const oid_mod.OID {
@@ -128,15 +128,15 @@ pub const DateIndex = struct {
         }
 
         const result_count = @min(count, self.sorted_by_time.items.len);
-        var result = std.ArrayList(oid_mod.OID).init(self.allocator);
-        errdefer result.deinit();
+        var result = std.ArrayListUnmanaged(oid_mod.OID).empty;
+        defer result.deinit(self.allocator);
 
         const start = self.sorted_by_time.items.len - result_count;
         for (start..self.sorted_by_time.items.len) |i| {
-            try result.append(self.sorted_by_time.items[i].oid);
+            try result.append(self.allocator, self.sorted_by_time.items[i].oid);
         }
 
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(self.allocator);
     }
 
     pub fn getOldestCommits(self: *DateIndex, count: usize) ![]const oid_mod.OID {
@@ -145,14 +145,14 @@ pub const DateIndex = struct {
         }
 
         const result_count = @min(count, self.sorted_by_time.items.len);
-        var result = std.ArrayList(oid_mod.OID).init(self.allocator);
-        errdefer result.deinit();
+        var result = std.ArrayListUnmanaged(oid_mod.OID).empty;
+        defer result.deinit(self.allocator);
 
         for (0..result_count) |i| {
-            try result.append(self.sorted_by_time.items[i].oid);
+            try result.append(self.allocator, self.sorted_by_time.items[i].oid);
         }
 
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(self.allocator);
     }
 
     fn rebuildSortedList(self: *DateIndex) !void {
@@ -160,7 +160,7 @@ pub const DateIndex = struct {
 
         var iter = self.entries.iterator();
         while (iter.next()) |entry| {
-            try self.sorted_by_time.append(.{
+            try self.sorted_by_time.append(self.allocator, .{
                 .oid = entry.key_ptr.*,
                 .timestamp = entry.value_ptr.*,
                 .author_or_committer = .committer,

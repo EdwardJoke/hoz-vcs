@@ -38,6 +38,7 @@ pub const RefError = error{
     FileLocksUnsupported,
     WouldBlock,
     WriteFailed,
+    OutOfMemory,
 };
 
 pub const RefType = enum {

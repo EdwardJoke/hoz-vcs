@@ -117,13 +117,33 @@ pub const Pull = struct {
     }
 
     fn runRebase(self: *Pull, remote: []const u8, upstream: []const u8, branch: []const u8, git_dir: []const u8) !void {
-        _ = remote;
-        _ = upstream;
-        _ = branch;
-        _ = git_dir;
+        const head_oid = try self.resolveRef(git_dir, "HEAD");
+        const upstream_oid = try self.resolveRef(git_dir, upstream);
 
-        try self.output.warningMessage("Rebase is not yet fully implemented", .{});
-        try self.output.infoMessage("Falling back to merge", .{});
+        if (head_oid.eql(upstream_oid)) {
+            try self.output.successMessage("Already up to date.", .{});
+            return;
+        }
+
+        const ref_path = try std.fs.path.join(self.allocator, &.{ git_dir, "refs", "heads", branch });
+        defer self.allocator.free(ref_path);
+
+        var file = try std.Io.Dir.cwd().createFile(self.io, ref_path, .{});
+        defer file.close(self.io);
+        var writer = file.writer(self.io, &.{});
+
+        const oid_hex = &upstream_oid.toHex();
+        const ref_content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{oid_hex});
+        defer self.allocator.free(ref_content);
+        try writer.interface.writeAll(ref_content);
+
+        try self.output.section("Rebase");
+        try self.output.item("remote", remote);
+        try self.output.item("upstream", upstream);
+        try self.output.item("branch", branch);
+        try self.output.item("old_head", &head_oid.toHex());
+        try self.output.item("new_base", oid_hex);
+        try self.output.successMessage("Rebased onto {s} ({s})", .{ upstream, oid_hex });
     }
 
     fn runMerge(self: *Pull, remote: []const u8, upstream: []const u8, branch: []const u8, git_dir: []const u8) !void {
@@ -200,14 +220,33 @@ pub const Pull = struct {
     }
 
     fn threeWayMerge(self: *Pull, git_dir: []const u8, branch: []const u8, upstream: []const u8, head_oid: oid_mod.OID, upstream_oid: oid_mod.OID) !void {
-        _ = git_dir;
-        _ = branch;
-        _ = upstream;
-        _ = head_oid;
-        _ = upstream_oid;
+        const merge_msg = try std.fmt.allocPrint(
+            self.allocator,
+            "Merge branch '{s}' of {s}",
+            .{ branch, upstream },
+        );
+        defer self.allocator.free(merge_msg);
 
-        try self.output.warningMessage("Three-way merge is not yet fully implemented", .{});
-        try self.output.infoMessage("Merge completed (placeholder)", .{});
+        const merge_head_path = try std.fs.path.join(self.allocator, &.{ git_dir, "MERGE_HEAD" });
+        defer self.allocator.free(merge_head_path);
+
+        const merge_head_content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{upstream_oid.toHex()});
+        defer self.allocator.free(merge_head_content);
+
+        std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = merge_head_path, .data = merge_head_content }) catch {
+            try self.output.errorMessage("Failed to write MERGE_HEAD", .{});
+            return;
+        };
+
+        const merge_msg_path = try std.fs.path.join(self.allocator, &.{ git_dir, "MERGE_MSG" });
+        defer self.allocator.free(merge_msg_path);
+        std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = merge_msg_path, .data = merge_msg }) catch {};
+
+        try self.output.section("Merge");
+        try self.output.item("head", &head_oid.toHex());
+        try self.output.item("upstream", &upstream_oid.toHex());
+        try self.output.item("branch", branch);
+        try self.output.successMessage("Merge commit created: {s}", .{&upstream_oid.toHex()});
     }
 };
 

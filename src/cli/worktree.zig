@@ -158,7 +158,49 @@ pub const Worktree = struct {
     }
 
     fn runPrune(self: *Worktree) !void {
-        try self.output.successMessage("Pruned worktree metadata", .{});
+        const cwd = Io.Dir.cwd();
+        const worktrees_dir = ".git/worktrees";
+
+        var pruned_count: usize = 0;
+
+        var wt_dir = cwd.openDir(self.io, worktrees_dir, .{}) catch {
+            try self.output.infoMessage("No worktree directory found", .{});
+            return;
+        };
+        defer wt_dir.close(self.io);
+
+        var iter = wt_dir.iterate();
+        while (iter.next(self.io) catch null) |entry| {
+            if (entry.kind != .directory) continue;
+            const name = entry.name;
+            if (name.len == 0 or name[0] == '.') continue;
+
+            const gitdir_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}/gitdir", .{ worktrees_dir, name });
+            defer self.allocator.free(gitdir_path);
+
+            const gitdir_content = cwd.readFileAlloc(self.io, gitdir_path, self.allocator, .limited(1024)) catch continue;
+            defer self.allocator.free(gitdir_content);
+
+            const target_path = std.mem.trim(u8, gitdir_content, " \n\r\t");
+            if (target_path.len == 0) continue;
+
+            const stat_result = std.Io.Dir.cwd().statFile(self.io, target_path, .{}) catch null;
+            const exists = stat_result != null;
+
+            if (!exists or self.force) {
+                const remove_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ worktrees_dir, name });
+                defer self.allocator.free(remove_path);
+
+                _ = std.Io.Dir.cwd().deleteTree(self.io, remove_path) catch continue;
+                pruned_count += 1;
+            }
+        }
+
+        if (pruned_count > 0) {
+            try self.output.successMessage("Pruned {d} worktree(s)", .{pruned_count});
+        } else {
+            try self.output.infoMessage("No stale worktrees to prune", .{});
+        }
     }
 
     fn runLock(self: *Worktree, args: []const []const u8) !void {

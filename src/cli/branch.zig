@@ -96,8 +96,16 @@ pub const Branch = struct {
 
     fn runDelete(self: *Branch) !void {
         if (self.old_branch_name) |name| {
+            const cwd = Io.Dir.cwd();
+            const git_dir = cwd.openDir(self.io, ".git", .{}) catch {
+                try self.output.errorMessage("Not in a git repository", .{});
+                return;
+            };
+            defer git_dir.close(self.io);
+
+            var ref_store = RefStore.init(git_dir, self.allocator, self.io);
             const options = DeleteOptions{};
-            var deleter = BranchDeleter.init(self.allocator, options);
+            var deleter = BranchDeleter.init(self.allocator, &ref_store, options);
 
             const result = try deleter.delete(name);
             if (result.deleted) {
@@ -114,8 +122,16 @@ pub const Branch = struct {
     fn runRename(self: *Branch) !void {
         if (self.old_branch_name) |old| {
             if (self.new_branch_name) |new| {
+                const cwd = Io.Dir.cwd();
+                const git_dir = cwd.openDir(self.io, ".git", .{}) catch {
+                    try self.output.errorMessage("Not in a git repository", .{});
+                    return;
+                };
+                defer git_dir.close(self.io);
+
+                var ref_store = RefStore.init(git_dir, self.allocator, self.io);
                 const options = RenameOptions{};
-                var renamer = BranchRenamer.init(self.allocator, options);
+                var renamer = BranchRenamer.init(self.allocator, &ref_store, options);
 
                 const result = try renamer.rename(old, new);
                 try self.output.successMessage("Branch renamed: {s} -> {s}", .{ result.old_name, result.new_name });
