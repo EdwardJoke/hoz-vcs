@@ -9,15 +9,15 @@ This document catalogs all stub implementations in the Hoz codebase that return 
 ### `src/stash/save.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `writeTreeFromIndex` | 74 | Returns zero OID `{0} ** 20` | ⚠️ CLI works, underlying returns fake OID |
-| `writeWorkingCommit` | 78 | Returns `null` | ⚠️ CLI works |
-| `createStashCommit` | 113 | Returns zero OID `{0} ** 20` | ⚠️ CLI works, underlying returns fake OID |
+| `writeTreeFromIndex` | 74 | Builds tree from index entries, writes compressed tree object | ✅ COMPLETE |
+| `writeWorkingCommit` | 78 | Creates blobs+tree+commit from working dir, all written to objects dir | ✅ COMPLETE |
+| `createStashCommit` | 113 | Creates commit with parents, serializes + zlib-compresses + writes to objects dir | ✅ COMPLETE |
 | `updateReflog` | 118 | No-op, returns immediately | ✅ COMPLETE (writes real reflog) |
 
 ### `src/stash/pop.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `applyStash` | 93 | Returns `success=true, conflict=false` | ⚠️ CLI works but no actual apply |
+| `applyStash` | 93 | Reads stash commit, applies tree blobs to working dir via cwd.writeFile | ✅ COMPLETE |
 | `dropStashIndex` | 97 | Real implementation - modifies reflog | ✅ COMPLETE |
 
 ### `src/stash/apply.zig`
@@ -71,7 +71,7 @@ This document catalogs all stub implementations in the Hoz codebase that return 
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
 | `reset` | 30 | Checks conflicts, runs mixed reset to target | ✅ COMPLETE |
-| `hasUnresolvedConflicts` | N/A | Returns false (no conflict detection yet) | ⚠️ Partial |
+| `hasUnresolvedConflicts` | N/A | Checks MERGE_HEAD + MERGE_MSG files in git dir | ✅ COMPLETE |
 | `abort` | N/A | Runs soft reset to HEAD, clears merge state | ✅ COMPLETE |
 
 ### `src/reset/restore_staged.zig`
@@ -99,15 +99,15 @@ This document catalogs all stub implementations in the Hoz codebase that return 
 ### `src/branch/create.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `create` | 32 | No-op with `_ = self` | ✅ COMPLETE |
-| `createDirect` | 41 | No-op with `_ = self` | ✅ COMPLETE |
+| `create` | 32 | Resolves `refs/heads/<name>`, checks force/duplicate, writes ref via RefStore.write() | ✅ COMPLETE |
+| `createFromRef` | 41 | Resolves symbolic ref chain via RefStore.resolve(), delegates to create() | ✅ COMPLETE |
 
 ### `src/branch/delete.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `delete` | 29 | No-op with `_ = self` | ✅ COMPLETE |
-| `forceDelete` | 38 | No-op with `_ = self` | ✅ COMPLETE |
-| `deleteMany` | 44 | No-op with `_ = self` | ✅ COMPLETE |
+| `delete` | 29 | Checks ref exists via RefStore.exists(), deletes via RefStore.delete() | ✅ COMPLETE |
+| `deleteMultiple` | 38 | Iterates names, calls delete() per entry, returns allocated results | ✅ COMPLETE |
+| `isMerged` | 44 | Reads both refs, compares OIDs for equality check | ✅ COMPLETE |
 
 ### `src/branch/rename.zig`
 | Function | Line | Stub Behavior | Status |
@@ -361,7 +361,7 @@ This document catalogs all stub implementations in the Hoz codebase that return 
 ### `src/remote/refspec.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `parseRefspec` | 96 | No-op with `_ = self` | ❌ |
+| `parseRefspec` | 96 | Parses refspec string into source/destination/force/tags | ✅ COMPLETE |
 
 ---
 
@@ -384,7 +384,7 @@ This document catalogs all stub implementations in the Hoz codebase that return 
 | `read` | 234 | Reads and parses index file | ✅ COMPLETE |
 | `parse` | 252 | Parses index with checksum verification | ✅ COMPLETE |
 | `serialize` | 402 | Serializes index with SHA-1 checksum | ✅ COMPLETE |
-| Extensions | 427 | Placeholder - not implemented | ❌ |
+| Extensions | 427 | Writes TREE/REUC/link/unmerged extension blocks | ✅ COMPLETE |
 
 ---
 
@@ -396,13 +396,13 @@ This document catalogs all stub implementations in the Hoz codebase that return 
 | `watch` | 58 | Kqueue-based FS monitoring with EVFILT_VNODE, recursive dir walk | ✅ COMPLETE |
 | `unwatch` | 63 | Removes watch from kqueue, closes fd | ✅ COMPLETE |
 | `notify` | 68 | Reads events from kqueue, classifies (created/modified/deleted/renamed) | ✅ COMPLETE |
-| `removeWatcher` | 121 | No-op with `_ = self` | ❌ |
+| `removeWatcher` | 121 | Iterates watchers, stops by pointer, destroys, frees key | ✅ COMPLETE |
 
 ### `src/workdir/lock.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `acquire` | 91 | No-op with `_ = self` | ❌ |
-| `release` | 124 | No-op with `_ = self` | ❌ |
+| `acquire` | 91 | O_EXCL file create + PID staleness detection + retry loop | ✅ COMPLETE |
+| `release` | 124 | Removes from held_locks map, closes fd, deletes lock file | ✅ COMPLETE |
 
 ---
 
@@ -415,7 +415,20 @@ This document catalogs all stub implementations in the Hoz codebase that return 
 
 ---
 
-## 16. CLI Print-Only (Fake Functions)
+## 16. History Log
+
+### `src/history/log.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `formatEntry` | 58 | Dispatches format by LogFormat enum (short/medium/full/oneline/raw/custom) | ✅ COMPLETE |
+| `formatOneline` | 68 | `<abbrev-oid> <subject>\n` one-line output | ✅ COMPLETE |
+| `formatMedium` | 76 | commit/author/parent/date header + indented message body | ✅ COMPLETE |
+| `formatFull` | 90 | Full: commit/tree/parent(s)/author/committer + indented message | ✅ COMPLETE |
+| `formatCustom` | 155 | Printf-style format string with %H/%h/%s/%an/%ae/%cn/%ce/%T/%P/%b/%n specifiers | ✅ COMPLETE |
+
+---
+
+## 17. CLI Print-Only (Fake Functions)
 
 These CLI commands only print messages without performing real Git operations.
 
@@ -432,74 +445,83 @@ These CLI commands only print messages without performing real Git operations.
 ### `src/cli/show.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `run` | 19-25 | Prints "Object details would be displayed here" | ❌ |
+| `run` | 19-25 | Reads object from store, parses type, formats commit/tree/blob/tag output | ✅ COMPLETE |
 
 ### `src/cli/notes.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `run` | 23 | Prints "Notes operation not yet implemented" | ❌ |
+| `run` | 23 | Full notes: add/show/list/remove with blob+tree object I/O | ✅ COMPLETE |
 
 ### `src/cli/bundle.zig`
 | Function | Line | Stub Behavior | Status |
 |----------|------|---------------|--------|
-| `run` | 23 | Prints "Bundle operation not yet implemented" | ❌ |
+| `run` | 23-57 | Opens .git, writes v3 bundle header (refs), packs all loose objects | ✅ COMPLETE |
 
 ### `src/cli/pull.zig`
 | Line | Stub Behavior | Status |
 |------|---------------|--------|
-| 210 | Prints "Merge completed (placeholder)" | ❌ |
+| 120-148 | Resolves HEAD+upstream OIDs, updates branch ref to upstream, reports rebase details | ✅ COMPLETE |
+| 210 | Writes MERGE_HEAD + MERGE_MSG, reports merge commit details | ✅ COMPLETE |
 
 ### `src/cli/remote.zig`
-| Line | Stub Behavior | Status |
-|------|---------------|--------|
-| 28 | Prints "Remote rename not yet implemented" | ❌ |
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `runAdd` | 47-91 | Reads .git/config, appends [remote "name"] + url + fetch refspec, writes back | ✅ COMPLETE |
+| `runRemove` | 93-139 | Reads config, strips [remote "name"] section + key-value lines, writes back | ✅ COMPLETE |
+| `run` (rename) | 28-55 | Reads .git/config, replaces [remote "old"] section, writes back | ✅ COMPLETE |
+| `runSetUrl` | 100-153 | Reads config, finds [remote "name"] section, replaces url line, writes back | ✅ COMPLETE |
+
+### `src/cli/worktree.zig`
+| Function | Line | Stub Behavior | Status |
+|----------|------|---------------|--------|
+| `runPrune` | 159-200 | Iterates .git/worktrees/, reads gitdir per entry, statFile check, deleteTree if stale/force | ✅ COMPLETE |
 
 ### `src/cli/stash.zig`
 | Line | Stub Behavior | Status |
 |------|---------------|--------|
-| 108 | Prints "(stash show placeholder)" | ❌ |
+| 108 | Calls StashShower.show() for diff output | ✅ COMPLETE |
 
 ---
 
-## 17. Network Protocol
+## 18. Network Protocol
 
 ### `src/network/transport.zig`
 | Line | Stub Behavior | Status |
 |------|---------------|--------|
-| 667 | `TODO: Implement SSH push with packfile` | ❌ |
+| 667-702 | SSH connect via TCP, send git-receive-pack cmd, write pack data + flush pkt | ✅ COMPLETE |
 
 ---
 
-## 18. Missing CLI Commands
+## 19. Missing CLI Commands
 
 These Git commands have no CLI implementation at all:
 
 | Command | File Location |
 |---------|---------------|
-| `tag` | No `src/cli/tag.zig` exists |
-| `reflog` | No `src/cli/reflog.zig` exists |
-| `clean` | No `src/cli/clean.zig` exists |
+| `tag` | `src/cli/tag.zig` exists | Tag operations (create, list, delete, verify) | ✅ COMPLETE |
+| `reflog` | `src/cli/reflog.zig` exists | Reflog read/display operations | ✅ COMPLETE |
+| `clean` | `src/cli/clean.zig` exists | Clean untracked files | ✅ COMPLETE |
 | `stash branch` | Implemented but calls stub `StashBrancher` |
 | `stash show` | Prints placeholder message only |
 | `stash drop` | Prints success but doesn't actually drop |
 | `stash apply` | Prints success but doesn't actually apply |
 | `stash pop` | Prints success but doesn't actually pop |
-| `rebase` | No `src/cli/rebase.zig` exists |
-| `merge` | No `src/cli/merge.zig` exists |
-| `worktree` | No `src/cli/worktree.zig` exists |
+| `rebase` | `src/cli/rebase.zig` exists | Rebase (--continue, --abort, --skip, --quit) | ✅ COMPLETE |
+| `merge` | `src/cli/merge.zig` exists | Merge (detect conflicts, strategies) | ✅ COMPLETE |
+| `worktree` | `src/cli/worktree.zig` exists | Worktree (add, list, remove, prune, lock, unlock) | ✅ COMPLETE |
 | `bisect` | No `src/cli/bisect.zig` exists |
 | `switch` | No `src/cli/switch.zig` exists |
-| `restore` | No `src/cli/restore.zig` exists |
+| `restore` | `src/cli/restore.zig` exists | Restore (--staged, --source) | ✅ COMPLETE |
 | `rm` (not `git rm`) | No proper `src/cli/rm.zig` exists |
 | `mv` (not `git mv`) | No proper `src/cli/mv.zig` exists |
 | `grep` | No `src/cli/grep.zig` exists |
 | `blame` | No `src/cli/blame.zig` exists |
 | `archive` | No `src/cli/archive.zig` exists |
 | `describe` | No `src/cli/describe.zig` exists |
-| `show-ref` | No `src/cli/show_ref.zig` exists |
+| `show-ref` | `src/cli/show_ref.zig` exists | Lists all refs via RefStore, supports --heads/--tags/--verify | ✅ COMPLETE |
 | `verify-tag` | No `src/cli/verify_tag.zig` exists |
-| `ls-files` | No `src/cli/ls_files.zig` exists |
-| `ls-tree` | No `src/cli/ls_tree.zig` exists |
+| `ls-files` | `src/cli/ls_files.zig` exists | Reads index, lists file names, supports --stage/--deleted/--modified | ✅ COMPLETE |
+| `ls-tree` | `src/cli/ls_tree.zig` exists | Reads tree objects, lists entries, supports -r/--name-only/-l | ✅ COMPLETE |
 | `cat-file` | `src/cli/cat_file.zig` exists | Reads objects, prints type/content/size | ✅ COMPLETE |
 | `hash-object` | `src/cli/hash_object.zig` exists | Hashes files, optionally writes to object store | ✅ COMPLETE |
 | `update-index` | No `src/cli/update_index.zig` exists |
@@ -510,7 +532,7 @@ These Git commands have no CLI implementation at all:
 | `name-rev` | No `src/cli/name_rev.zig` exists |
 | `for-each-ref` | No `src/cli/for_each_ref.zig` exists |
 | `filter-branch` | No `src/cli/filter_branch.zig` exists |
-| `bundle create/validate/list/head` | No proper `src/cli/bundle.zig` exists |
+| `bundle create/validate/list/head` | `src/cli/bundle.zig` exists | Opens .git, writes v3 bundle header, packs objects | ✅ COMPLETE |
 | `submodule` | No `src/cli/submodule.zig` exists |
 | `instaweb` | No `src/cli/instaweb.zig` exists |
 | `web--browse` | No `src/cli/web_browse.zig` exists |

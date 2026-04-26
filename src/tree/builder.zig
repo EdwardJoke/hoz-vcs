@@ -87,8 +87,49 @@ pub const TreeBuilder = struct {
     }
 
     pub fn buildAll(self: *TreeBuilder) ![]const tree_mod.Tree {
-        _ = self;
-        return &.{};
+        if (self.entries.items.len == 0) {
+            const trees = try self.allocator.alloc(tree_mod.Tree, 1);
+            trees[0] = try tree_mod.Tree.create(&.{});
+            return trees;
+        }
+
+        var dir_map = std.StringHashMapUnmanaged(std.ArrayListUnmanaged(tree_mod.TreeEntry)).empty;
+        defer {
+            var it = dir_map.iterator();
+            while (it.next()) |entry| {
+                entry.value_ptr.*.deinit(self.allocator);
+            }
+            dir_map.deinit(self.allocator);
+        }
+
+        for (self.entries.items) |entry| {
+            const slash_idx = std.mem.indexOf(u8, entry.name, "/") orelse entry.name.len;
+            const dir = if (slash_idx > 0)
+                entry.name[0..slash_idx]
+            else
+                ".";
+
+            const gop = try dir_map.getOrPut(self.allocator, dir);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .empty;
+            }
+            try gop.value_ptr.ensureTotalCapacity(self.allocator, 4);
+            try gop.value_ptr.append(self.allocator, entry);
+        }
+
+        var trees = std.ArrayListUnmanaged(tree_mod.Tree).empty;
+        errdefer trees.deinit(self.allocator);
+
+        var it = dir_map.iterator();
+        while (it.next()) |entry| {
+            const sub_entries = try entry.value_ptr.*.toOwnedSlice(self.allocator);
+            defer self.allocator.free(sub_entries);
+            const sorted = try self.sortEntries(sub_entries);
+            const tree = tree_mod.Tree.create(sorted);
+            try trees.append(self.allocator, tree);
+        }
+
+        return trees.toOwnedSlice(self.allocator);
     }
 };
 

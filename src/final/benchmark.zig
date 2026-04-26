@@ -3,7 +3,7 @@ const std = @import("std");
 
 pub const Benchmark = struct {
     allocator: std.mem.Allocator,
-    results: std.ArrayList(BenchResult),
+    results: std.ArrayListUnmanaged(BenchResult),
 
     pub const BenchResult = struct {
         name: []const u8,
@@ -15,12 +15,12 @@ pub const Benchmark = struct {
     pub fn init(allocator: std.mem.Allocator) Benchmark {
         return .{
             .allocator = allocator,
-            .results = std.ArrayList(BenchResult).init(allocator),
+            .results = .empty,
         };
     }
 
     pub fn deinit(self: *Benchmark) void {
-        self.results.deinit();
+        self.results.deinit(self.allocator);
     }
 
     pub fn runAll(self: *Benchmark) !void {
@@ -38,7 +38,7 @@ pub const Benchmark = struct {
     fn benchInit(self: *Benchmark) !void {
         const hoz_time = self.measureHoz(10);
         const git_time = self.measureGit(10);
-        try self.results.append(.{
+        try self.results.append(self.allocator, .{
             .name = "Init",
             .hoz_time_ms = hoz_time,
             .git_time_ms = git_time,
@@ -49,7 +49,7 @@ pub const Benchmark = struct {
     fn benchAdd(self: *Benchmark) !void {
         const hoz_time = self.measureHoz(100);
         const git_time = self.measureGit(100);
-        try self.results.append(.{
+        try self.results.append(self.allocator, .{
             .name = "Add",
             .hoz_time_ms = hoz_time,
             .git_time_ms = git_time,
@@ -60,7 +60,7 @@ pub const Benchmark = struct {
     fn benchCommit(self: *Benchmark) !void {
         const hoz_time = self.measureHoz(10);
         const git_time = self.measureGit(10);
-        try self.results.append(.{
+        try self.results.append(self.allocator, .{
             .name = "Commit",
             .hoz_time_ms = hoz_time,
             .git_time_ms = git_time,
@@ -71,7 +71,7 @@ pub const Benchmark = struct {
     fn benchLog(self: *Benchmark) !void {
         const hoz_time = self.measureHoz(50);
         const git_time = self.measureGit(50);
-        try self.results.append(.{
+        try self.results.append(self.allocator, .{
             .name = "Log",
             .hoz_time_ms = hoz_time,
             .git_time_ms = git_time,
@@ -82,7 +82,7 @@ pub const Benchmark = struct {
     fn benchDiff(self: *Benchmark) !void {
         const hoz_time = self.measureHoz(20);
         const git_time = self.measureGit(20);
-        try self.results.append(.{
+        try self.results.append(self.allocator, .{
             .name = "Diff",
             .hoz_time_ms = hoz_time,
             .git_time_ms = git_time,
@@ -93,7 +93,7 @@ pub const Benchmark = struct {
     fn benchStatus(self: *Benchmark) !void {
         const hoz_time = self.measureHoz(30);
         const git_time = self.measureGit(30);
-        try self.results.append(.{
+        try self.results.append(self.allocator, .{
             .name = "Status",
             .hoz_time_ms = hoz_time,
             .git_time_ms = git_time,
@@ -104,7 +104,7 @@ pub const Benchmark = struct {
     fn benchBranch(self: *Benchmark) !void {
         const hoz_time = self.measureHoz(10);
         const git_time = self.measureGit(10);
-        try self.results.append(.{
+        try self.results.append(self.allocator, .{
             .name = "Branch",
             .hoz_time_ms = hoz_time,
             .git_time_ms = git_time,
@@ -115,7 +115,7 @@ pub const Benchmark = struct {
     fn benchCheckout(self: *Benchmark) !void {
         const hoz_time = self.measureHoz(5);
         const git_time = self.measureGit(5);
-        try self.results.append(.{
+        try self.results.append(self.allocator, .{
             .name = "Checkout",
             .hoz_time_ms = hoz_time,
             .git_time_ms = git_time,

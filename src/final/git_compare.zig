@@ -32,14 +32,14 @@ pub const GitComparisonStats = struct {
 pub const GitComparison = struct {
     allocator: std.mem.Allocator,
     config: GitConfig,
-    results: std.ArrayList(GitBenchmarkResult),
+    results: std.ArrayListUnmanaged(GitBenchmarkResult),
     stats: GitComparisonStats,
 
     pub fn init(allocator: std.mem.Allocator, config: GitConfig) GitComparison {
         return .{
             .allocator = allocator,
             .config = config,
-            .results = std.ArrayList(GitBenchmarkResult).init(allocator),
+            .results = .empty,
             .stats = .{},
         };
     }
@@ -48,7 +48,7 @@ pub const GitComparison = struct {
         for (self.results.items) |result| {
             self.allocator.free(result.operation);
         }
-        self.results.deinit();
+        self.results.deinit(self.allocator);
     }
 
     pub fn compare(self: *GitComparison, operation: []const u8, hoz_func: *const fn () void, git_args: []const []const u8) !GitBenchmarkResult {
@@ -67,7 +67,7 @@ pub const GitComparison = struct {
             .sample_count = 5,
         };
 
-        try self.results.append(result);
+        try self.results.append(self.allocator, result);
 
         self.stats.operations_compared += 1;
         self.stats.total_hoz_time_ns += hoz_time;
@@ -153,8 +153,8 @@ pub const GitComparison = struct {
     pub fn printComparison(self: *GitComparison) !void {
         const stdout = std.io.getStdOut().writer();
         try stdout.print("\n=== Hoz vs GNU Git Comparison ===\n", .{});
-        try stdout.print("{:<15} {:>12} {:>12} {:>10}\n", .{"Operation", "Hoz(ns)", "Git(ns)", "Speedup"});
-        try stdout.print("{:<15} {:>12} {:>12} {:>10}\n", .{"---------", "-------", "-------", "-------"});
+        try stdout.print("{:<15} {:>12} {:>12} {:>10}\n", .{ "Operation", "Hoz(ns)", "Git(ns)", "Speedup" });
+        try stdout.print("{:<15} {:>12} {:>12} {:>10}\n", .{ "---------", "-------", "-------", "-------" });
 
         for (self.results.items) |result| {
             const winner = if (result.hoz_faster) "Hoz" else "Git";

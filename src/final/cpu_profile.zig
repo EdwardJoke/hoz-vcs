@@ -49,8 +49,8 @@ pub const FunctionProfile = struct {
 pub const CPUProfile = struct {
     allocator: std.mem.Allocator,
     config: CPUProfileConfig,
-    samples: std.ArrayList(ProfileSample),
-    function_profiles: std.AutoArrayHashMap([]const u8, FunctionProfile),
+    samples: std.ArrayListUnmanaged(ProfileSample),
+    function_profiles: std.array_hash_map.Auto([]const u8, FunctionProfile),
     stats: CPUProfileStats,
     enabled: bool,
     start_time: i64,
@@ -59,8 +59,8 @@ pub const CPUProfile = struct {
         return .{
             .allocator = allocator,
             .config = config,
-            .samples = std.ArrayList(ProfileSample).init(allocator),
-            .function_profiles = std.AutoArrayHashMap([]const u8, FunctionProfile).init(allocator),
+            .samples = .empty,
+            .function_profiles = .empty,
             .stats = .{},
             .enabled = false,
             .start_time = 0,
@@ -71,14 +71,14 @@ pub const CPUProfile = struct {
         for (self.samples.items) |sample| {
             self.allocator.free(sample.stack_trace);
         }
-        self.samples.deinit();
+        self.samples.deinit(self.allocator);
 
         var iter = self.function_profiles.iterator();
         while (iter.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
             self.allocator.free(entry.value_ptr.samples);
         }
-        self.function_profiles.deinit();
+        self.function_profiles.deinit(self.allocator);
     }
 
     pub fn start(self: *CPUProfile) void {
@@ -101,7 +101,7 @@ pub const CPUProfile = struct {
             .is_kernel = is_kernel,
         };
 
-        try self.samples.append(sample);
+        try self.samples.append(self.allocator, sample);
         self.stats.total_samples += 1;
         self.stats.total_cpu_time_ns += cpu_time_ns;
 
@@ -128,7 +128,7 @@ pub const CPUProfile = struct {
             const name_copy = try self.allocator.dupe(u8, name);
             errdefer self.allocator.free(name_copy);
 
-            try self.function_profiles.put(name_copy, .{
+            try self.function_profiles.put(self.allocator, name_copy, .{
                 .name = name_copy,
                 .address = 0,
                 .hit_count = 1,
@@ -142,12 +142,12 @@ pub const CPUProfile = struct {
     }
 
     pub fn getTopFunctions(self: *CPUProfile, count: usize) ![]const FunctionProfile {
-        var sorted = std.ArrayList(FunctionProfile).init(self.allocator);
-        defer sorted.deinit();
+        var sorted = std.ArrayListUnmanaged(FunctionProfile).empty;
+        defer sorted.deinit(self.allocator);
 
         var iter = self.function_profiles.iterator();
         while (iter.next()) |entry| {
-            try sorted.append(entry.value_ptr.*);
+            try sorted.append(self.allocator, entry.value_ptr.*);
         }
 
         std.mem.sort(FunctionProfile, sorted.items, {}, struct {
@@ -182,8 +182,8 @@ pub const CPUProfile = struct {
 
         try stdout.print("\n=== Top Functions by CPU Time ===\n", .{});
         const top = try self.getTopFunctions(10);
-        try stdout.print("{:<30} {:>12} {:>15}\n", .{"Function", "Hits", "Total Time(ns)"});
-        try stdout.print("{:<30} {:>12} {:>15}\n", .{"--------", "----", "------------"});
+        try stdout.print("{:<30} {:>12} {:>15}\n", .{ "Function", "Hits", "Total Time(ns)" });
+        try stdout.print("{:<30} {:>12} {:>15}\n", .{ "--------", "----", "------------" });
 
         for (top) |func| {
             try stdout.print("{:<30} {:>12} {:>15}\n", .{

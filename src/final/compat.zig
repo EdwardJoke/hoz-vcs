@@ -71,14 +71,15 @@ pub const GitCompatTester = struct {
         if (term != .exited or term.exited != 0) {
             return error.CommandFailed;
         }
-        var buf = std.ArrayList(u8).init(self.allocator);
+        var buf = std.ArrayListUnmanaged(u8).empty;
+        defer buf.deinit(self.allocator);
         var chunk: [4096]u8 = undefined;
         while (true) {
             const n = try stdout_file.readStreaming(self.io, &.{&chunk});
             if (n == 0) break;
-            try buf.appendSlice(chunk[0..n]);
+            try buf.appendSlice(self.allocator, chunk[0..n]);
         }
-        return try buf.toOwnedSlice();
+        return try buf.toOwnedSlice(self.allocator);
     }
 
     fn cleanupDir(self: *GitCompatTester, path: []const u8) void {
