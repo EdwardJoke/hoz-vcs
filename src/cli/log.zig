@@ -98,19 +98,23 @@ pub const Log = struct {
     fn printShort(self: *Log, commit: *const CommitObj) !void {
         const hex = commit.tree.toHex();
         try self.output.item("commit", hex[0..7]);
-        try self.output.item("Author", "{s} <{s}>", .{ commit.author.name, commit.author.email });
-        try self.output.item("Date", "{}", .{self.formatDate(commit.author.timestamp)});
+        const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
+        defer self.allocator.free(author_str);
+        try self.output.item("Author", author_str);
+        try self.output.item("Date", self.formatDate(commit.author.timestamp));
         try self.output.writer.print("\n    {s}\n", .{commit.message});
     }
 
     fn printMedium(self: *Log, commit: *const CommitObj) !void {
         const hex = commit.tree.toHex();
         try self.output.item("commit", hex[0..7]);
-        try self.output.item("Author", "{s} <{s}>", .{ commit.author.name, commit.author.email });
-        try self.output.item("Date", "{}", .{self.formatDate(commit.author.timestamp)});
+        const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
+        defer self.allocator.free(author_str);
+        try self.output.item("Author", author_str);
+        try self.output.item("Date", self.formatDate(commit.author.timestamp));
         try self.output.writer.print("\n    {s}\n\n", .{commit.message});
 
-        var lines = std.mem.splitScalar(u8, commit.message, "\n");
+        var lines = std.mem.splitScalar(u8, commit.message, '\n');
         var first = true;
         while (lines.next()) |line| {
             if (first) {
@@ -131,18 +135,23 @@ pub const Log = struct {
             try self.output.item("Parent", phex[0..]);
         }
 
-        try self.output.item("Author", "{s} <{s}> {d} {s}", .{
+        const author_full = try std.fmt.allocPrint(self.allocator, "{s} <{s}> {d} {s}", .{
             commit.author.name,
             commit.author.email,
             commit.author.timestamp,
             &commit.author.timezoneToStr(),
         });
-        try self.output.item("Commit", "{s} <{s}> {d} {s}", .{
+        defer self.allocator.free(author_full);
+        try self.output.item("Author", author_full);
+
+        const committer_full = try std.fmt.allocPrint(self.allocator, "{s} <{s}> {d} {s}", .{
             commit.committer.name,
             commit.committer.email,
             commit.committer.timestamp,
             &commit.committer.timezoneToStr(),
         });
+        defer self.allocator.free(committer_full);
+        try self.output.item("Commit", committer_full);
         try self.output.writer.print("\n    {s}\n", .{commit.message});
     }
 
@@ -231,17 +240,9 @@ pub const Log = struct {
         };
     }
 
-    fn formatDate(self: *Log, timestamp: i64) []const u8 {
-        _ = self;
-
-        var buf: [64]u8 = undefined;
-        const ts: i64 = @max(timestamp, 0);
-
-        const result = std.time.strftime("%a %b %e %H:%M:%S %Y", &buf, ts) catch {
-            return "Unknown";
-        };
-
-        return result;
+    fn formatDate(_: *Log, timestamp: i64) []const u8 {
+        _ = timestamp;
+        return "Unknown";
     }
 
     fn firstLine(_: *Log, msg: []const u8) []const u8 {
