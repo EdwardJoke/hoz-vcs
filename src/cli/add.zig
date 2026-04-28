@@ -107,8 +107,6 @@ pub const Add = struct {
     }
 
     fn writeBlob(self: *Add, git_dir: *const Io.Dir, content: []const u8, oid: OID) ![]const u8 {
-        _ = content;
-
         const hex = oid.toHex();
         const obj_dir = try std.fmt.allocPrint(self.allocator, "objects/{s}", .{hex[0..2]});
         defer self.allocator.free(obj_dir);
@@ -138,7 +136,7 @@ pub const Add = struct {
     }
 
     fn updateIndex(self: *Add, git_dir: *const Io.Dir, path: []const u8, oid: OID) !void {
-        var index_data = git_dir.readFileAlloc(self.io, "index", self.allocator, .limited(16 * 1024 * 1024)) catch null;
+        const index_data = git_dir.readFileAlloc(self.io, "index", self.allocator, .limited(16 * 1024 * 1024)) catch null;
         defer if (index_data) |d| self.allocator.free(d);
 
         var index: ?Index = null;
@@ -151,9 +149,24 @@ pub const Add = struct {
             return;
         };
 
-        const mode: u32 = if (stat.mode & 0o100 != 0) 0o100755 else 0o100644;
+        const now = Io.Timestamp.now(self.io, .real);
+        const ts: u32 = @intCast(@divTrunc(now.nanoseconds, 1000000000));
+        const file_size: u32 = @intCast(@min(stat.size, std.math.maxInt(u32)));
 
-        const new_entry = IndexEntry.fromStat(stat, oid, path, 0);
+        const new_entry = IndexEntry{
+            .ctime_sec = ts,
+            .ctime_nsec = 0,
+            .mtime_sec = ts,
+            .mtime_nsec = 0,
+            .dev = 0,
+            .ino = @intCast(stat.inode),
+            .mode = 0o100644,
+            .uid = 0,
+            .gid = 0,
+            .file_size = file_size,
+            .oid = oid,
+            .flags = @intCast(@min(path.len, 0xFFF)),
+        };
 
         if (index) |*idx| {
             defer idx.deinit();
@@ -174,7 +187,7 @@ pub const Add = struct {
                 try idx.entry_names.append(self.allocator, owned_name);
             }
 
-            const serialized = idx.serialize(self.allocator) catch {
+            const serialized = idx.serialize() catch {
                 return;
             };
             defer self.allocator.free(serialized);
@@ -186,7 +199,7 @@ pub const Add = struct {
             try fresh_idx.entries.append(self.allocator, new_entry);
             try fresh_idx.entry_names.append(self.allocator, owned_name);
 
-            const serialized = fresh_idx.serialize(self.allocator) catch {
+            const serialized = fresh_idx.serialize() catch {
                 fresh_idx.deinit();
                 return;
             };
