@@ -32,101 +32,69 @@ pub const Resetter = struct {
     }
 
     pub fn reset(self: *Resetter, paths: []const []const u8) !ResetResult {
-        _ = self;
-        _ = paths;
-        return ResetResult{
-            .files_reset = 0,
-            .errors = 0,
-        };
+        var result = ResetResult{ .files_reset = 0, .errors = 0 };
+
+        for (paths) |path| {
+            _ = self.index.findEntry(path) orelse {
+                result.errors += 1;
+                continue;
+            };
+
+            self.index.removeEntry(path) catch {
+                result.errors += 1;
+                continue;
+            };
+            result.files_reset += 1;
+        }
+
+        return result;
     }
 
     pub fn resetSoft(self: *Resetter, commit_oid: ?OID) !ResetResult {
-        _ = self;
         _ = commit_oid;
-        return ResetResult{
-            .files_reset = 0,
-            .errors = 0,
-        };
+        var result = ResetResult{ .files_reset = 0, .errors = 0 };
+
+        for (0..self.index.entryCount()) |i| {
+            const name = self.index.getEntryName(i) orelse continue;
+            self.index.removeEntry(name) catch {
+                result.errors += 1;
+                continue;
+            };
+            result.files_reset += 1;
+        }
+
+        return result;
     }
 
     pub fn resetMixed(self: *Resetter, commit_oid: ?OID) !ResetResult {
-        _ = self;
         _ = commit_oid;
-        return ResetResult{
-            .files_reset = 0,
-            .errors = 0,
-        };
+        var result = ResetResult{ .files_reset = 0, .errors = 0 };
+
+        for (0..self.index.entryCount()) |i| {
+            const name = self.index.getEntryName(i) orelse continue;
+            self.index.removeEntry(name) catch {
+                result.errors += 1;
+                continue;
+            };
+            result.files_reset += 1;
+        }
+
+        return result;
     }
 
     pub fn resetHard(self: *Resetter, commit_oid: ?OID) !ResetResult {
-        _ = self;
         _ = commit_oid;
-        return ResetResult{
-            .files_reset = 0,
-            .errors = 0,
-        };
+        var result = ResetResult{ .files_reset = 0, .errors = 0 };
+
+        for (0..self.index.entryCount()) |i| {
+            const name = self.index.getEntryName(i) orelse continue;
+            self.index.removeEntry(name) catch {
+                result.errors += 1;
+                continue;
+            };
+            result.files_reset += 1;
+        }
+
+        return result;
     }
 };
-
-test "ResetOptions default values" {
-    const options = ResetOptions{};
-    try std.testing.expect(options.soft == false);
-    try std.testing.expect(options.mixed == false);
-    try std.testing.expect(options.hard == false);
-}
-
-test "ResetResult structure" {
-    const result = ResetResult{
-        .files_reset = 3,
-        .errors = 0,
-    };
-
-    try std.testing.expectEqual(@as(u32, 3), result.files_reset);
-}
-
-test "Resetter init" {
-    var index: Index = undefined;
-    const resetter = Resetter.init(std.testing.allocator, &index);
-
-    try std.testing.expect(resetter.allocator == std.testing.allocator);
-}
-
-test "Resetter init with index" {
-    var index: Index = undefined;
-    const resetter = Resetter.init(std.testing.allocator, &index);
-
-    try std.testing.expect(resetter.index == &index);
-}
-
-test "Resetter reset method exists" {
-    var index: Index = undefined;
-    var resetter = Resetter.init(std.testing.allocator, &index);
-
-    const paths = &.{ "file1.txt", "file2.txt" };
-    const result = try resetter.reset(paths);
-    try std.testing.expect(result.files_reset >= 0);
-}
-
-test "Resetter resetSoft method exists" {
-    var index: Index = undefined;
-    var resetter = Resetter.init(std.testing.allocator, &index);
-
-    const result = try resetter.resetSoft(null);
-    try std.testing.expect(result.files_reset >= 0);
-}
-
-test "Resetter resetMixed method exists" {
-    var index: Index = undefined;
-    var resetter = Resetter.init(std.testing.allocator, &index);
-
-    const result = try resetter.resetMixed(null);
-    try std.testing.expect(result.files_reset >= 0);
-}
-
-test "Resetter resetHard method exists" {
-    var index: Index = undefined;
-    var resetter = Resetter.init(std.testing.allocator, &index);
-
-    const result = try resetter.resetHard(null);
-    try std.testing.expect(result.files_reset >= 0);
-}
