@@ -134,9 +134,51 @@ pub const RemoteManager = struct {
     }
 
     pub fn renameRemote(self: *RemoteManager, old_name: []const u8, new_name: []const u8) !Remote {
-        _ = new_name;
-        return (try self.getRemote(old_name)) orelse Remote{
+        if (self.git_dir_path == null) {
+            return (try self.getRemote(old_name)) orelse Remote{
+                .name = old_name,
+                .url = "",
+                .fetch_url = "",
+                .push_url = "",
+            };
+        }
+        const git_dir = self.git_dir_path.?;
+        const config_path = try std.fmt.allocPrint(self.allocator, "{s}/config", .{git_dir});
+        defer self.allocator.free(config_path);
+
+        const content = self.readConfig(config_path) catch return (try self.getRemote(old_name)) orelse Remote{
             .name = old_name,
+            .url = "",
+            .fetch_url = "",
+            .push_url = "",
+        };
+
+        var buf = std.ArrayList(u8).init(self.allocator);
+        errdefer buf.deinit();
+
+        const old_header = try std.fmt.allocPrint(self.allocator, "[remote \"{s}\"]", .{old_name});
+        defer self.allocator.free(old_header);
+
+        const new_header = try std.fmt.allocPrint(self.allocator, "[remote \"{s}\"]", .{new_name});
+        defer self.allocator.free(new_header);
+
+        var lines = std.mem.tokenizeAny(u8, content, "\n");
+        while (lines.next()) |line| {
+            const trim_line = std.mem.trim(u8, line, " \t\r");
+            if (std.mem.eql(u8, trim_line, old_header)) {
+                if (buf.items.len > 0) try buf.append('\n');
+                try buf.appendSlice(new_header);
+            } else {
+                if (buf.items.len > 0) try buf.append('\n');
+                try buf.appendSlice(line);
+            }
+        }
+
+        const cwd = Io.Dir.cwd();
+        try cwd.writeFile(self.allocator, config_path, buf.items, .{});
+
+        return (try self.getRemote(new_name)) orelse Remote{
+            .name = new_name,
             .url = "",
             .fetch_url = "",
             .push_url = "",
@@ -144,12 +186,67 @@ pub const RemoteManager = struct {
     }
 
     pub fn setUrl(self: *RemoteManager, name: []const u8, url: []const u8) !Remote {
-        _ = url;
-        return (try self.getRemote(name)) orelse Remote{
+        if (self.git_dir_path == null) {
+            return (try self.getRemote(name)) orelse Remote{
+                .name = name,
+                .url = "",
+                .fetch_url = "",
+                .push_url = "",
+            };
+        }
+        const git_dir = self.git_dir_path.?;
+        const config_path = try std.fmt.allocPrint(self.allocator, "{s}/config", .{git_dir});
+        defer self.allocator.free(config_path);
+
+        const content = self.readConfig(config_path) catch return (try self.getRemote(name)) orelse Remote{
             .name = name,
             .url = "",
             .fetch_url = "",
             .push_url = "",
+        };
+
+        var buf = std.ArrayList(u8).init(self.allocator);
+        errdefer buf.deinit();
+
+        const section_header = try std.fmt.allocPrint(self.allocator, "[remote \"{s}\"]", .{name});
+        defer self.allocator.free(section_header);
+
+        var in_target_section = false;
+        var url_written = false;
+
+        var lines = std.mem.tokenizeAny(u8, content, "\n");
+        while (lines.next()) |line| {
+            const trim_line = std.mem.trim(u8, line, " \t\r");
+
+            if (std.mem.startsWith(u8, trim_line, "[")) {
+                if (in_target_section and !url_written) {
+                    try buf.writer().print("    url = {s}\n", .{url});
+                    url_written = true;
+                }
+                in_target_section = std.mem.eql(u8, trim_line, section_header);
+                if (buf.items.len > 0) try buf.append('\n');
+                try buf.appendSlice(line);
+            } else if (in_target_section and std.mem.startsWith(u8, trim_line, "url")) {
+                try buf.writer().print("\turl = {s}", .{url});
+                url_written = true;
+            } else {
+                if (buf.items.len > 0 or trim_line.len == 0) try buf.append('\n');
+                try buf.appendSlice(line);
+            }
+        }
+
+        if (in_target_section and !url_written) {
+            try buf.writer().print("\n\turl = {s}", .{url});
+        }
+
+        const cwd = Io.Dir.cwd();
+        try cwd.writeFile(self.allocator, config_path, buf.items, .{});
+
+        return Remote{
+            .name = name,
+            .url = url,
+            .fetch_url = url,
+            .push_url = url,
         };
     }
 
@@ -162,12 +259,69 @@ pub const RemoteManager = struct {
             .tags = &.{},
         };
 
+        var branches = std.ArrayList([]const u8).init(self.allocator);
+        errdefer {
+            for (branches.items) |b| self.allocator.free(b);
+            branches.deinit(self.allocator);
+        }
+
+        var tags = std.ArrayList([]const u8).init(self.allocator);
+        errdefer {
+            for (tags.items) |t| self.allocator.free(t);
+            tags.deinit(self.allocator);
+        }
+
+        if (self.git_dir_path) |git_dir| {
+            const heads_dir = try std.fmt.allocPrint(self.allocator, "{s}/refs/remotes/{s}/heads", .{ git_dir, name });
+            defer self.allocator.free(heads_dir);
+
+            const cwd = Io.Dir.cwd();
+            var iter = cwd.openDir(self.io, heads_dir, .{}) catch {
+                return RemoteShowInfo{
+                    .name = remote.name,
+                    .fetch_url = remote.fetch_url,
+                    .push_url = remote.push_url,
+                    .branches = &.{},
+                    .tags = &.{},
+                };
+            };
+            defer iter.close();
+
+            var walker = iter.iterate(self.io);
+            while (walker.next() catch break) |entry| {
+                if (entry.kind == .file) {
+                    try branches.append(self.allocator, try self.allocator.dupe(u8, entry.name));
+                }
+            }
+
+            const tags_dir = try std.fmt.allocPrint(self.allocator, "{s}/refs/remotes/{s}/tags", .{ git_dir, name });
+            defer self.allocator.free(tags_dir);
+
+            var tag_iter = cwd.openDir(self.io, tags_dir, .{}) catch {
+                return RemoteShowInfo{
+                    .name = remote.name,
+                    .fetch_url = remote.fetch_url,
+                    .push_url = remote.push_url,
+                    .branches = try branches.toOwnedSlice(self.allocator),
+                    .tags = &.{},
+                };
+            };
+            defer tag_iter.close();
+
+            var tag_walker = tag_iter.iterate(self.io);
+            while (tag_walker.next() catch break) |entry| {
+                if (entry.kind == .file) {
+                    try tags.append(self.allocator, try self.allocator.dupe(u8, entry.name));
+                }
+            }
+        }
+
         return RemoteShowInfo{
             .name = remote.name,
             .fetch_url = remote.fetch_url,
             .push_url = remote.push_url,
-            .branches = &.{},
-            .tags = &.{},
+            .branches = try branches.toOwnedSlice(self.allocator),
+            .tags = try tags.toOwnedSlice(self.allocator),
         };
     }
 
