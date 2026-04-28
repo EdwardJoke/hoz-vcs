@@ -12,7 +12,7 @@ pub usingnamespace @import("benchmark.zig");
 pub usingnamespace @import("errors.zig");
 pub usingnamespace @import("complete.zig");
 
-pub const VERSION = "0.2.5";
+pub const VERSION = "0.2.9";
 
 test "final module loads" {
     try std.testing.expect(true);

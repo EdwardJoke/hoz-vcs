@@ -125,22 +125,26 @@ pub const Benchmark = struct {
 
     fn measureHoz(self: *Benchmark, ops: u32) u64 {
         _ = self;
-        const start = std.time.nanoTimestamp();
+        if (ops == 0) return 0;
+        var timer = try std.time.Timer.start();
         var i: u32 = 0;
         while (i < ops) : (i += 1) {
-            _ = i * 2;
+            std.mem.doNotOptimizeAway(@as(u32, i));
         }
-        return @as(u64, @intCast((std.time.nanoTimestamp() - start) / 1000000));
+        const elapsed_ns = timer.read();
+        return elapsed_ns / 1_000_000;
     }
 
     fn measureGit(self: *Benchmark, ops: u32) u64 {
         _ = self;
-        const start = std.time.nanoTimestamp();
+        if (ops == 0) return 0;
+        var timer = try std.time.Timer.start();
         var i: u32 = 0;
         while (i < ops) : (i += 1) {
-            _ = i + 1;
+            std.mem.doNotOptimizeAway(@as(u32, i));
         }
-        return @as(u64, @intCast((std.time.nanoTimestamp() - start) / 1000000));
+        const elapsed_ns = timer.read();
+        return elapsed_ns / 1_000_000;
     }
 
     fn printSummary(self: *Benchmark) !void {
