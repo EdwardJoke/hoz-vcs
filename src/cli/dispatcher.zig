@@ -406,7 +406,7 @@ pub const CommandDispatcher = struct {
 
     fn runLog(self: *CommandDispatcher, args: []const []const u8) !void {
         _ = args;
-        var log_cmd = Log.init(self.allocator, self.writer, self.style);
+        var log_cmd = Log.init(self.allocator, self.io, self.writer, self.style);
         try log_cmd.run(null);
     }
 
