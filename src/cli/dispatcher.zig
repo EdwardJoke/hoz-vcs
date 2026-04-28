@@ -50,6 +50,15 @@ const Config = @import("config.zig").Config;
 const Archive = @import("archive.zig").Archive;
 const RevParse = @import("rev_parse.zig").RevParse;
 const WriteTree = @import("write_tree.zig").WriteTree;
+const Shortlog = @import("shortlog.zig").Shortlog;
+const Cherry = @import("cherry.zig").Cherry;
+const Rerere = @import("rerere.zig").Rerere;
+const Submodule = @import("submodule.zig").Submodule;
+const FilterRepo = @import("filter_repo.zig").FilterRepo;
+const ForEachRef = @import("for_each_ref.zig").ForEachRef;
+const RevList = @import("rev_list.zig").RevList;
+const CommitTree = @import("commit_tree.zig").CommitTree;
+const UpdateIndex = @import("update_index.zig").UpdateIndex;
 
 pub const CommandDispatcher = struct {
     allocator: std.mem.Allocator,
@@ -157,6 +166,24 @@ pub const CommandDispatcher = struct {
             try self.runRevParse(args);
         } else if (std.mem.eql(u8, cmd, "write-tree") or std.mem.eql(u8, cmd, "write_tree")) {
             try self.runWriteTree(args);
+        } else if (std.mem.eql(u8, cmd, "shortlog")) {
+            try self.runShortlog(args);
+        } else if (std.mem.eql(u8, cmd, "cherry")) {
+            try self.runCherry(args);
+        } else if (std.mem.eql(u8, cmd, "rerere")) {
+            try self.runRerere(args);
+        } else if (std.mem.eql(u8, cmd, "submodule")) {
+            try self.runSubmodule(args);
+        } else if (std.mem.eql(u8, cmd, "filter-repo") or std.mem.eql(u8, cmd, "filter_repo")) {
+            try self.runFilterRepo(args);
+        } else if (std.mem.eql(u8, cmd, "for-each-ref") or std.mem.eql(u8, cmd, "for_each_ref")) {
+            try self.runForEachRef(args);
+        } else if (std.mem.eql(u8, cmd, "rev-list") or std.mem.eql(u8, cmd, "rev_list")) {
+            try self.runRevList(args);
+        } else if (std.mem.eql(u8, cmd, "commit-tree") or std.mem.eql(u8, cmd, "commit_tree")) {
+            try self.runCommitTree(args);
+        } else if (std.mem.eql(u8, cmd, "update-index") or std.mem.eql(u8, cmd, "update_index")) {
+            try self.runUpdateIndex(args);
         } else {
             var out = Output.init(self.writer, self.style, self.allocator);
             try out.errorMessage("Unknown command: {s}", .{cmd});
@@ -705,6 +732,54 @@ pub const CommandDispatcher = struct {
     fn runWriteTree(self: *CommandDispatcher, args: []const []const u8) !void {
         var writetree_cmd = WriteTree.init(self.allocator, self.io, self.writer, self.style);
         try writetree_cmd.run(args);
+    }
+
+    fn runShortlog(self: *CommandDispatcher, args: []const []const u8) !void {
+        var shortlog_cmd = Shortlog.init(self.allocator, self.io, self.writer, self.style);
+        try shortlog_cmd.run(args);
+    }
+
+    fn runCherry(self: *CommandDispatcher, args: []const []const u8) !void {
+        var cherry_cmd = Cherry.init(self.allocator, self.io, self.writer, self.style);
+        try cherry_cmd.run(args);
+    }
+
+    fn runRerere(self: *CommandDispatcher, args: []const []const u8) !void {
+        var rerere_cmd = Rerere.init(self.allocator, self.io, self.writer, self.style);
+        try rerere_cmd.run(args);
+    }
+
+    fn runSubmodule(self: *CommandDispatcher, args: []const []const u8) !void {
+        var sub_cmd = Submodule.init(self.allocator, self.io, self.writer, self.style);
+        try sub_cmd.run(args);
+    }
+
+    fn runFilterRepo(self: *CommandDispatcher, args: []const []const u8) !void {
+        var filter_cmd = FilterRepo.init(self.allocator, self.io, self.writer, self.style);
+        try filter_cmd.run(args);
+    }
+
+    fn runForEachRef(self: *CommandDispatcher, args: []const []const u8) !void {
+        var for_each_ref = ForEachRef.init(self.allocator, self.io, self.writer, self.style);
+        try for_each_ref.run(args);
+    }
+
+    fn runRevList(self: *CommandDispatcher, args: []const []const u8) !void {
+        var rev_list = try RevList.init(self.allocator, self.io, self.writer, self.style);
+        defer rev_list.deinit();
+        try rev_list.run(args);
+    }
+
+    fn runCommitTree(self: *CommandDispatcher, args: []const []const u8) !void {
+        var commit_tree = try CommitTree.init(self.allocator, self.io, self.writer, self.style);
+        defer commit_tree.deinit();
+        try commit_tree.run(args);
+    }
+
+    fn runUpdateIndex(self: *CommandDispatcher, args: []const []const u8) !void {
+        var update_index = try UpdateIndex.init(self.allocator, self.io, self.writer, self.style);
+        defer update_index.deinit();
+        try update_index.run(args);
     }
 };
 

@@ -118,10 +118,10 @@ pub const Tag = struct {
                 try self.output.errorMessage("Annotated tag requires -m <message>", .{});
                 return;
             }
-            var creator = AnnotatedTagCreator.init(self.allocator);
+            var creator = AnnotatedTagCreator.init(self.allocator, self.io);
             try creator.create(tag_name.?, target_ref, self.message.?);
         } else {
-            var creator = LightweightTagCreator.init(self.allocator);
+            var creator = LightweightTagCreator.init(self.allocator, self.io);
             try creator.create(tag_name.?, target_ref);
         }
 
@@ -143,7 +143,7 @@ pub const Tag = struct {
             return;
         }
 
-        var deleter = TagDeleter.init(self.allocator);
+        var deleter = TagDeleter.init(self.allocator, self.io);
         try deleter.delete(tag_name.?);
 
         try self.output.successMessage("Deleted tag: {s}", .{tag_name.?});
@@ -164,7 +164,7 @@ pub const Tag = struct {
             return;
         }
 
-        var verifier = TagVerifier.init(self.allocator);
+        var verifier = TagVerifier.init(self.allocator, self.io);
         const result = try verifier.verify(tag_name.?);
 
         if (result.valid) {

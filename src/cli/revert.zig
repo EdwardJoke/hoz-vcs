@@ -124,6 +124,23 @@ pub const Revert = struct {
             }
         }
 
+        const packed_data = self.git_dir.readFileAlloc(self.io.*, "packed-refs", self.allocator, .limited(65536)) catch {
+            return OID{ .bytes = .{0} ** 20 };
+        };
+        defer self.allocator.free(packed_data);
+
+        var lines = std.mem.splitScalar(u8, packed_data, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t\r");
+            if (trimmed.len == 0 or trimmed[0] == '#' or trimmed[0] == '^') continue;
+            if (trimmed.len >= 42 and trimmed[40] == ' ') {
+                const ref_name = trimmed[41..];
+                if (std.mem.eql(u8, spec, ref_name) or std.mem.endsWith(u8, ref_name, spec)) {
+                    return OID.fromHex(trimmed[0..40]) catch OID{ .bytes = .{0} ** 20 };
+                }
+            }
+        }
+
         return OID{ .bytes = .{0} ** 20 };
     }
 

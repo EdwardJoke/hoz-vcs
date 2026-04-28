@@ -132,6 +132,23 @@ pub const CherryPick = struct {
             }
         }
 
+        const packed_data = self.git_dir.readFileAlloc(self.io.*, "packed-refs", self.allocator, .limited(65536)) catch {
+            return OID{ .bytes = .{0} ** 20 };
+        };
+        defer self.allocator.free(packed_data);
+
+        var lines = std.mem.splitScalar(u8, packed_data, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t\r");
+            if (trimmed.len == 0 or trimmed[0] == '#' or trimmed[0] == '^') continue;
+            if (trimmed.len >= 42 and trimmed[40] == ' ') {
+                const ref_name = trimmed[41..];
+                if (std.mem.eql(u8, spec, ref_name) or std.mem.endsWith(u8, ref_name, spec)) {
+                    return OID.fromHex(trimmed[0..40]) catch OID{ .bytes = .{0} ** 20 };
+                }
+            }
+        }
+
         return OID{ .bytes = .{0} ** 20 };
     }
 
@@ -164,9 +181,85 @@ pub const CherryPick = struct {
     }
 
     fn applyTreeDiff(self: *CherryPick, parent_tree_hex: []const u8, our_tree_hex: []const u8) !void {
-        _ = parent_tree_hex;
-        const tree_oid = try OID.fromHex(our_tree_hex);
-        try self.applyTreeToWorkdirRaw(tree_oid);
+        const parent_oid = OID.fromHex(parent_tree_hex) catch return;
+        const our_oid = try OID.fromHex(our_tree_hex);
+
+        var parent_entries = try self.parseTreeEntries(parent_oid);
+        defer {
+            for (parent_entries.items) |e| {
+                self.allocator.free(e.name);
+            }
+            parent_entries.deinit(self.allocator);
+        }
+
+        var our_entries = try self.parseTreeEntries(our_oid);
+        defer {
+            for (our_entries.items) |e| {
+                self.allocator.free(e.name);
+            }
+            our_entries.deinit(self.allocator);
+        }
+
+        var parent_map = std.StringHashMap(TreeEntryDiff).init(self.allocator);
+        defer parent_map.deinit();
+        for (parent_entries.items) |e| {
+            try parent_map.put(e.name, e);
+        }
+
+        for (our_entries.items) |our| {
+            if (parent_map.get(our.name)) |parent_entry| {
+                if (!std.mem.eql(u8, &parent_entry.oid_bytes, &our.oid_bytes)) {
+                    try self.applyEntry(our.name, oid_mod.oidFromBytes(&our.oid_bytes), our.mode);
+                }
+                _ = parent_map.remove(our.name);
+            } else {
+                try self.applyEntry(our.name, oid_mod.oidFromBytes(&our.oid_bytes), our.mode);
+            }
+        }
+
+        var remove_iter = parent_map.iterator();
+        while (remove_iter.next()) |entry| {
+            const cwd = Io.Dir.cwd();
+            cwd.deleteFile(self.io.*, entry.key_ptr.*) catch {};
+        }
+    }
+
+    const TreeEntryDiff = struct { name: []const u8, mode: u32, oid_bytes: [20]u8 };
+
+    fn parseTreeEntries(self: *CherryPick, tree_oid: OID) !std.ArrayList(TreeEntryDiff) {
+        var result = try std.ArrayList(TreeEntryDiff).initCapacity(self.allocator, 16);
+        errdefer {
+            for (result.items) |e| self.allocator.free(e.name);
+            result.deinit(self.allocator);
+        }
+
+        if (tree_oid.isZero()) return result;
+
+        const tree_data = self.readObject(tree_oid) catch return result;
+        defer self.allocator.free(tree_data);
+
+        const obj = object_mod.parse(tree_data) catch return result;
+        if (obj.obj_type != .tree) return result;
+
+        var pos: usize = 0;
+        while (pos < obj.data.len) {
+            const space_idx = std.mem.indexOf(u8, obj.data[pos..], " ") orelse break;
+            const mode_str = obj.data[pos .. pos + space_idx];
+            pos += space_idx + 1;
+            const null_idx = std.mem.indexOf(u8, obj.data[pos..], "\x00") orelse break;
+            const name = obj.data[pos .. pos + null_idx];
+            pos += null_idx + 1;
+            if (pos + 20 > obj.data.len) break;
+            var oid_bytes: [20]u8 = undefined;
+            @memcpy(&oid_bytes, obj.data[pos .. pos + 20]);
+            pos += 20;
+
+            const mode = parseModeU32(mode_str) catch continue;
+            const name_copy = try self.allocator.dupe(u8, name);
+            try result.append(self.allocator, .{ .name = name_copy, .mode = mode, .oid_bytes = oid_bytes });
+        }
+
+        return result;
     }
 
     fn applyTreeToWorkdir(self: *CherryPick, tree_hex: []const u8) !void {
