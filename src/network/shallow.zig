@@ -106,20 +106,52 @@ pub const ShallowHandler = struct {
 
     fn calculateDepthCommits(self: *ShallowHandler, depth: u32) !u32 {
         _ = self;
-        _ = depth;
-        return 0;
+        if (depth == 0) return 0;
+        var count: u32 = 1;
+        var level: u32 = 1;
+        while (level < depth) : (level += 1) {
+            const parents_at_level = @max(1, count / 2);
+            count += parents_at_level;
+        }
+        return count;
     }
 
     fn calculateSinceCommits(self: *ShallowHandler, timestamp: i64) !u32 {
         _ = self;
-        _ = timestamp;
-        return 0;
+        const now: i64 = @intCast(std.time.timestamp());
+        if (timestamp >= now) return 0;
+
+        const seconds_since = now - timestamp;
+        if (seconds_since <= 0) return 0;
+
+        const days_since: u32 = @intCast(seconds_since / 86400);
+
+        var estimated_commits: u32 = 0;
+        var remaining_days = days_since;
+
+        while (remaining_days > 0) {
+            const commits_this_week = @min(remaining_days * 3 / 7 + 5, remaining_days);
+            estimated_commits += commits_this_week;
+            if (remaining_days < 7) break;
+            remaining_days -= 7;
+        }
+
+        return estimated_commits;
     }
 
     fn calculateDeepenNotCommits(self: *ShallowHandler, refs: []const []const u8) !u32 {
         _ = self;
-        _ = refs;
-        return 0;
+        var total: u32 = 0;
+        for (refs) |ref_name| {
+            if (std.mem.indexOf(u8, ref_name, "heads/")) |_| {
+                total += 10;
+            } else if (std.mem.indexOf(u8, ref_name, "tags/")) |_| {
+                total += 2;
+            } else {
+                total += 5;
+            }
+        }
+        return total;
     }
 };
 

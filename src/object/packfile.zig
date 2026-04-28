@@ -64,6 +64,41 @@ pub fn isThinPack(data: []const u8) bool {
     if (data.len < 12) return false;
     const signature = std.mem.readIntBig(u32, data[0..4]);
     if (signature != 0x5041434b) return false;
+
+    const num_objects =
+        (@as(u32, data[8]) << 24) |
+        (@as(u32, data[9]) << 16) |
+        (@as(u32, data[10]) << 8) |
+        @as(u32, data[11]);
+
+    var pos: usize = 12;
+    var count: u32 = 0;
+
+    while (count < num_objects and pos < data.len) : (count += 1) {
+        const first_byte = data[pos];
+        const obj_type = (first_byte >> 4) & 0x07;
+
+        if (obj_type == 7) return true;
+
+        var i: usize = 1;
+        while (pos + i < data.len and i < 20) : (i += 1) {
+            if ((data[pos + i] & 0x80) == 0) break;
+        }
+        pos += i + 1;
+
+        if (obj_type == 6) {
+            if (pos + 4 > data.len) break;
+            pos += 4;
+        } else if (obj_type != 7) {
+            while (pos < data.len) : (pos += 1) {
+                if (data[pos] & 0x80 == 0) {
+                    pos += 1;
+                    break;
+                }
+            }
+        }
+    }
+
     return false;
 }
 

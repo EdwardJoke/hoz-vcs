@@ -280,8 +280,31 @@ pub const Transport = struct {
     }
 
     fn fetchRefsGeneric(self: *Transport) ![]const refs.RemoteRef {
-        const result = try self.allocator.alloc(refs.RemoteRef, 0);
-        return result;
+        var result_list = std.ArrayList(refs.RemoteRef).initCapacity(self.allocator, 16) catch |err| return err;
+        defer result_list.deinit(self.allocator);
+
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch return try self.allocator.alloc(refs.RemoteRef, 0);
+        defer git_dir.close(self.io);
+
+        const ref_paths = [_][]const u8{
+            "refs/heads/master", "refs/heads/main",
+            "HEAD",
+        };
+
+        for (ref_paths) |ref_path| {
+            const content = git_dir.readFileAlloc(self.io, ref_path, self.allocator, .limited(256)) catch continue;
+            defer self.allocator.free(content);
+            const oid_str = std.mem.trim(u8, content, " \t\r\n");
+            if (oid_str.len >= 40) {
+                const owned_name = try self.allocator.dupe(u8, ref_path);
+                const owned_oid = try self.allocator.dupe(u8, oid_str[0..40]);
+                try result_list.append(self.allocator, .{ .name = owned_name, .oid = owned_oid });
+            }
+        }
+
+        if (result_list.items.len == 0) return try self.allocator.alloc(refs.RemoteRef, 0);
+        return try result_list.toOwnedSlice(self.allocator);
     }
 
     pub fn fetchPack(self: *Transport, wants: []const []const u8, haves: []const []const u8) ![]u8 {
@@ -404,10 +427,26 @@ pub const Transport = struct {
     }
 
     fn fetchPackGeneric(self: *Transport, wants: []const []const u8, haves: []const []const u8) ![]u8 {
-        _ = wants;
         _ = haves;
-        const result = try self.allocator.alloc(u8, 0);
-        return result;
+        var pack_data = std.ArrayList(u8).initCapacity(self.allocator, 4096) catch |err| return err;
+        defer pack_data.deinit(self.allocator);
+
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch return try self.allocator.alloc(u8, 0);
+        defer git_dir.close(self.io);
+
+        for (wants) |want| {
+            if (want.len < 40) continue;
+            const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ want[0..2], want[2..] });
+            defer self.allocator.free(obj_path);
+
+            const compressed = git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024)) catch continue;
+            defer self.allocator.free(compressed);
+            try pack_data.appendSlice(self.allocator, compressed);
+        }
+
+        if (pack_data.items.len == 0) return try self.allocator.alloc(u8, 0);
+        return try pack_data.toOwnedSlice(self.allocator);
     }
 
     fn httpGet(self: *Transport, url: []const u8, auth: ?[]const u8) ![]u8 {
@@ -805,10 +844,49 @@ pub const HttpTransport = struct {
     }
 
     pub fn request(self: *HttpTransport, path: []const u8, service: []const u8) ![]u8 {
-        _ = path;
         _ = service;
-        const result = try self.allocator.alloc(u8, 0);
-        return result;
+        const full_url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.base_url, path });
+        defer self.allocator.free(full_url);
+
+        const io = std.Io.Threaded.global_single_threaded;
+        const host_str = self.hostFromUrl();
+        var address = try std.Io.net.IpAddress.resolve(io, host_str, 80);
+        var socket = try address.connect(io, .{ .mode = .stream });
+        errdefer socket.close(io);
+
+        var req_buf: [2048]u8 = undefined;
+        var writer = std.Io.Writer.fixed(&req_buf);
+        try writer.interface.print("GET {s} HTTP/1.1\r\nHost: {s}\r\nConnection: close\r\n\r\n", .{ full_url, host_str });
+        const req_len = writer.interface.bytesWritten();
+        try socket.writeAll(io, req_buf[0..req_len]);
+
+        var resp_buf: [65536]u8 = undefined;
+        var resp_list = std.ArrayList(u8).initCapacity(self.allocator, 4096) catch |err| return err;
+        defer resp_list.deinit(self.allocator);
+
+        while (true) {
+            const n = try socket.readStreaming(io, &.{&resp_buf});
+            if (n == 0) break;
+            try resp_list.appendSlice(self.allocator, resp_buf[0..n]);
+        }
+        socket.close(io);
+
+        const raw = try resp_list.toOwnedSlice(self.allocator);
+        defer self.allocator.free(raw);
+
+        const header_end = std.mem.indexOf(u8, raw, "\r\n\r\n") orelse return try self.allocator.alloc(u8, 0);
+        const body = raw[header_end + 4 ..];
+        return try self.allocator.dupe(u8, body);
+    }
+
+    fn hostFromUrl(self: *HttpTransport) []const u8 {
+        if (std.mem.indexOf(u8, self.base_url, "://")) |idx| {
+            const after = idx + 3;
+            const host_start = after;
+            const host_end = std.mem.indexOf(u8, self.base_url[after..], "/") orelse self.base_url.len - after;
+            return self.base_url[host_start .. host_start + host_end];
+        }
+        return self.base_url;
     }
 
     pub fn fetchRefs(self: *HttpTransport) ![]const refs.RemoteRef {

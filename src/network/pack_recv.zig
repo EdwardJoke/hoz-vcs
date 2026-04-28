@@ -361,29 +361,6 @@ pub const PackReceiver = struct {
         }
     }
 
-    fn copyFromBase(base: []const u8, delta: []const u8, offset: *usize, result: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
-        _ = base;
-        _ = delta;
-        _ = offset;
-        _ = result;
-        _ = allocator;
-    }
-
-    fn insertFromBase(base: []const u8, delta: []const u8, offset: *usize, result: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
-        _ = base;
-        _ = delta;
-        _ = offset;
-        _ = result;
-        _ = allocator;
-    }
-
-    fn copyFromResult(delta: []const u8, offset: *usize, result: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
-        _ = delta;
-        _ = offset;
-        _ = result;
-        _ = allocator;
-    }
-
     fn resolveDelta(self: *PackReceiver, base_oid: []const u8, delta_data: []const u8, expected_size: u64, git_dir: []const u8, allocator: std.mem.Allocator, io: Io) ![]u8 {
         if (self.resolved_objects.get(base_oid)) |base| {
             return try applyDelta(base, delta_data, expected_size, allocator);

@@ -75,11 +75,37 @@ pub const RefAdvertisement = struct {
     }
 
     pub fn getBranches(self: *RefAdvertisement) []const RemoteRef {
-        return self.refs.values();
+        if (self.getBranchesFiltered(self.allocator)) |filtered| return filtered;
+        return &[_]RemoteRef{};
     }
 
     pub fn getTags(self: *RefAdvertisement) []const RemoteRef {
-        return self.refs.values();
+        if (self.getTagsFiltered(self.allocator)) |filtered| return filtered;
+        return &[_]RemoteRef{};
+    }
+
+    pub fn getBranchesFiltered(self: *RefAdvertisement, allocator: std.mem.Allocator) ![]const RemoteRef {
+        var result = std.ArrayList(RemoteRef).empty;
+        errdefer result.deinit(allocator);
+
+        for (self.refs.values()) |ref| {
+            if (std.mem.startsWith(u8, ref.name, "refs/heads/") or std.mem.startsWith(u8, ref.name, "refs/remotes/")) {
+                try result.append(allocator, ref);
+            }
+        }
+        return result.toOwnedSlice(allocator);
+    }
+
+    pub fn getTagsFiltered(self: *RefAdvertisement, allocator: std.mem.Allocator) ![]const RemoteRef {
+        var result = std.ArrayList(RemoteRef).empty;
+        errdefer result.deinit(allocator);
+
+        for (self.refs.values()) |ref| {
+            if (std.mem.startsWith(u8, ref.name, "refs/tags/")) {
+                try result.append(allocator, ref);
+            }
+        }
+        return result.toOwnedSlice(allocator);
     }
 };
 
