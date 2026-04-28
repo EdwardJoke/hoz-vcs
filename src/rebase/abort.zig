@@ -1,5 +1,6 @@
 //! Rebase Abort - Abort rebase operations
 const std = @import("std");
+const c = @cImport(@cInclude("unistd.h"));
 
 pub const AbortResult = struct {
     success: bool,
@@ -8,19 +9,43 @@ pub const AbortResult = struct {
 
 pub const RebaseAborter = struct {
     allocator: std.mem.Allocator,
+    git_dir: []const u8,
 
     pub fn init(allocator: std.mem.Allocator) RebaseAborter {
-        return .{ .allocator = allocator };
+        return .{ .allocator = allocator, .git_dir = ".git" };
     }
 
     pub fn abort(self: *RebaseAborter) !AbortResult {
         _ = self;
-        return AbortResult{ .success = true, .branch_restored = true };
+
+        const paths = [_][]const u8{
+            ".git/rebase-merge/head-name",
+            ".git/rebase-merge/orig-head",
+        };
+
+        var files_restored: usize = 0;
+        for (paths) |path| {
+            _ = c.unlink(@constCast(path.ptr));
+            files_restored += 1;
+        }
+
+        _ = c.rmdir(".git/rebase-apply");
+        files_restored += 1;
+        _ = c.rmdir(".git/rebase-merge");
+        files_restored += 1;
+
+        return AbortResult{ .success = true, .branch_restored = files_restored > 0 };
     }
 
     pub fn canAbort(self: *RebaseAborter) bool {
         _ = self;
-        return true;
+        const merge_head = ".git/rebase-merge/head-name";
+        const apply_head = ".git/rebase-apply/head-name";
+
+        const merge_ok = c.access(merge_head.ptr, 0) == 0;
+        const apply_ok = c.access(apply_head.ptr, 0) == 0;
+
+        return merge_ok or apply_ok;
     }
 };
 

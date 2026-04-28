@@ -1,5 +1,6 @@
 //! Rebase Patch - Apply patches during rebase
 const std = @import("std");
+const Io = std.Io;
 
 pub const PatchOptions = struct {
     ignore_whitespace: bool = false,
@@ -26,10 +27,11 @@ pub const HunkContext = struct {
 
 pub const PatchApplicator = struct {
     allocator: std.mem.Allocator,
+    io: Io,
     options: PatchOptions,
 
-    pub fn init(allocator: std.mem.Allocator, options: PatchOptions) PatchApplicator {
-        return .{ .allocator = allocator, .options = options };
+    pub fn init(allocator: std.mem.Allocator, io: Io, options: PatchOptions) PatchApplicator {
+        return .{ .allocator = allocator, .io = io, .options = options };
     }
 
     pub fn apply(self: *PatchApplicator, patch: []const u8, target: []const u8) !PatchResult {
@@ -65,10 +67,13 @@ pub const PatchApplicator = struct {
     }
 
     pub fn applyToFile(self: *PatchApplicator, patch: []const u8, file_path: []const u8) !PatchResult {
-        _ = self;
-        _ = patch;
-        _ = file_path;
-        return PatchResult{ .success = true, .hunks_applied = 0, .hunks_failed = 0 };
+        const cwd = Io.Dir.cwd();
+        const target = cwd.readFileAlloc(self.io, file_path, self.allocator, .limited(100 * 1024 * 1024)) catch {
+            return PatchResult{ .success = false, .hunks_applied = 0, .hunks_failed = 0 };
+        };
+        defer self.allocator.free(target);
+
+        return self.apply(patch, target);
     }
 
     fn parsePatch(self: *PatchApplicator, patch: []const u8) ![]const HunkContext {
@@ -289,7 +294,8 @@ test "PatchResult structure" {
 
 test "PatchApplicator init" {
     const options = PatchOptions{};
-    const applicator = PatchApplicator.init(std.testing.allocator, options);
+    const io = std.Io{};
+    const applicator = PatchApplicator.init(std.testing.allocator, io, options);
     try std.testing.expect(applicator.allocator == std.testing.allocator);
 }
 
@@ -297,18 +303,21 @@ test "PatchApplicator init with options" {
     var options = PatchOptions{};
     options.ignore_whitespace = true;
     options.whitespace_style = .loose;
-    const applicator = PatchApplicator.init(std.testing.allocator, options);
+    const io = std.Io{};
+    const applicator = PatchApplicator.init(std.testing.allocator, io, options);
     try std.testing.expect(applicator.options.ignore_whitespace == true);
 }
 
 test "PatchApplicator apply method exists" {
-    var applicator = PatchApplicator.init(std.testing.allocator, .{});
+    const io = std.Io{};
+    var applicator = PatchApplicator.init(std.testing.allocator, io, .{});
     const result = try applicator.apply("patch content", "target content");
     try std.testing.expect(result.success == true);
 }
 
 test "PatchApplicator applyToFile method exists" {
-    var applicator = PatchApplicator.init(std.testing.allocator, .{});
+    const io = std.Io{};
+    var applicator = PatchApplicator.init(std.testing.allocator, io, .{});
     const result = try applicator.applyToFile("patch", "file.txt");
     try std.testing.expect(result.success == true);
 }

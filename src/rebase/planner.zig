@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 const OID = @import("../object/oid.zig").OID;
 const Commit = @import("../object/commit.zig").Commit;
+const compress_mod = @import("../compress/zlib.zig");
 
 pub const RebasePlan = struct {
     upstream: OID,
@@ -242,9 +243,12 @@ pub const RebasePlanner = struct {
         const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
         defer self.allocator.free(obj_path);
 
-        return self.git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(65536)) catch {
+        const compressed = self.git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(65536)) catch {
             return error.ObjectNotFound;
         };
+        defer self.allocator.free(compressed);
+
+        return compress_mod.Zlib.decompress(compressed, self.allocator);
     }
 
     pub fn getNextCommit(self: *RebasePlanner, rebase_plan: *RebasePlan) ?OID {

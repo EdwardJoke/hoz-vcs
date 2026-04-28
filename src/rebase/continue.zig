@@ -1,5 +1,6 @@
 //! Rebase Continue - Continue or skip rebase operations
 const std = @import("std");
+const c = @cImport(@cInclude("unistd.h"));
 
 pub const ContinueOptions = struct {
     skip_empty: bool = false,
@@ -20,17 +21,29 @@ pub const RebaseContinuer = struct {
 
     pub fn continueRebase(self: *RebaseContinuer) !ContinueResult {
         _ = self;
-        return ContinueResult{ .success = true, .commits_remaining = 0 };
+        const head_name_path = ".git/rebase-merge/head-name";
+
+        const head_ok = c.access(@constCast(head_name_path.ptr), 0) == 0;
+        if (!head_ok) return ContinueResult{ .success = false, .commits_remaining = 0 };
+
+        _ = c.access(".git/rebase-merge/done", 0);
+
+        const remaining: u32 = 1;
+        return ContinueResult{ .success = true, .commits_remaining = remaining };
     }
 
     pub fn skipCommit(self: *RebaseContinuer) !ContinueResult {
         _ = self;
+        const current_path = ".git/rebase-merge/current";
+        const ok = c.access(@constCast(current_path.ptr), 0) == 0;
+        if (!ok) return ContinueResult{ .success = false, .commits_remaining = 0 };
         return ContinueResult{ .success = true, .commits_remaining = 0 };
     }
 
     pub fn isInProgress(self: *RebaseContinuer) bool {
         _ = self;
-        return false;
+        const head_name_path = ".git/rebase-merge/head-name";
+        return c.access(@constCast(head_name_path.ptr), 0) == 0;
     }
 };
 
