@@ -60,10 +60,15 @@ pub const ANSI = struct {
     pub const BG_WHITE: []const u8 = "\x1b[47m";
 };
 
-pub fn colorize(text: []const u8, color: DiffColor) []const u8 {
-    _ = text;
-    _ = color;
-    return text;
+pub fn colorize(allocator: std.mem.Allocator, text: []const u8, color: DiffColor) ![]const u8 {
+    const code = getColorCode(color);
+    if (code.len == 0) return try allocator.dupe(u8, text);
+    var result = try std.ArrayList(u8).initCapacity(allocator, code.len + text.len + ANSI.RESET.len);
+    defer result.deinit(allocator);
+    try result.appendSlice(allocator, code);
+    try result.appendSlice(allocator, text);
+    try result.appendSlice(allocator, ANSI.RESET);
+    return result.toOwnedSlice();
 }
 
 pub fn getColorCode(color: DiffColor) []const u8 {

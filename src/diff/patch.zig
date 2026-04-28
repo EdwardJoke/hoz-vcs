@@ -161,7 +161,7 @@ pub const PatchFormat = struct {
             self.allocator.free(hunks);
         }
 
-        var target_lines = try self.splitLines(target_content);
+        const target_lines = try self.splitLines(target_content);
         defer self.allocator.free(target_lines);
 
         var result_lines = std.ArrayList([]const u8).init(self.allocator);
@@ -224,11 +224,42 @@ pub const PatchFormat = struct {
         errdefer hunks.deinit();
 
         var lines = std.mem.splitScalar(u8, patch, '\n');
+        var current_lines = std.ArrayList(HunkLine).init(self.allocator);
+        defer current_lines.deinit();
+
+        var current_header: ?Hunk = null;
+
         while (lines.next()) |line| {
             if (std.mem.startsWith(u8, line, "@@")) {
-                const hunk = try self.parseHunkHeader(line);
-                try hunks.append(hunk);
+                if (current_header) |*hdr| {
+                    hdr.lines = try current_lines.toOwnedSlice();
+                    try hunks.append(hdr.*);
+                }
+                current_header = try self.parseHunkHeader(line);
+                current_lines.clearAndFree();
+            } else if (current_header != null) {
+                if (line.len == 0) {
+                    try current_lines.append(.{ .kind = .context, .content = "" });
+                } else if (line[0] == ' ' or line[0] == '-' or line[0] == '+') {
+                    const kind: enum { context, add, remove } = switch (line[0]) {
+                        ' ' => .context,
+                        '-' => .remove,
+                        '+' => .add,
+                        else => .context,
+                    };
+                    try current_lines.append(.{
+                        .kind = kind,
+                        .content = if (line.len > 1) line[1..] else "",
+                    });
+                } else if (std.mem.startsWith(u8, line, "\\ ") or std.mem.startsWith(u8, line, "\\")) {
+                    try current_lines.append(.{ .kind = .context, .content = line });
+                }
             }
+        }
+
+        if (current_header) |*hdr| {
+            hdr.lines = try current_lines.toOwnedSlice();
+            try hunks.append(hdr.*);
         }
 
         return hunks.toOwnedSlice();
@@ -306,12 +337,24 @@ pub const PatchFormat = struct {
         hunk: Hunk,
     ) !bool {
         _ = self;
-        var lines_consumed: usize = 0;
 
-        while (lines_consumed < hunk.old_count and current.* < target.len) {
-            _ = target[current.*];
-            current.* += 1;
-            lines_consumed += 1;
+        for (hunk.lines) |hunk_line| {
+            switch (hunk_line.kind) {
+                .context => {
+                    if (current.* < target.len) {
+                        try result.append(target[current.*]);
+                        current.* += 1;
+                    }
+                },
+                .remove => {
+                    if (current.* < target.len) {
+                        current.* += 1;
+                    }
+                },
+                .add => {
+                    try result.append(hunk_line.content);
+                },
+            }
         }
 
         return true;

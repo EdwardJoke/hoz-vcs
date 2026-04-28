@@ -175,20 +175,31 @@ pub const LargeFileDiffProcessor = struct {
         old_size: u64,
         new_size: u64,
     ) !result.DiffResult {
-        _ = old_reader;
-        _ = new_reader;
+        const max_read = @min(old_size + new_size, 100 * 1024 * 1024);
 
-        var diff_result = result.DiffResult.init(self.allocator);
-        errdefer diff_result.deinit();
+        var old_buf = try self.allocator.alloc(u8, @as(usize, @intCast(@min(old_size, max_read))));
+        defer self.allocator.free(old_buf);
+        var new_buf = try self.allocator.alloc(u8, @as(usize, @intCast(@min(new_size, max_read))));
+        defer self.allocator.free(new_buf);
 
-        if (old_size == 0 and new_size == 0) {
-            return diff_result;
+        var old_bytes: usize = 0;
+        while (old_bytes < old_buf.len) {
+            const n = old_reader.interface.read(old_buf[old_bytes..]) catch break;
+            if (n == 0) break;
+            old_bytes += n;
+        }
+
+        var new_bytes: usize = 0;
+        while (new_bytes < new_buf.len) {
+            const n = new_reader.interface.read(new_buf[new_bytes..]) catch break;
+            if (n == 0) break;
+            new_bytes += n;
         }
 
         self.stats.streaming_mode_used = true;
-        self.stats.total_bytes_processed = old_size + new_size;
+        self.stats.total_bytes_processed = old_bytes + new_bytes;
 
-        return diff_result;
+        return self.processLargeFile(old_buf[0..old_bytes], new_buf[0..new_bytes]);
     }
 
     fn createChunks(self: *LargeFileDiffProcessor, text: []const u8) ![]DiffChunk {

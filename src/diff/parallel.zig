@@ -169,15 +169,27 @@ pub const ParallelDiffProcessor = struct {
 
     fn processInParallel(
         self: *ParallelDiffProcessor,
-        _: []const []const u8,
-        _: []const []const u8,
-        _: []const myers.Edit,
+        old_lines: []const []const u8,
+        new_lines: []const []const u8,
+        edits: []const myers.Edit,
         hunks: []HunkTask,
         results: []HunkResult,
     ) !void {
-        _ = results;
-        self.stats.parallel_hunks = hunks.len;
-        self.stats.processed_hunks = hunks.len;
+        for (hunks, 0..) |hunk, idx| {
+            const hunk_edits = edits[hunk.start_edit_idx..hunk.end_edit_idx];
+            const processed = try self.processSingleHunk(old_lines, new_lines, hunk_edits);
+
+            results[idx] = .{
+                .hunk_index = idx,
+                .edits = processed,
+                .old_start = if (processed.len > 0) processed[0].old_line else 1,
+                .old_count = @max(old_lines.len, 0),
+                .new_start = if (processed.len > 0) processed[0].new_line else 1,
+                .new_count = @max(new_lines.len, 0),
+            };
+            self.stats.processed_hunks += 1;
+            self.stats.parallel_hunks += 1;
+        }
     }
 
     fn processSingleHunk(

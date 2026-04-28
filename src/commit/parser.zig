@@ -61,7 +61,46 @@ pub const CommitParser = struct {
     }
 
     pub fn validateFormat(data: []const u8) !bool {
-        _ = data;
+        if (data.len == 0) return false;
+
+        var has_tree = false;
+        var has_author = false;
+        var has_committer = false;
+        var found_separator = false;
+
+        var lines = std.mem.split(u8, data, "\n");
+        while (lines.next()) |line| {
+            if (line.len == 0) {
+                found_separator = true;
+                break;
+            }
+            if (std.mem.startsWith(u8, line, "tree ")) {
+                const hex = line[5..];
+                if (hex.len < 40) return false;
+                for (hex[0..40]) |c| {
+                    if (!std.ascii.isHex(c)) return false;
+                }
+                has_tree = true;
+            } else if (std.mem.startsWith(u8, line, "parent ")) {
+                const hex = line[7..];
+                if (hex.len < 40) return false;
+                for (hex[0..40]) |c| {
+                    if (!std.ascii.isHex(c)) return false;
+                }
+            } else if (std.mem.startsWith(u8, line, "author ")) {
+                if (line.len <= 7) return false;
+                has_author = true;
+            } else if (std.mem.startsWith(u8, line, "committer ")) {
+                if (line.len <= 10) return false;
+                has_committer = true;
+            }
+        }
+
+        if (!has_tree) return false;
+        if (!has_author) return false;
+        if (!has_committer) return false;
+        if (!found_separator) return false;
+
         return true;
     }
 };

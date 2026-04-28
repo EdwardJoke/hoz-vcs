@@ -1,48 +1,99 @@
 //! Clean Interactive - Interactive cleaning mode (-i)
 const std = @import("std");
+const Io = std.Io;
+
+pub const CleanAction = enum {
+    select,
+    quit,
+    help,
+};
 
 pub const CleanInteractive = struct {
     allocator: std.mem.Allocator,
-    interactive: bool,
+    io: Io,
+    selected: std.ArrayList([]const u8),
 
-    pub fn init(allocator: std.mem.Allocator) CleanInteractive {
-        return .{ .allocator = allocator, .interactive = true };
+    pub fn init(allocator: std.mem.Allocator, io: Io) CleanInteractive {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .selected = std.ArrayList([]const u8).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *CleanInteractive) void {
+        self.selected.deinit(self.allocator);
     }
 
     pub fn prompt(self: *CleanInteractive, path: []const u8) !bool {
-        _ = self;
-        _ = path;
-        return false;
+        const stdout = Io.File.stdout().writer(&.{});
+        try stdout.interface.print("Remove {s}? [y/N] ", .{path});
+
+        var buf: [64]u8 = undefined;
+        const stdin = Io.File.stdin().reader(&.{});
+        const line = (stdin.interface.readUntilDelimiterOrEof(&buf, '\n') catch return false) orelse return false;
+        const trimmed = std.mem.trim(u8, line, " \r\n");
+        return trimmed.len == 1 and (trimmed[0] == 'y' or trimmed[0] == 'Y');
     }
 
     pub fn showMenu(self: *CleanInteractive) !void {
         _ = self;
+        const stdout = Io.File.stdout().writer(&.{});
+        try stdout.interface.print(
+            \\*** Commands ***
+            \\   select - select items to clean
+            \\   quit   - stop cleaning
+            \\   help  - show this message
+            \\
+        , .{});
     }
 
     pub fn selectAction(self: *CleanInteractive, action: []const u8, paths: []const []const u8) !void {
-        _ = self;
-        _ = action;
-        _ = paths;
+        const parsed = std.meta.stringToEnum(CleanAction, action) orelse .help;
+
+        switch (parsed) {
+            .select => {
+                self.selected.clearAndFree(self.allocator);
+                for (paths) |p| {
+                    if (try self.prompt(p)) {
+                        try self.selected.append(self.allocator, p);
+                    }
+                }
+            },
+            .quit => {},
+            .help => try self.showMenu(),
+        }
+    }
+
+    pub fn getSelected(self: *CleanInteractive) []const []const u8 {
+        return self.selected.items;
     }
 
     pub fn isInteractive(self: *CleanInteractive) bool {
-        return self.interactive;
+        return true;
     }
 };
 
 test "CleanInteractive init" {
-    const cleaner = CleanInteractive.init(std.testing.allocator);
-    try std.testing.expect(cleaner.interactive == true);
-}
-
-test "CleanInteractive isInteractive" {
-    const cleaner = CleanInteractive.init(std.testing.allocator);
+    const io = Io.Threaded.global_single_threaded.ioBasic();
+    const cleaner = CleanInteractive.init(std.testing.allocator, io);
+    defer cleaner.deinit();
     try std.testing.expect(cleaner.isInteractive() == true);
 }
 
-test "CleanInteractive prompt method exists" {
-    var cleaner = CleanInteractive.init(std.testing.allocator);
-    const result = try cleaner.prompt("file.txt");
-    _ = result;
-    try std.testing.expect(true);
+test "CleanInteractive isInteractive" {
+    const io = Io.Threaded.global_single_threaded.ioBasic();
+    const cleaner = CleanInteractive.init(std.testing.allocator, io);
+    defer cleaner.deinit();
+    try std.testing.expect(cleaner.isInteractive() == true);
+}
+
+test "CleanInteractive select action parses" {
+    const io = Io.Threaded.global_single_threaded.ioBasic();
+    var cleaner = CleanInteractive.init(std.testing.allocator, io);
+    defer cleaner.deinit();
+
+    const test_paths = [_][]const u8{ "file1.txt", "file2.zig" };
+    try cleaner.selectAction("help", &test_paths);
+    try std.testing.expectEqual(@as(usize, 0), cleaner.getSelected().len);
 }
