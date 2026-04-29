@@ -375,3 +375,307 @@ pub const Submodule = struct {
         }
     }
 };
+
+pub const GitModulesEntry = struct {
+    name: []const u8,
+    path: []const u8,
+    url: []const u8,
+    branch: ?[]const u8 = null,
+    update_strategy: []const u8 = "checkout",
+};
+
+pub const GitModulesParser = struct {
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) GitModulesParser {
+        return .{ .allocator = allocator };
+    }
+
+    pub fn parse(self: *GitModulesParser, content: []const u8) ![]GitModulesEntry {
+        var result = std.ArrayList(GitModulesEntry).empty;
+        errdefer {
+            for (result.items) |e| {
+                self.allocator.free(e.name);
+                self.allocator.free(e.path);
+                self.allocator.free(e.url);
+                if (e.branch) |b| self.allocator.free(b);
+                self.allocator.free(e.update_strategy);
+            }
+            result.deinit(self.allocator);
+        }
+
+        var current_name: ?[]const u8 = null;
+        var current_path: ?[]const u8 = null;
+        var current_url: ?[]const u8 = null;
+        var current_branch: ?[]const u8 = null;
+        var current_update: []const u8 = "checkout";
+
+        var lines = std.mem.splitScalar(u8, content, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t\r");
+
+            if (std.mem.startsWith(u8, trimmed, "[submodule")) {
+                if (current_name) |name| {
+                    try self.flushEntry(&result, name, current_path, current_url, current_branch, current_update);
+                    current_name = null;
+                    current_path = null;
+                    current_url = null;
+                    current_branch = null;
+                    current_update = "checkout";
+                }
+
+                const name_start = std.mem.indexOfScalar(u8, trimmed, '"') orelse continue;
+                const name_end = std.mem.indexOfScalar(u8, trimmed[name_start + 1 ..], '"') orelse continue;
+
+                current_name = try self.allocator.dupe(u8, trimmed[name_start + 1 ..][0..name_end]);
+            } else if (std.mem.startsWith(u8, trimmed, "\tpath") or std.mem.startsWith(u8, trimmed, "path")) {
+                const eq_idx = std.mem.indexOfScalar(u8, trimmed, '=') orelse continue;
+                current_path = try self.allocator.dupe(u8, std.mem.trim(u8, trimmed[eq_idx + 1 ..], " \t\r"));
+            } else if (std.mem.startsWith(u8, trimmed, "\turl") or std.mem.startsWith(u8, trimmed, "url")) {
+                const eq_idx = std.mem.indexOfScalar(u8, trimmed, '=') orelse continue;
+                current_url = try self.allocator.dupe(u8, std.mem.trim(u8, trimmed[eq_idx + 1 ..], " \t\r"));
+            } else if (std.mem.startsWith(u8, trimmed, "\tbranch") or std.mem.startsWith(u8, trimmed, "branch")) {
+                const eq_idx = std.mem.indexOfScalar(u8, trimmed, '=') orelse continue;
+                current_branch = try self.allocator.dupe(u8, std.mem.trim(u8, trimmed[eq_idx + 1 ..], " \t\r"));
+            } else if (std.mem.startsWith(u8, trimmed, "\tupdate") or std.mem.startsWith(u8, trimmed, "update")) {
+                const eq_idx = std.mem.indexOfScalar(u8, trimmed, '=') orelse continue;
+                current_update = try self.allocator.dupe(u8, std.mem.trim(u8, trimmed[eq_idx + 1 ..], " \t\r"));
+            }
+        }
+
+        if (current_name) |name| {
+            try self.flushEntry(&result, name, current_path, current_url, current_branch, current_update);
+        }
+
+        return result.toOwnedSlice(self.allocator);
+    }
+
+    fn flushEntry(
+        self: *GitModulesParser,
+        result: *std.ArrayList(GitModulesEntry),
+        name: []const u8,
+        path: ?[]const u8,
+        url: ?[]const u8,
+        branch: ?[]const u8,
+        update_strategy: []const u8,
+    ) !void {
+        const path_val = path orelse name;
+        const url_val = url orelse "";
+        const branch_owned = if (branch) |b|
+            try self.allocator.dupe(u8, b)
+        else
+            null;
+        const update_owned = try self.allocator.dupe(u8, update_strategy);
+
+        try result.append(self.allocator, .{
+            .name = name,
+            .path = path_val,
+            .url = url_val,
+            .branch = branch_owned,
+            .update_strategy = update_owned,
+        });
+
+        if (path) |p| self.allocator.free(p);
+        if (url) |u_| self.allocator.free(u_);
+    }
+
+    pub fn deinitEntries(self: *GitModulesParser, entries: []GitModulesEntry) void {
+        for (entries) |e| {
+            self.allocator.free(e.name);
+            self.allocator.free(e.path);
+            self.allocator.free(e.url);
+            if (e.branch) |b| self.allocator.free(b);
+            self.allocator.free(e.update_strategy);
+        }
+        self.allocator.free(entries);
+    }
+};
+
+pub const ModuleManager = struct {
+    allocator: std.mem.Allocator,
+    io: Io,
+
+    pub fn init(allocator: std.mem.Allocator, io: Io) ModuleManager {
+        return .{ .allocator = allocator, .io = io };
+    }
+
+    pub fn createModuleDir(self: *ModuleManager, git_dir: *Io.Dir, module_name: []const u8) !void {
+        const modules_dir = git_dir.openDir(self.io, "modules", .{}) catch {
+            git_dir.makeDir(self.io, "modules") catch return error.FailedToCreateModulesDir;
+            return git_dir.openDir(self.io, "modules", .{}) orelse return error.FailedToCreateModulesDir;
+        };
+        defer modules_dir.close(self.io);
+
+        _ = modules_dir.openDir(self.io, module_name, .{}) catch {
+            modules_dir.makeDir(self.io, module_name) catch return error.FailedToCreateModuleDir;
+        };
+
+        const sub_dir = modules_dir.openDir(self.io, module_name, .{}) orelse return;
+        defer sub_dir.close(self.io);
+
+        for (&[_][]const u8{ "objects", "refs/heads", "refs/tags", "info" }) |subdir| {
+            sub_dir.makeDirPath(self.io, subdir) catch {};
+        }
+    }
+
+    pub fn writeModuleHead(self: *ModuleManager, git_dir: *Io.Dir, module_name: []const u8, oid: []const u8) !void {
+        const modules_dir = git_dir.openDir(self.io, "modules", .{}) catch return;
+        defer modules_dir.close(self.io);
+
+        const sub_dir = modules_dir.openDir(self.io, module_name, .{}) catch return;
+        defer sub_dir.close(self.io);
+
+        sub_dir.writeFile(self.io, .{ .sub_path = "HEAD", .data = oid }) catch {};
+    }
+
+    pub fn writeModuleConfig(self: *ModuleManager, git_dir: *Io.Dir, entry: GitModulesEntry) !void {
+        const config_path = try std.fmt.allocPrint(self.allocator, "config", .{});
+        defer self.allocator.free(config_path);
+
+        const existing = git_dir.readFileAlloc(self.io, config_path, self.allocator, .limited(1024 * 1024)) catch "";
+        defer if (existing.len > 0) self.allocator.free(existing);
+
+        const section_header = try std.fmt.allocPrint(self.allocator, "[submodule \"{s}\"]\n", .{entry.name});
+        defer self.allocator.free(section_header);
+
+        if (std.mem.indexOf(u8, existing, section_header) != null) return;
+
+        var buf = std.ArrayList(u8).empty;
+        errdefer buf.deinit(self.allocator);
+
+        if (existing.len > 0) {
+            try buf.appendSlice(self.allocator, existing);
+            if (!std.mem.endsWith(u8, existing, "\n")) {
+                try buf.append(self.allocator, '\n');
+            }
+        }
+
+        try buf.appendSlice(self.allocator, section_header);
+        try buf.appendSlice(self.allocator, "\tpath = ");
+        try buf.appendSlice(self.allocator, entry.path);
+        try buf.appendSlice(self.allocator, "\n");
+        try buf.appendSlice(self.allocator, "\turl = ");
+        try buf.appendSlice(self.allocator, entry.url);
+        try buf.appendSlice(self.allocator, "\n");
+
+        if (entry.branch) |b| {
+            try buf.appendSlice(self.allocator, "\tactivebranch = ");
+            try buf.appendSlice(self.allocator, b);
+            try buf.appendSlice(self.allocator, "\n");
+        }
+
+        const final = buf.toOwnedSlice(self.allocator);
+        defer self.allocator.free(final);
+
+        git_dir.writeFile(self.io, .{ .sub_path = config_path, .data = final }) catch {};
+    }
+
+    pub fn removeModuleConfig(self: *ModuleManager, git_dir: *Io.Dir, module_name: []const u8) !void {
+        const config_content = git_dir.readFileAlloc(self.io, "config", self.allocator, .limited(1024 * 1024)) catch return;
+        defer self.allocator.free(config_content);
+
+        const section_start = try std.fmt.allocPrint(self.allocator, "[submodule \"{s}\"]\n", .{module_name});
+        defer self.allocator.free(section_start);
+
+        const idx = std.mem.indexOf(u8, config_content, section_start) orelse return;
+
+        var section_end = idx + section_start.len;
+        while (section_end < config_content.len) : (section_end += 1) {
+            if (config_content[section_end] == '[' and section_end > idx) break;
+        }
+
+        var buf = std.ArrayList(u8).empty;
+        errdefer buf.deinit(self.allocator);
+
+        if (idx > 0) {
+            try buf.appendSlice(self.allocator, config_content[0..idx]);
+        }
+        if (section_end < config_content.len) {
+            try buf.appendSlice(self.allocator, config_content[section_end..]);
+        }
+
+        const final = buf.toOwnedSlice(self.allocator);
+        defer self.allocator.free(final);
+
+        git_dir.writeFile(self.io, .{ .sub_path = "config", .data = final }) catch {};
+    }
+
+    pub fn isInitialized(self: *ModuleManager, git_dir: *Io.Dir, module_name: []const u8) bool {
+        const modules_dir = git_dir.openDir(self.io, "modules", .{}) catch return false;
+        defer modules_dir.close(self.io);
+
+        const sub_dir = modules_dir.openDir(self.io, module_name, .{}) catch return false;
+        defer sub_dir.close(self.io);
+
+        const head = sub_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch return false;
+        defer self.allocator.free(head);
+
+        return head.len > 0;
+    }
+};
+
+test "GitModulesParser parses basic .gitmodules" {
+    var parser = GitModulesParser.init(std.testing.allocator);
+    const input =
+        \\[submodule "libfoo"]
+        \\\tpath = libs/libfoo
+        \\\turl = https://github.com/example/libfoo.git
+        \\
+        \\[submodule "libbar"]
+        \\\tpath = libs/libbar
+        \\\turl = https://github.com/example/libbar.git
+        \\\tbranch = main
+        \\\tupdate = rebase
+    ;
+
+    const entries = try parser.parse(input);
+    defer parser.deinitEntries(entries);
+
+    try std.testing.expectEqual(@as(usize, 2), entries.len);
+    try std.testing.expectEqualStrings("libfoo", entries[0].name);
+    try std.testing.expectEqualStrings("libs/libfoo", entries[0].path);
+    try std.testing.expectEqualStrings("https://github.com/example/libfoo.git", entries[0].url);
+    try std.testing.expect(entries[0].branch == null);
+    try std.testing.expectEqualStrings("checkout", entries[0].update_strategy);
+
+    try std.testing.expectEqualStrings("libbar", entries[1].name);
+    try std.testing.expectEqualStrings("libs/libbar", entries[1].path);
+    try std.testing.expectEqualStrings("https://github.com/example/libbar.git", entries[1].url);
+    try std.testing.expectEqualStrings("main", entries[1].branch.?);
+    try std.testing.expectEqualStrings("rebase", entries[1].update_strategy);
+}
+
+test "GitModulesParser handles empty input" {
+    var parser = GitModulesParser.init(std.testing.allocator);
+    const entries = try parser.parse("");
+    defer parser.deinitEntries(entries);
+    try std.testing.expectEqual(@as(usize, 0), entries.len);
+}
+
+test "GitModulesParser single submodule no optional fields" {
+    var parser = GitModulesParser.init(std.testing.allocator);
+    const input =
+        \\[submodule "core"]
+        \\\tpath = deps/core
+        \\\turl = git@example.com:core.git
+    ;
+
+    const entries = try parser.parse(input);
+    defer parser.deinitEntries(entries);
+
+    try std.testing.expectEqual(@as(usize, 1), entries.len);
+    try std.testing.expectEqualStrings("core", entries[0].name);
+    try std.testing.expectEqualStrings("deps/core", entries[0].path);
+    try std.testing.expect(entries[0].branch == null);
+}
+
+test "ModuleManager init creates structure" {
+    var buf: [1]u8 = undefined;
+    const io: Io = .init(.{
+        .stdin = .empty,
+        .stdout = .buffered(&buf),
+        .stderr = .buffered(&buf),
+    });
+    const mgr = ModuleManager.init(std.testing.allocator, io);
+    try std.testing.expect(mgr.allocator == std.testing.allocator);
+}

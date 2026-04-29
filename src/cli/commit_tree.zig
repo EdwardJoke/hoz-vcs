@@ -110,24 +110,46 @@ pub const CommitTree = struct {
 
         // Read commit message from stdin
         var message = try std.ArrayList(u8).initCapacity(self.allocator, 1024);
-        defer message.deinit(self.allocator);
+        errdefer message.deinit(self.allocator);
 
-        // For now, use a dummy message
-        try message.appendSlice(self.allocator, "Initial commit");
-        _ = message.items;
+        var stdin_buf: [4096]u8 = undefined;
+        var stdin_reader = Io.File.stdin().reader(self.io, &stdin_buf);
+
+        while (true) {
+            const line = stdin_reader.interface.takeDelimiter('\n') catch |err| switch (err) {
+                error.StreamTooLong => {
+                    _ = stdin_reader.interface.take(4096) catch break;
+                    continue;
+                },
+                error.ReadFailed => break,
+            };
+            if (line) |content| {
+                try message.appendSlice(self.allocator, content);
+                try message.append(self.allocator, '\n');
+            } else {
+                break;
+            }
+        }
+
+        if (message.items.len == 0) {
+            try message.appendSlice(self.allocator, "Initial commit");
+        }
 
         // Create commit
+        const now = Io.Timestamp.now(self.io, .real);
+        const current_timestamp: i64 = @intCast(@divTrunc(now.nanoseconds, 1000000000));
+
         const author = Identity{
             .name = author_name orelse "Hoz User",
             .email = author_email orelse "user@hoz.example",
-            .timestamp = if (author_date) |date| try std.fmt.parseInt(i64, date, 10) else 1714272000,
+            .timestamp = if (author_date) |date| try std.fmt.parseInt(i64, date, 10) else current_timestamp,
             .timezone = 0,
         };
 
         const committer = Identity{
             .name = committer_name orelse author_name orelse "Hoz User",
             .email = committer_email orelse author_email orelse "user@hoz.example",
-            .timestamp = if (committer_date) |date| try std.fmt.parseInt(i64, date, 10) else 1714272000,
+            .timestamp = if (committer_date) |date| try std.fmt.parseInt(i64, date, 10) else current_timestamp,
             .timezone = 0,
         };
 
@@ -141,6 +163,7 @@ pub const CommitTree = struct {
             committer,
             message.items,
         );
+        defer message.deinit(self.allocator);
 
         // Write commit to object store
         const commit_data = try commit.serialize(self.allocator);

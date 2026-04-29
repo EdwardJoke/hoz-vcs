@@ -4,6 +4,7 @@
 //! to respect network limits and prevent saturating the connection.
 
 const std = @import("std");
+const Io = std.Io;
 
 pub const ThrottleConfig = struct {
     max_bandwidth_bytes_per_sec: u64 = 1024 * 1024 * 100,
@@ -23,9 +24,11 @@ pub const ThrottleStats = struct {
 
 pub const BandwidthThrottle = struct {
     allocator: std.mem.Allocator,
+    io: Io,
     config: ThrottleConfig,
     tokens: u64,
-    last_refill: i64,
+    last_refill_ms: i64,
+    start_time_ms: i64,
     bytes_sent: u64,
     bytes_received: u64,
     throttled_count: u64,
@@ -33,12 +36,15 @@ pub const BandwidthThrottle = struct {
     stats: ThrottleStats,
     lock: std.Thread.Mutex,
 
-    pub fn init(allocator: std.mem.Allocator, config: ThrottleConfig) BandwidthThrottle {
+    pub fn init(allocator: std.mem.Allocator, io: Io, config: ThrottleConfig) BandwidthThrottle {
+        const now = Io.Timestamp.now(io, .real);
         return .{
             .allocator = allocator,
+            .io = io,
             .config = config,
             .tokens = config.burst_size_bytes,
-            .last_refill = std.time.milliTimestamp(),
+            .last_refill_ms = @divTrunc(now.nanoseconds, std.time.ns_per_ms),
+            .start_time_ms = @divTrunc(now.nanoseconds, std.time.ns_per_ms),
             .bytes_sent = 0,
             .bytes_received = 0,
             .throttled_count = 0,
@@ -48,15 +54,27 @@ pub const BandwidthThrottle = struct {
     }
 
     pub fn deinit(self: *BandwidthThrottle) void {
-        _ = self;
+        self.lock.lock();
+        defer self.lock.unlock();
+        self.tokens = self.config.burst_size_bytes;
+        self.bytes_sent = 0;
+        self.bytes_received = 0;
+        self.throttled_count = 0;
+        self.total_wait_ms = 0;
+        self.stats = .{};
+    }
+
+    fn nowMs(self: *BandwidthThrottle) i64 {
+        const ts = Io.Timestamp.now(self.io, .real);
+        return @divTrunc(ts.nanoseconds, std.time.ns_per_ms);
     }
 
     fn refill(self: *BandwidthThrottle) void {
-        const now = std.time.milliTimestamp();
-        const elapsed = @as(u64, @intCast(now - self.last_refill));
+        const now = self.nowMs();
+        const elapsed = @as(u64, @intCast(now - self.last_refill_ms));
         const refill_amount = (elapsed * self.config.max_bandwidth_bytes_per_sec) / 1000;
         self.tokens = @min(self.tokens + refill_amount, self.config.burst_size_bytes);
-        self.last_refill = now;
+        self.last_refill_ms = now;
     }
 
     pub fn requestTokens(self: *BandwidthThrottle, bytes: u64) !void {
@@ -75,14 +93,16 @@ pub const BandwidthThrottle = struct {
         const needed = bytes - self.tokens;
         const wait_ms = (needed * 1000) / self.config.max_bandwidth_bytes_per_sec;
 
-        const start_wait = std.time.milliTimestamp();
+        _ = wait_ms;
+
+        const start_wait = self.nowMs();
         while (self.tokens < bytes) {
             self.refill();
             if (self.tokens < bytes) {
-                std.thread.sleep(@as(u64, @intCast(10)) * std.time.ms_per_s);
+                try Io.sleep(self.io, Io.Duration.fromMilliseconds(10), .monotonic);
             }
         }
-        const actual_wait = @as(u64, @intCast(std.time.milliTimestamp() - start_wait));
+        const actual_wait = @as(u64, @intCast(self.nowMs() - start_wait));
 
         self.tokens -= bytes;
         self.bytes_sent += bytes;
@@ -135,6 +155,7 @@ pub const BandwidthThrottle = struct {
     pub fn resetStats(self: *BandwidthThrottle) void {
         self.lock.lock();
         defer self.lock.unlock();
+        self.start_time_ms = self.nowMs();
         self.stats = .{};
         self.bytes_sent = 0;
         self.bytes_received = 0;
@@ -143,8 +164,11 @@ pub const BandwidthThrottle = struct {
     }
 
     pub fn currentRate(self: *const BandwidthThrottle) u64 {
-        _ = self;
-        return 0;
+        if (self.bytes_sent == 0) return 0;
+        const now_ns = @divTrunc(Io.Timestamp.now(self.io, .real).nanoseconds, std.time.ns_per_ms);
+        const elapsed_ms: u64 = @as(u64, now_ns) -| self.start_time_ms;
+        if (elapsed_ms == 0) return 0;
+        return (self.bytes_sent * 1000) / elapsed_ms;
     }
 };
 
@@ -154,10 +178,10 @@ pub const RateLimiter = struct {
     request_count: u64,
     tokens_per_request: u64,
 
-    pub fn init(allocator: std.mem.Allocator, requests_per_sec: u64, tokens_per_request: u64) !RateLimiter {
+    pub fn init(allocator: std.mem.Allocator, io: Io, requests_per_sec: u64, tokens_per_request: u64) !RateLimiter {
         return .{
             .allocator = allocator,
-            .throttle = BandwidthThrottle.init(allocator, .{
+            .throttle = BandwidthThrottle.init(allocator, io, .{
                 .max_bandwidth_bytes_per_sec = requests_per_sec * tokens_per_request,
             }),
             .request_count = 0,
@@ -187,7 +211,7 @@ test "ThrottleConfig default" {
 
 test "BandwidthThrottle init" {
     const allocator = std.testing.allocator;
-    const throttle = BandwidthThrottle.init(allocator, .{});
+    var throttle = BandwidthThrottle.init(allocator, undefined, .{});
     defer throttle.deinit();
     try std.testing.expectEqual(@as(u64, 0), throttle.stats.bytes_allowed);
 }
@@ -200,9 +224,50 @@ test "ThrottleStats init" {
 
 test "BandwidthThrottle setLimit" {
     const allocator = std.testing.allocator;
-    var throttle = BandwidthThrottle.init(allocator, .{});
+    var throttle = BandwidthThrottle.init(allocator, undefined, .{});
     defer throttle.deinit();
 
     throttle.setLimit(500000);
     try std.testing.expectEqual(@as(u64, 500000), throttle.getLimit());
+}
+
+test "BandwidthThrottle concurrent setLimit/getLimit" {
+    var buf: [1]u8 = undefined;
+    const io: Io = .init(.{
+        .stdin = .empty,
+        .stdout = .buffered(&buf),
+        .stderr = .buffered(&buf),
+    });
+    var throttle = BandwidthThrottle.init(std.testing.allocator, io, .{});
+    defer throttle.deinit();
+
+    var i: usize = 0;
+    while (i < 100) : (i += 1) {
+        throttle.setLimit(1000 + @as(u64, @intCast(i * 1024)));
+        _ = throttle.getLimit();
+        throttle.recordSent(64);
+        throttle.recordReceived(32);
+    }
+
+    try std.testing.expect(throttle.bytes_sent == 6400);
+    try std.testing.expect(throttle.bytes_received == 3200);
+    try std.testing.expect(throttle.getLimit() > 0);
+}
+
+test "BandwidthThrottle adjust and resetStats" {
+    var buf: [1]u8 = undefined;
+    const io: Io = .init(.{
+        .stdin = .empty,
+        .stdout = .buffered(&buf),
+        .stderr = .buffered(&buf),
+    });
+    var throttle = BandwidthThrottle.init(std.testing.allocator, io, .{ .enable_auto_adjust = true });
+    defer throttle.deinit();
+
+    throttle.adjust(2.0);
+    try std.testing.expect(throttle.getLimit() > 100 * 1024 * 1024);
+
+    throttle.recordSent(9999);
+    throttle.resetStats();
+    try std.testing.expectEqual(@as(u64, 0), throttle.stats.bytes_sent);
 }

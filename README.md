@@ -58,6 +58,15 @@ hoz merge <branch>            # Merge branches
 hoz log           # View commit history
 hoz show <ref>    # Show commit details
 hoz blame <file>  # Show file annotations
+hoz describe      # Describe commit using tags
+hoz verify-tag    # Verify annotated tag signature
+hoz name-rev      # Translate SHA to symbolic name
+```
+
+### File Operations
+```bash
+hoz add <file>     # Stage files for commit
+hoz rm <file>      # Remove from working tree and index
 ```
 
 ### Remote Collaboration

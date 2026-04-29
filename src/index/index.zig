@@ -400,11 +400,12 @@ pub const Index = struct {
     }
 
     /// Write index to file
-    pub fn write(self: *Index, _: Io, _: []const u8) !void {
+    pub fn write(self: *Index, io: Io, path: []const u8) !void {
         const data = try self.serialize();
         defer self.allocator.free(data);
 
-        // For now, skip actual file writing
+        const cwd = Io.Dir.cwd();
+        try cwd.writeFile(io, .{ .sub_path = path, .data = data });
     }
 
     /// Serialize index to bytes

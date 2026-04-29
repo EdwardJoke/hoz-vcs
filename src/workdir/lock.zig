@@ -279,3 +279,26 @@ test "WorkDirLock double acquire fails" {
 
     try std.testing.expectError(error.LockTimeout, result);
 }
+
+test "WorkDirLock shared lock acquire/release cycle" {
+    var io_instance: Io.Threaded = .init_single_threaded;
+    defer io_instance.deinit();
+    const io = io_instance.io();
+
+    var lock = WorkDirLock.init(std.testing.allocator, io);
+    defer lock.deinit();
+
+    var i: usize = 0;
+    while (i < 5) : (i += 1) {
+        const handle = lock.acquireLock("/tmp/test_hoz_lock_cycle", .shared, .{ .timeout_ms = 500, .retry_interval_ms = 20 }) catch |err| {
+            if (err == error.PermissionDenied or err == error.IoError) return;
+            return err;
+        };
+        _ = handle;
+        lock.releaseLock("/tmp/test_hoz_lock_cycle");
+    }
+}
+
+test "WorkDirLock stale PID detection" {
+    try std.testing.expect(isPidAlive(999999999) == false);
+}

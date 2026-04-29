@@ -53,6 +53,9 @@ const WriteTree = @import("write_tree.zig").WriteTree;
 const Shortlog = @import("shortlog.zig").Shortlog;
 const Cherry = @import("cherry.zig").Cherry;
 const Rerere = @import("rerere.zig").Rerere;
+const NameRev = @import("name_rev.zig").NameRev;
+const Rm = @import("rm.zig").Rm;
+const VerifyTag = @import("verify_tag.zig").VerifyTag;
 const Submodule = @import("submodule.zig").Submodule;
 const FilterRepo = @import("filter_repo.zig").FilterRepo;
 const ForEachRef = @import("for_each_ref.zig").ForEachRef;
@@ -182,6 +185,12 @@ pub const CommandDispatcher = struct {
             try self.runRevList(args);
         } else if (std.mem.eql(u8, cmd, "commit-tree") or std.mem.eql(u8, cmd, "commit_tree")) {
             try self.runCommitTree(args);
+        } else if (std.mem.eql(u8, cmd, "name-rev") or std.mem.eql(u8, cmd, "name_rev")) {
+            try self.runNameRev(args);
+        } else if (std.mem.eql(u8, cmd, "rm")) {
+            try self.runRm(args);
+        } else if (std.mem.eql(u8, cmd, "verify-tag") or std.mem.eql(u8, cmd, "verify_tag")) {
+            try self.runVerifyTag(args);
         } else if (std.mem.eql(u8, cmd, "update-index") or std.mem.eql(u8, cmd, "update_index")) {
             try self.runUpdateIndex(args);
         } else {
@@ -774,6 +783,21 @@ pub const CommandDispatcher = struct {
         var commit_tree = try CommitTree.init(self.allocator, self.io, self.writer, self.style);
         defer commit_tree.deinit();
         try commit_tree.run(args);
+    }
+
+    fn runNameRev(self: *CommandDispatcher, args: []const []const u8) !void {
+        var name_rev = NameRev.init(self.allocator, self.io, self.writer, self.style);
+        try name_rev.run(args);
+    }
+
+    fn runRm(self: *CommandDispatcher, args: []const []const u8) !void {
+        var rm = Rm.init(self.allocator, self.io, self.writer, self.style);
+        try rm.run(args);
+    }
+
+    fn runVerifyTag(self: *CommandDispatcher, args: []const []const u8) !void {
+        var verify_tag = VerifyTag.init(self.allocator, self.io, self.writer, self.style);
+        try verify_tag.run(args);
     }
 
     fn runUpdateIndex(self: *CommandDispatcher, args: []const []const u8) !void {

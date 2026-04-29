@@ -119,14 +119,14 @@ pub const Rebase = struct {
 
     fn runContinue(self: *Rebase, git_dir: Io.Dir) !void {
         _ = git_dir;
-        var rebase_continue = RebaseContinuer.init(self.allocator, .{});
+        var rebase_continue = RebaseContinuer.init(self.allocator, self.io, .{});
         _ = try rebase_continue.continueRebase();
         try self.output.successMessage("Rebase continued", .{});
     }
 
     fn runAbort(self: *Rebase, git_dir: Io.Dir) !void {
         _ = git_dir;
-        var rebase_abort = RebaseAborter.init(self.allocator);
+        var rebase_abort = RebaseAborter.init(self.allocator, self.io);
         _ = try rebase_abort.abort();
         try self.output.successMessage("Rebase aborted", .{});
     }

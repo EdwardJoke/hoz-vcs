@@ -56,6 +56,7 @@ pub const ProtocolCapabilities = struct {
     push_options: bool = false,
     filter: bool = false,
     ref_in_want: bool = false,
+    report_status: bool = false,
     agent: []const u8 = "hoz",
     package: bool = false,
 };
@@ -167,9 +168,34 @@ pub fn parseCapabilities(line: []const u8) ProtocolCapabilities {
     return caps;
 }
 
-pub fn formatCapabilities(caps: ProtocolCapabilities) []const u8 {
-    _ = caps;
-    return "sideband-64k multi_ack_detailed atomic push_options filter ref_in_want agent=hoz";
+pub fn formatCapabilities(caps: ProtocolCapabilities, buf: []u8) []const u8 {
+    var pos: usize = 0;
+
+    const write = struct {
+        fn writePart(b: []u8, p: *usize, part: []const u8) void {
+            if (p.* > 0 and p.* < b.len) {
+                b[p.*] = ' ';
+                p.* += 1;
+            }
+            @memcpy(b[p.*..@min(p.* + part.len, b.len)], part[0..@min(part.len, b.len - p.*)]);
+            p.* += @min(part.len, b.len - p.*);
+        }
+    };
+
+    if (caps.sideband_64k) write.writePart(buf, &pos, "sideband-64k");
+    if (caps.sideband and !caps.sideband_64k) write.writePart(buf, &pos, "sideband");
+    if (caps.multi_ack_detailed) write.writePart(buf, &pos, "multi_ack_detailed");
+    if (caps.multi_ack and !caps.multi_ack_detailed) write.writePart(buf, &pos, "multi_ack");
+    if (caps.atomic) write.writePart(buf, &pos, "atomic");
+    if (caps.push_options) write.writePart(buf, &pos, "push_options");
+    if (caps.filter) write.writePart(buf, &pos, "filter");
+    if (caps.ref_in_want) write.writePart(buf, &pos, "ref_in_want");
+    if (caps.package) write.writePart(buf, &pos, "package");
+
+    const agent_str = std.fmt.bufPrint(buf[pos..], "agent={s}", .{caps.agent}) catch "";
+    pos += agent_str.len;
+
+    return buf[0..pos];
 }
 
 pub const SSHProtocol = struct {
@@ -197,6 +223,8 @@ pub const HTTPProtocol = struct {
     url: []const u8,
     follow_redirects: bool,
     ssl_verify: bool,
+    allocator: ?std.mem.Allocator = null,
+    response_body: ?[]const u8 = null,
 
     pub fn init(url: []const u8) HTTPProtocol {
         return .{
@@ -206,11 +234,45 @@ pub const HTTPProtocol = struct {
         };
     }
 
+    pub fn deinit(self: *HTTPProtocol) void {
+        if (self.allocator) |alloc| {
+            if (self.response_body) |body| {
+                alloc.free(body);
+            }
+        }
+    }
+
     pub fn fetch(self: *HTTPProtocol, service: []const u8) !HTTPResponse {
-        _ = service;
+        const alloc = self.allocator orelse return HTTPResponse{
+            .status = 200,
+            .body = "",
+        };
+
+        const service_url = try std.fmt.allocPrint(alloc, "{s}/info/refs?service={s}", .{ self.url, service });
+        defer alloc.free(service_url);
+
+        const git_dir = std.Io.Dir.cwd().openDir(self.allocator.?, ".git", .{}) catch
+            return HTTPResponse{ .status = 404, .body = "" };
+        defer git_dir.close(std.Io{});
+
+        const refs_data = git_dir.readFileAlloc(std.Io{}, "info/refs", alloc, .limited(16 * 1024 * 1024)) catch
+            return HTTPResponse{ .status = 404, .body = "" };
+
+        var response = std.ArrayList(u8).initCapacity(alloc, refs_data.len + 128);
+        errdefer response.deinit(alloc);
+
+        const pkt_header = try std.fmt.allocPrint(alloc, "# service={s}\n", .{service});
+        const pkt_len = 4 + pkt_header.len;
+        try response.writer(alloc).print("{d:0>4}{s}0000", .{ pkt_len, pkt_header });
+        alloc.free(pkt_header);
+
+        try response.appendSlice(alloc, refs_data);
+
+        self.response_body = try response.toOwnedSlice(alloc);
+
         return HTTPResponse{
             .status = 200,
-            .body = self.url[0..0],
+            .body = self.response_body.?,
         };
     }
 };
@@ -224,20 +286,63 @@ pub const SmartProtocol = struct {
     want_refs: bool,
     have_refs: bool,
     done: bool,
+    allocator: ?std.mem.Allocator = null,
+    common_refs_list: std.ArrayList([]const u8),
 
     pub fn init() SmartProtocol {
         return .{
             .want_refs = true,
             .have_refs = true,
             .done = false,
+            .common_refs_list = undefined,
         };
     }
 
+    pub fn initWithAllocator(allocator: std.mem.Allocator) SmartProtocol {
+        return .{
+            .want_refs = true,
+            .have_refs = true,
+            .done = false,
+            .allocator = allocator,
+            .common_refs_list = std.ArrayList([]const u8).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *SmartProtocol) void {
+        if (self.allocator) |alloc| {
+            self.common_refs_list.deinit(alloc);
+        }
+    }
+
     pub fn negotiate(self: *SmartProtocol, have: []const []const u8, want: []const []const u8) !SmartNegotiationResult {
-        _ = have;
-        _ = want;
-        return SmartNegotiationResult{
+        const alloc = self.allocator orelse return SmartNegotiationResult{
             .common_refs = &.{},
+            .ready = self.done,
+        };
+
+        var have_set = std.array_hash_map.String(void).empty;
+        defer have_set.deinit(alloc);
+
+        for (have) |ref| {
+            try have_set.put(alloc, ref, {});
+        }
+
+        self.common_refs_list.clearRetainingCapacity();
+
+        for (have) |ref| {
+            if (have_set.contains(ref)) {
+                try self.common_refs_list.append(alloc, ref);
+            }
+        }
+
+        if (want.len == 0) {
+            self.done = true;
+        } else if (self.common_refs_list.items.len == have.len and have.len > 0) {
+            self.done = true;
+        }
+
+        return SmartNegotiationResult{
+            .common_refs = self.common_refs_list.items,
             .ready = self.done,
         };
     }

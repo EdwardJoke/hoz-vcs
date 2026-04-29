@@ -140,15 +140,15 @@ pub const PushPusher = struct {
         const git_dir = Io.Dir.openDirAbsolute(self.io, self.git_dir_path, .{}) catch {
             return PushResult{ .success = true, .refs_updated = 0, .refs_delta = 0 };
         };
-        const heads_content = git_dir.listDir(heads_dir_path, self.allocator) catch {
+        const heads_dir = git_dir.openDir(self.io, heads_dir_path, .{ .iterate = true }) catch {
             return PushResult{ .success = true, .refs_updated = 0, .refs_delta = 0 };
         };
-        defer {
-            for (heads_content.entries) |entry| self.allocator.free(entry.name);
-            self.allocator.free(heads_content.entries);
-        }
+        var walker = heads_dir.walk(self.allocator) catch {
+            return PushResult{ .success = true, .refs_updated = 0, .refs_delta = 0 };
+        };
+        defer walker.deinit();
 
-        var updates = std.ArrayList(transport.RefUpdate).initCapacity(self.allocator, heads_content.entries.len) catch |e| return e;
+        var updates = std.ArrayList(transport.RefUpdate).initCapacity(self.allocator, 16) catch |e| return e;
         defer {
             for (updates.items) |u| {
                 self.allocator.free(u.name);
@@ -157,21 +157,21 @@ pub const PushPusher = struct {
             }
             updates.deinit(self.allocator);
         }
-        var want_oids = std.ArrayList([]const u8).initCapacity(self.allocator, heads_content.entries.len) catch |e| return e;
+        var want_oids = std.ArrayList([]const u8).initCapacity(self.allocator, 16) catch |e| return e;
         defer {
             for (want_oids.items) |oid| self.allocator.free(oid);
             want_oids.deinit(self.allocator);
         }
 
-        for (heads_content.entries) |entry| {
+        while (walker.next(self.io) catch null) |entry| {
             if (entry.kind != .file) continue;
 
-            const full_local_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ heads_dir_path, entry.name });
+            const full_local_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ heads_dir_path, entry.path });
             defer self.allocator.free(full_local_path);
 
             const oid_str = self.readLocalRef(full_local_path) orelse continue;
 
-            const remote_name = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{entry.name});
+            const remote_name = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{entry.path});
             try want_oids.append(self.allocator, oid_str);
             try updates.append(self.allocator, .{
                 .name = remote_name,

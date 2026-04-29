@@ -70,14 +70,45 @@ pub const PackReceiver = struct {
         progress.phase = .receiving;
         self.reportProgress(progress);
 
-        progress.bytes_done = data.len;
-        progress.objects_total = self.estimateObjectCount(data.len);
-        progress.objects_done = 0;
+        if (!try self.verifyPack(data)) {
+            progress.phase = .err;
+            self.reportProgress(progress);
+            return PackRecvResult{
+                .success = false,
+                .objects_received = 0,
+                .bytes_received = 0,
+                .progress = progress,
+            };
+        }
+
+        const object_count = std.mem.readInt(u32, data[8..12], .big);
+        progress.objects_total = object_count;
+        progress.bytes_done = 12;
 
         progress.phase = .resolving;
         self.reportProgress(progress);
 
+        var offset: usize = 12;
+        var objects_resolved: u32 = 0;
+        while (offset < data.len) {
+            const obj = self.readObject(data, &offset) catch break orelse break;
+            if (obj.type == 0) continue;
+
+            objects_resolved += 1;
+            progress.objects_done = objects_resolved;
+            progress.bytes_done = offset;
+
+            if (progress.objects_total > 0) {
+                progress.percentage = @as(u8, @intCast(@min(100, (objects_resolved * 100) / progress.objects_total)));
+            }
+
+            if (objects_resolved % 50 == 0) {
+                self.reportProgress(progress);
+            }
+        }
+
         progress.phase = .indexing;
+        progress.objects_done = objects_resolved;
         self.reportProgress(progress);
 
         progress.phase = .verifying;
@@ -89,7 +120,7 @@ pub const PackReceiver = struct {
 
         return PackRecvResult{
             .success = true,
-            .objects_received = progress.objects_total,
+            .objects_received = objects_resolved,
             .bytes_received = progress.bytes_done,
             .progress = progress,
         };
@@ -143,7 +174,7 @@ pub const PackReceiver = struct {
 
                 const base_result = try self.findBaseObject(pack_file, base_pos, git_dir);
                 if (base_result) |base_data| {
-                    full_object = try self.resolveDeltaObject(base_data, ofs_delta_data, obj.size, git_dir, allocator);
+                    full_object = try self.resolveDeltaObject(base_data, ofs_delta_data, obj.size, git_dir);
                     obj_type_name = try self.getDeltaResultType(base_data);
                 } else {
                     continue;
@@ -206,17 +237,19 @@ pub const PackReceiver = struct {
         return full_object;
     }
 
-    fn resolveDeltaObject(self: *PackReceiver, base: []const u8, delta: []const u8, expected_size: u64, _: []const u8, allocator: std.mem.Allocator) ![]u8 {
-        _ = self;
-        return try applyDelta(base, delta, expected_size, allocator);
+    fn resolveDeltaObject(self: *PackReceiver, base: []const u8, delta: []const u8, expected_size: u64, _: []const u8) ![]u8 {
+        return try applyDelta(base, delta, expected_size, self.allocator);
     }
 
     fn getDeltaResultType(self: *PackReceiver, base_data: []const u8) ![]const u8 {
-        _ = self;
         if (base_data.len < 32) return error.InvalidObject;
         const space = std.mem.indexOf(u8, base_data, " ") orelse return error.InvalidObject;
-        _ = std.mem.indexOf(u8, base_data[space..], "\x00") orelse return error.InvalidObject;
-        return base_data[0..space];
+        const null_pos = std.mem.indexOf(u8, base_data[space..], "\x00") orelse return error.InvalidObject;
+        _ = null_pos;
+        const type_name = base_data[0..space];
+        const cached = self.resolved_objects.get(type_name);
+        _ = cached;
+        return type_name;
     }
 
     fn readOfsDeltaOffset(delta: []const u8) !u64 {
@@ -390,7 +423,6 @@ pub const PackReceiver = struct {
     }
 
     fn readObject(self: *PackReceiver, pack_data: []const u8, offset: *usize) !?IndexedObject {
-        _ = self;
         if (offset.* >= pack_data.len) return null;
 
         const byte = pack_data[offset.*];
@@ -408,11 +440,17 @@ pub const PackReceiver = struct {
             shift += 7;
         }
 
-        return IndexedObject{
+        const result = IndexedObject{
             .type = obj_type,
             .size = size,
             .offset = offset.*,
         };
+
+        if (obj_type == 6 or obj_type == 7) {
+            _ = self.resolved_objects;
+        }
+
+        return result;
     }
 
     fn reportProgress(self: *PackReceiver, progress: ProgressInfo) void {
@@ -422,7 +460,10 @@ pub const PackReceiver = struct {
     }
 
     fn estimateObjectCount(self: *PackReceiver, pack_size: usize) u32 {
-        _ = self;
+        const resolved_count = self.resolved_objects.count();
+        if (resolved_count > 0) {
+            return @as(u32, @intCast(resolved_count));
+        }
         const avg_object_size: usize = 512;
         const header_size: usize = 8;
         const estimated = (pack_size -| header_size) / avg_object_size;
@@ -600,4 +641,224 @@ test "PackReceiver indexPack method exists" {
     var receiver = PackReceiver.init(std.testing.allocator, .{});
     try receiver.indexPack("pack data");
     try std.testing.expect(true);
+}
+
+pub const SidebandChannel = enum(u8) {
+    data = 1,
+    progress = 2,
+    err = 3,
+};
+
+pub const SidebandMessage = struct {
+    channel: SidebandChannel,
+    data: []const u8,
+};
+
+pub const SidebandDemux = struct {
+    allocator: std.mem.Allocator,
+    data_buffer: std.ArrayList(u8),
+    progress_buffer: std.ArrayList(u8),
+    error_buffer: std.ArrayList(u8),
+    total_data_bytes: u64,
+    total_progress_bytes: u64,
+    total_error_bytes: u64,
+
+    pub fn init(allocator: std.mem.Allocator) SidebandDemux {
+        return .{
+            .allocator = allocator,
+            .data_buffer = std.ArrayList(u8).init(allocator),
+            .progress_buffer = std.ArrayList(u8).init(allocator),
+            .error_buffer = std.ArrayList(u8).init(allocator),
+            .total_data_bytes = 0,
+            .total_progress_bytes = 0,
+            .total_error_bytes = 0,
+        };
+    }
+
+    pub fn deinit(self: *SidebandDemux) void {
+        self.data_buffer.deinit(self.allocator);
+        self.progress_buffer.deinit(self.allocator);
+        self.error_buffer.deinit(self.allocator);
+    }
+
+    pub fn feed(self: *SidebandDemux, packet: []const u8) !?SidebandMessage {
+        if (packet.len < 5) return null;
+
+        const channel_byte = packet[4];
+        const payload = packet[5..];
+
+        const channel: SidebandChannel = switch (channel_byte) {
+            1 => .data,
+            2 => .progress,
+            3 => .err,
+            else => return null,
+        };
+
+        switch (channel) {
+            .data => {
+                try self.data_buffer.appendSlice(self.allocator, payload);
+                self.total_data_bytes += @as(u64, @intCast(payload.len));
+            },
+            .progress => {
+                try self.progress_buffer.appendSlice(self.allocator, payload);
+                self.total_progress_bytes += @as(u64, @intCast(payload.len));
+            },
+            .err => {
+                try self.error_buffer.appendSlice(self.allocator, payload);
+                self.total_error_bytes += @as(u64, @intCast(payload.len));
+            },
+        }
+
+        return SidebandMessage{ .channel = channel, .data = payload };
+    }
+
+    pub fn feedPacketLine(self: *SidebandDemux, raw: []const u8) !?SidebandMessage {
+        if (raw.len < 5) return null;
+
+        const len_hex = raw[0..4];
+        const len = std.fmt.parseInt(u16, len_hex, 16) catch return null;
+        if (len < 5 or len > raw.len) return null;
+
+        const packet = raw[0..@as(usize, @intCast(len))];
+        return try self.feed(packet);
+    }
+
+    pub fn getData(self: *SidebandDemux) []const u8 {
+        return self.data_buffer.items;
+    }
+
+    pub fn getProgress(self: *SidebandDemux) []const u8 {
+        return self.progress_buffer.items;
+    }
+
+    pub fn getError(self: *SidebandDemux) []const u8 {
+        return self.error_buffer.items;
+    }
+
+    pub fn reset(self: *SidebandDemux) void {
+        self.data_buffer.clearAndFree(self.allocator);
+        self.progress_buffer.clearAndFree(self.allocator);
+        self.error_buffer.clearAndFree(self.allocator);
+        self.total_data_bytes = 0;
+        self.total_progress_bytes = 0;
+        self.total_error_bytes = 0;
+    }
+};
+
+test "SidebandDemux feeds data channel" {
+    var demux = SidebandDemux.init(std.testing.allocator);
+    defer demux.deinit();
+
+    var pkt = [_]u8{0} ** 9;
+    _ = std.fmt.bufPrintSentinel(pkt[0..4], 0, "{x:0>4}", .{9});
+    pkt[4] = 1;
+    @memcpy(pkt[5..], "hello");
+
+    const msg = try demux.feed(&pkt);
+    try std.testing.expect(msg != null);
+    try std.testing.expect(msg.?.channel == .data);
+    try std.testing.expectEqualStrings("hello", msg.?.data);
+    try std.testing.expectEqual(@as(u64, 5), demux.total_data_bytes);
+}
+
+test "SidebandDemux feeds progress channel" {
+    var demux = SidebandDemux.init(std.testing.allocator);
+    defer demux.deinit();
+
+    var pkt = [_]u8{0} ** 14;
+    _ = std.fmt.bufPrintSentinel(pkt[0..4], 0, "{x:0>4}", .{14});
+    pkt[4] = 2;
+    @memcpy(pkt[5..], "progress: 50%");
+
+    const msg = try demux.feed(&pkt);
+    try std.testing.expect(msg != null);
+    try std.testing.expect(msg.?.channel == .progress);
+    try std.testing.expectEqualStrings("progress: 50%", msg.?.data);
+}
+
+test "SidebandDemux feeds error channel" {
+    var demux = SidebandDemux.init(std.testing.allocator);
+    defer demux.deinit();
+
+    var pkt = [_]u8{0} ** 12;
+    _ = std.fmt.bufPrintSentinel(pkt[0..4], 0, "{x:0>4}", .{12});
+    pkt[4] = 3;
+    @memcpy(pkt[5..], "error msg");
+
+    const msg = try demux.feed(&pkt);
+    try std.testing.expect(msg != null);
+    try std.testing.expect(msg.?.channel == .err);
+    try std.testing.expectEqualStrings("error msg", msg.?.data);
+}
+
+test "SidebandDemux accumulates data across packets" {
+    var demux = SidebandDemux.init(std.testing.allocator);
+    defer demux.deinit();
+
+    var pkt1 = [_]u8{0} ** 7;
+    _ = std.fmt.bufPrintSentinel(pkt1[0..4], 0, "{x:0>4}", .{7});
+    pkt1[4] = 1;
+    @memcpy(pkt1[5..], "abc");
+
+    var pkt2 = [_]u8{0} ** 7;
+    _ = std.fmt.bufPrintSentinel(pkt2[0..4], 0, "{x:0>4}", .{7});
+    pkt2[4] = 1;
+    @memcpy(pkt2[5..], "def");
+
+    _ = try demux.feed(&pkt1);
+    _ = try demux.feed(&pkt2);
+
+    try std.testing.expectEqualStrings("abcdef", demux.getData());
+    try std.testing.expectEqual(@as(u64, 6), demux.total_data_bytes);
+}
+
+test "SidebandDemux separates mixed channels" {
+    var demux = SidebandDemux.init(std.testing.allocator);
+    defer demux.deinit();
+
+    var data_pkt = [_]u8{0} ** 6;
+    _ = std.fmt.bufPrintSentinel(data_pkt[0..4], 0, "{x:0>4}", .{6});
+    data_pkt[4] = 1;
+    data_pkt[5] = 'X';
+
+    var prog_pkt = [_]u8{0} ** 11;
+    _ = std.fmt.bufPrintSentinel(prog_pkt[0..4], 0, "{x:0>4}", .{11});
+    prog_pkt[4] = 2;
+    @memcpy(prog_pkt[5..], "10%");
+
+    _ = try demux.feed(&data_pkt);
+    _ = try demux.feed(&prog_pkt);
+
+    try std.testing.expectEqualStrings("X", demux.getData());
+    try std.testing.expectEqualStrings("10%", demux.getProgress());
+    try std.testing.expectEqualStrings("", demux.getError());
+}
+
+test "SidebandDemux ignores invalid channel byte" {
+    var demux = SidebandDemux.init(std.testing.allocator);
+    defer demux.deinit();
+
+    var pkt = [_]u8{0} ** 6;
+    _ = std.fmt.bufPrintSentinel(pkt[0..4], 0, "{x:0>4}", .{6});
+    pkt[4] = 99;
+    pkt[5] = '?';
+
+    const msg = try demux.feed(&pkt);
+    try std.testing.expect(msg == null);
+}
+
+test "SidebandDemux reset clears all buffers" {
+    var demux = SidebandDemux.init(std.testing.allocator);
+    defer demux.deinit();
+
+    var pkt = [_]u8{0} ** 6;
+    _ = std.fmt.bufPrintSentinel(pkt[0..4], 0, "{x:0>4}", .{6});
+    pkt[4] = 1;
+    pkt[5] = 'Z';
+    _ = try demux.feed(&pkt);
+
+    try std.testing.expect(demux.getData().len > 0);
+    demux.reset();
+    try std.testing.expectEqual(@as(usize, 0), demux.getData().len);
+    try std.testing.expectEqual(@as(u64, 0), demux.total_data_bytes);
 }

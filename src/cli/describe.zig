@@ -46,7 +46,13 @@ pub const Describe = struct {
         var describer = Describer.init(self.allocator, self.io);
         describer.options = self.options;
 
-        const result = try describer.describeCommit(self.commitish);
+        const result = describer.describeCommit(self.commitish) catch |err| {
+            if (err == error.NoTagsFound) {
+                try self.output.infoMessage("No tags found to describe", .{});
+                return;
+            }
+            return err;
+        };
         defer describer.freeResult(&result);
 
         try self.output.writer.print("{s}\n", .{result.description});

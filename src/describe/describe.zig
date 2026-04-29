@@ -112,25 +112,56 @@ pub const Describe = struct {
         const oid_buf = try self.allocator.alloc(u8, oid_display.len + 1);
         @memcpy(oid_buf, oid_display);
 
-        const desc = if (best_tag != null)
-            try std.fmt.allocPrint(
-                self.allocator,
-                "{s}-{d}-g{s}",
-                .{ best_tag.?, best_depth, oid_buf },
-            )
-        else
-            try std.fmt.allocPrint(
-                self.allocator,
-                "g{s}",
-                .{oid_buf},
-            );
+        var is_dirty = false;
+        if (self.options.dirty) {
+            is_dirty = self.checkDirty(&git_dir);
+        }
+
+        var desc: []const u8 = undefined;
+        if (best_tag != null) {
+            if (is_dirty) {
+                desc = try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s}-{d}-g{s}-dirty",
+                    .{ best_tag.?, best_depth, oid_buf },
+                );
+            } else if (best_depth > 0) {
+                desc = try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s}-{d}-g{s}",
+                    .{ best_tag.?, best_depth, oid_buf },
+                );
+            } else {
+                desc = try std.fmt.allocPrint(
+                    self.allocator,
+                    "{s}",
+                    .{best_tag.?},
+                );
+            }
+        } else if (self.options.always or is_dirty) {
+            if (is_dirty) {
+                desc = try std.fmt.allocPrint(
+                    self.allocator,
+                    "g{s}-dirty",
+                    .{oid_buf},
+                );
+            } else {
+                desc = try std.fmt.allocPrint(
+                    self.allocator,
+                    "g{s}",
+                    .{oid_buf},
+                );
+            }
+        } else {
+            return error.NoTagsFound;
+        }
 
         return DescribeResult{
             .description = desc,
             .commit_oid = oid_buf,
             .tag_name = tag_name_copy,
             .depth = best_depth,
-            .is_dirty = false,
+            .is_dirty = is_dirty,
         };
     }
 
@@ -330,6 +361,34 @@ pub const Describe = struct {
         }
 
         return depth;
+    }
+
+    fn checkDirty(self: *Describe, git_dir: *const Io.Dir) bool {
+        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch return false;
+        defer self.allocator.free(head_content);
+        const trimmed = std.mem.trim(u8, head_content, " \n\r");
+
+        const ref_path = if (std.mem.startsWith(u8, trimmed, "ref: "))
+            trimmed[5..]
+        else
+            return false;
+
+        const ref_val = git_dir.readFileAlloc(self.io, ref_path, self.allocator, .limited(64)) catch return false;
+        defer self.allocator.free(ref_val);
+
+        const index_path = "index";
+        const index_data = git_dir.readFileAlloc(self.io, index_path, self.allocator, .limited(1024 * 1024)) catch return false;
+        defer self.allocator.free(index_data);
+
+        var idx_it = std.mem.tokenizeAny(u8, index_data, "\n");
+        while (idx_it.next()) |line| {
+            if (std.mem.indexOf(u8, line, " M ") != null) return true;
+            if (std.mem.indexOf(u8, line, "A  ") != null) return true;
+            if (std.mem.indexOf(u8, line, " D ") != null) return true;
+            if (std.mem.endsWith(u8, line, " U") or std.mem.endsWith(u8, line, "U ")) return true;
+        }
+
+        return false;
     }
 
     fn tagMatches(self: *Describe, tag_name: []const u8, pattern: []const u8) bool {

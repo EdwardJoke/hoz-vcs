@@ -1,5 +1,6 @@
 //! Reference Advertisement - Parse and manage remote refs
 const std = @import("std");
+const Io = std.Io;
 const packet = @import("packet.zig");
 const protocol = @import("protocol.zig");
 
@@ -82,6 +83,38 @@ pub const RefAdvertisement = struct {
     pub fn getTags(self: *RefAdvertisement) []const RemoteRef {
         if (self.getTagsFiltered(self.allocator)) |filtered| return filtered;
         return &[_]RemoteRef{};
+    }
+
+    pub fn loadLocalPackedRefs(self: *RefAdvertisement, allocator: std.mem.Allocator, io: Io) !void {
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(io, ".git", .{}) catch return;
+
+        const content = git_dir.readFileAlloc(io, "packed-refs", allocator, .limited(1024 * 1024)) catch {
+            git_dir.close(io);
+            return;
+        };
+        defer {
+            allocator.free(content);
+            git_dir.close(io);
+        }
+
+        var lines = std.mem.tokenizeAny(u8, content, "\n");
+        while (lines.next()) |line| {
+            if (line.len == 0 or line[0] == '#') continue;
+            if (std.mem.endsWith(u8, line, "^")) continue;
+
+            var parts = std.mem.tokenizeAny(u8, line, " ");
+            const oid_hex = parts.next() orelse continue;
+            const ref_name = parts.rest();
+            if (ref_name.len == 0) continue;
+
+            if (self.refs.contains(ref_name)) continue;
+            try self.refs.put(allocator, ref_name, .{
+                .name = ref_name,
+                .oid = oid_hex,
+                .peeled = null,
+            });
+        }
     }
 
     pub fn getBranchesFiltered(self: *RefAdvertisement, allocator: std.mem.Allocator) ![]const RemoteRef {

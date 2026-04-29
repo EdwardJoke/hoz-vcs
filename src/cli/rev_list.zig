@@ -7,6 +7,7 @@ const RevParse = @import("rev_parse.zig").RevParse;
 
 const ObjectStore = @import("../object/store.zig").ObjectStore;
 const Commit = @import("../object/commit.zig").Commit;
+const OID = @import("../object/oid.zig").OID;
 
 pub const RevList = struct {
     allocator: std.mem.Allocator,
@@ -30,16 +31,67 @@ pub const RevList = struct {
         self.object_store.deinit();
     }
 
-    fn resolveOid(_: *RevList, ref: []const u8) ![40]u8 {
-        // Simple OID resolution for now
-        var oid: [40]u8 = undefined;
+    fn resolveOid(self: *RevList, ref: []const u8) ![40]u8 {
         if (ref.len == 40) {
+            var oid: [40]u8 = undefined;
             @memcpy(&oid, ref);
             return oid;
-        } else if (std.mem.eql(u8, ref, "HEAD")) {
-            // For now, return a dummy OID
-            @memcpy(&oid, "0000000000000000000000000000000000000000");
-            return oid;
+        }
+
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch return error.InvalidOid;
+        defer git_dir.close(self.io);
+
+        if (std.mem.eql(u8, ref, "HEAD")) {
+            const oid = self.resolveHead(&git_dir) catch return error.InvalidOid;
+            return oid.toHex();
+        }
+
+        if (std.mem.startsWith(u8, ref, "refs/")) {
+            const oid = self.resolveRefPath(&git_dir, ref) catch return error.InvalidOid;
+            return oid.toHex();
+        }
+
+        const full_ref = std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{ref}) catch
+            return error.InvalidOid;
+        defer self.allocator.free(full_ref);
+        const oid = self.resolveRefPath(&git_dir, full_ref) catch return error.InvalidOid;
+        return oid.toHex();
+    }
+
+    fn resolveHead(self: *RevList, git_dir: *const Io.Dir) !OID {
+        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch
+            return error.InvalidOid;
+        defer self.allocator.free(head_content);
+
+        const trimmed = std.mem.trim(u8, head_content, " \n\r");
+
+        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
+            const ref_path = std.mem.trim(u8, trimmed["ref: ".len..], " \n\r");
+            return self.resolveRefPath(git_dir, ref_path);
+        }
+
+        if (trimmed.len >= 40) {
+            return OID.fromHex(trimmed[0..40]);
+        }
+
+        return error.InvalidOid;
+    }
+
+    fn resolveRefPath(self: *RevList, git_dir: *const Io.Dir, path: []const u8) !OID {
+        const content = git_dir.readFileAlloc(self.io, path, self.allocator, .limited(256)) catch
+            return error.InvalidOid;
+        defer self.allocator.free(content);
+
+        const trimmed = std.mem.trim(u8, content, " \n\r");
+
+        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
+            const target = std.mem.trim(u8, trimmed["ref: ".len..], " \n\r");
+            return self.resolveRefPath(git_dir, target);
+        }
+
+        if (trimmed.len >= 40) {
+            return OID.fromHex(trimmed[0..40]);
         }
 
         return error.InvalidOid;

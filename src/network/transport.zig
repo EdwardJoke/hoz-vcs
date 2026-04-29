@@ -284,26 +284,66 @@ pub const Transport = struct {
         defer result_list.deinit(self.allocator);
 
         const cwd = Io.Dir.cwd();
-        const git_dir = cwd.openDir(self.io, ".git", .{}) catch return try self.allocator.alloc(refs.RemoteRef, 0);
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch return error.GitRepositoryNotFound;
         defer git_dir.close(self.io);
 
-        const ref_paths = [_][]const u8{
-            "refs/heads/master", "refs/heads/main",
-            "HEAD",
-        };
-
-        for (ref_paths) |ref_path| {
-            const content = git_dir.readFileAlloc(self.io, ref_path, self.allocator, .limited(256)) catch continue;
-            defer self.allocator.free(content);
-            const oid_str = std.mem.trim(u8, content, " \t\r\n");
-            if (oid_str.len >= 40) {
-                const owned_name = try self.allocator.dupe(u8, ref_path);
-                const owned_oid = try self.allocator.dupe(u8, oid_str[0..40]);
-                try result_list.append(self.allocator, .{ .name = owned_name, .oid = owned_oid });
+        const ref_dirs = [_][]const u8{ "refs/heads", "refs/tags", "refs/remotes" };
+        for (ref_dirs) |ref_dir| {
+            var dir = git_dir.openDir(self.io, ref_dir, .{ .iterate = true }) catch continue;
+            defer dir.close(self.io);
+            var walker = dir.walk(self.allocator) catch continue;
+            defer walker.deinit();
+            while (walker.next(self.io) catch null) |entry| {
+                if (entry.kind != .file) continue;
+                const full_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ ref_dir, entry.path });
+                defer self.allocator.free(full_path);
+                const content = git_dir.readFileAlloc(self.io, full_path, self.allocator, .limited(256)) catch continue;
+                defer self.allocator.free(content);
+                const oid_str = std.mem.trim(u8, content, " \t\r\n");
+                if (oid_str.len >= 40 and !std.mem.startsWith(u8, oid_str, "ref:")) {
+                    const owned_name = try self.allocator.dupe(u8, full_path);
+                    const owned_oid = try self.allocator.dupe(u8, oid_str[0..40]);
+                    try result_list.append(self.allocator, .{ .name = owned_name, .oid = owned_oid });
+                }
             }
         }
 
-        if (result_list.items.len == 0) return try self.allocator.alloc(refs.RemoteRef, 0);
+        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch "";
+        defer if (head_content.len > 0) self.allocator.free(head_content);
+        const head_trimmed = std.mem.trim(u8, head_content, " \t\r\n");
+        if (head_trimmed.len >= 40 and !std.mem.startsWith(u8, head_trimmed, "ref:")) {
+            const owned_name = try self.allocator.dupe(u8, "HEAD");
+            const owned_oid = try self.allocator.dupe(u8, head_trimmed[0..40]);
+            try result_list.append(self.allocator, .{ .name = owned_name, .oid = owned_oid });
+        }
+
+        const packed_content = git_dir.readFileAlloc(self.io, "packed-refs", self.allocator, .limited(1024 * 1024)) catch "";
+        defer if (packed_content.len > 0) self.allocator.free(packed_content);
+        if (packed_content.len > 0) {
+            var line_iter = std.mem.splitSequence(u8, packed_content, "\n");
+            while (line_iter.next()) |line| {
+                if (line.len == 0 or line[0] == '#' or line[0] == '^') continue;
+                var parts = std.mem.splitSequence(u8, line, " ");
+                const oid_part = parts.next() orelse continue;
+                const name_part = parts.next() orelse continue;
+                if (oid_part.len >= 40) {
+                    var found = false;
+                    for (result_list.items) |existing| {
+                        if (std.mem.eql(u8, existing.name, name_part)) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        const owned_name = try self.allocator.dupe(u8, name_part);
+                        const owned_oid = try self.allocator.dupe(u8, oid_part[0..40]);
+                        try result_list.append(self.allocator, .{ .name = owned_name, .oid = owned_oid });
+                    }
+                }
+            }
+        }
+
+        if (result_list.items.len == 0) return error.NoRefsFound;
         return try result_list.toOwnedSlice(self.allocator);
     }
 
@@ -432,8 +472,13 @@ pub const Transport = struct {
         defer pack_data.deinit(self.allocator);
 
         const cwd = Io.Dir.cwd();
-        const git_dir = cwd.openDir(self.io, ".git", .{}) catch return try self.allocator.alloc(u8, 0);
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch return error.GitRepositoryNotFound;
         defer git_dir.close(self.io);
+
+        try pack_data.appendSlice(self.allocator, "PACK");
+        try pack_data.appendSlice(self.allocator, &.{ 0, 0, 0, 2 });
+        var entry_count: u32 = 0;
+        const count_offset = pack_data.items.len - 4;
 
         for (wants) |want| {
             if (want.len < 40) continue;
@@ -442,10 +487,36 @@ pub const Transport = struct {
 
             const compressed = git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024)) catch continue;
             defer self.allocator.free(compressed);
+
             try pack_data.appendSlice(self.allocator, compressed);
+            entry_count += 1;
         }
 
-        if (pack_data.items.len == 0) return try self.allocator.alloc(u8, 0);
+        if (entry_count == 0) {
+            const objects_dir = git_dir.openDir(self.io, "objects/pack", .{ .iterate = true }) catch return error.NoObjectsFound;
+            defer objects_dir.close(self.io);
+            var walker = objects_dir.walk(self.allocator) catch return error.NoObjectsFound;
+            defer walker.deinit();
+            while (walker.next(self.io) catch null) |entry| {
+                if (entry.kind != .file) continue;
+                if (!std.mem.endsWith(u8, entry.path, ".pack")) continue;
+                const pack_content = objects_dir.readFileAlloc(self.io, entry.path, self.allocator, .limited(128 * 1024 * 1024)) catch continue;
+                defer self.allocator.free(pack_content);
+                if (pack_content.len > 12) {
+                    try pack_data.appendSlice(self.allocator, pack_content);
+                    return try pack_data.toOwnedSlice(self.allocator);
+                }
+            }
+            return error.NoObjectsFound;
+        }
+
+        std.mem.writeInt(u32, pack_data.items[count_offset..][0..4], entry_count, .big);
+        var sha1 = std.crypto.hash.Sha1.init(.{});
+        sha1.update(pack_data.items);
+        var hash: [20]u8 = undefined;
+        sha1.final(&hash);
+        try pack_data.appendSlice(self.allocator, &hash);
+
         return try pack_data.toOwnedSlice(self.allocator);
     }
 
@@ -711,25 +782,33 @@ pub const Transport = struct {
     }
 
     fn sshConnect(self: *Transport, host: []const u8, port: u16) !std.Io.net.Stream {
-        const addr = std.Io.net.Address.parseIp4(host, port) catch
-            return error.SshConnectionFailed;
-        const stream = try addr.connect(self.io);
+        const address = try std.Io.net.IpAddress.resolve(self.io, host, port);
+        const stream = try address.connect(self.io, .{ .mode = .stream });
         return stream;
     }
 
-    fn sendSshPack(self: *Transport, stream: std.Io.net.Stream, cmd: []const u8, updates: []RefUpdate, pack_data: ?[]const u8) !void {
-        _ = updates;
-
-        var writer = stream.writer(self.io, &{});
+    fn sendSshPack(self: *Transport, stream: std.Io.net.Stream, cmd: []const u8, updates: []const RefUpdate, pack_data: ?[]const u8) !void {
+        var write_buf: [4096]u8 = undefined;
+        var writer = stream.writer(self.io, &write_buf);
         try writer.interface.writeAll(cmd);
         try writer.interface.writeAll("\n");
 
-        const read_buf: [4096]u8 = undefined;
-        var reader = stream.reader(self.io, &.{});
+        var read_buf: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &read_buf);
 
-        const pkt_line_len = reader.interface.read(&read_buf) catch 0;
+        const pkt_line_len = reader.interface.readSliceShort(&read_buf) catch 0;
         if (pkt_line_len == 0 or read_buf[0] == 0)
             return error.SshProtocolError;
+
+        for (updates) |update| {
+            var update_buf: [256]u8 = undefined;
+            var update_writer = std.Io.Writer.fixed(&update_buf);
+            const old_oid = if (update.force) "0000000000000000000000000000000000000000" else update.old_oid;
+            try update_writer.print("{s} {s} {s}\n", .{ old_oid, update.new_oid, update.name });
+            try writer.interface.writeAll(update_buf[0..update_writer.end]);
+        }
+
+        try writer.interface.writeAll("0000");
 
         if (pack_data) |data| {
             try writer.interface.writeAll(data);
@@ -737,13 +816,13 @@ pub const Transport = struct {
 
         try writer.interface.writeAll("0000");
 
-        _ = reader.interface.read(&read_buf) catch 0;
+        _ = reader.interface.readSliceShort(&read_buf) catch 0;
     }
 
     fn buildPushCapabilities(self: *Transport, caps: *const protocol.ProtocolCapabilities) ![]const u8 {
         _ = self;
 
-        var parts = std.ArrayList([]const u8).initCapacity(std.heap.page_allocator, 8);
+        var parts = try std.ArrayList([]const u8).initCapacity(std.heap.page_allocator, 8);
         errdefer {
             for (parts.items) |p| std.heap.page_allocator.free(p);
             parts.deinit(std.heap.page_allocator);

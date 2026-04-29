@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
+const push_mod = @import("../remote/push.zig");
 
 pub const Push = struct {
     allocator: std.mem.Allocator,
@@ -42,22 +43,75 @@ pub const Push = struct {
     }
 
     fn runMirror(self: *Push, remote: []const u8) !void {
-        try self.output.successMessage("Mirroring to {s}", .{remote});
+        var pusher = push_mod.PushPusher.init(self.allocator, self.io, ".git", .{
+            .remote = remote,
+            .force = self.force,
+            .force_with_lease = self.force_with_lease,
+        });
+        const result = pusher.pushAll() catch |err| {
+            try self.output.errorMessage("Mirror push to {s} failed: {any}", .{ remote, err });
+            return;
+        };
+        if (result.success) {
+            try self.output.successMessage("Mirrored {d} ref(s) to {s}", .{ result.refs_updated, remote });
+        } else {
+            try self.output.errorMessage("Mirror push to {s} failed", .{remote});
+        }
     }
 
     fn runAll(self: *Push, remote: []const u8) !void {
-        try self.output.successMessage("Pushing all branches to {s}", .{remote});
+        var pusher = push_mod.PushPusher.init(self.allocator, self.io, ".git", .{
+            .remote = remote,
+            .force = self.force,
+            .force_with_lease = self.force_with_lease,
+        });
+        const result = pusher.pushAll() catch |err| {
+            try self.output.errorMessage("Push all to {s} failed: {any}", .{ remote, err });
+            return;
+        };
+        if (result.success) {
+            try self.output.successMessage("Pushed {d} ref(s) to {s}", .{ result.refs_updated, remote });
+        } else {
+            try self.output.errorMessage("Push all to {s} failed", .{remote});
+        }
     }
 
     fn runRefspec(self: *Push, remote: []const u8, refspec: []const u8) !void {
         if (self.force) {
             try self.output.warningMessage("Force pushing to {s}", .{remote});
         }
-        try self.output.successMessage("Pushing {s} to {s}", .{ refspec, remote });
+        var pusher = push_mod.PushPusher.init(self.allocator, self.io, ".git", .{
+            .remote = remote,
+            .refspecs = &.{refspec},
+            .force = self.force,
+            .force_with_lease = self.force_with_lease,
+        });
+        const result = pusher.push() catch |err| {
+            try self.output.errorMessage("Push {s} to {s} failed: {any}", .{ refspec, remote, err });
+            return;
+        };
+        if (result.success) {
+            try self.output.successMessage("Pushed {s} to {s} ({d} ref(s) updated)", .{ refspec, remote, result.refs_updated });
+        } else {
+            try self.output.errorMessage("Push {s} to {s} failed", .{ refspec, remote });
+        }
     }
 
     fn runDefault(self: *Push, remote: []const u8) !void {
-        try self.output.successMessage("Pushing to {s}", .{remote});
+        var pusher = push_mod.PushPusher.init(self.allocator, self.io, ".git", .{
+            .remote = remote,
+            .force = self.force,
+            .force_with_lease = self.force_with_lease,
+        });
+        const result = pusher.push() catch |err| {
+            try self.output.errorMessage("Push to {s} failed: {any}", .{ remote, err });
+            return;
+        };
+        if (result.success) {
+            try self.output.successMessage("Pushed {d} ref(s) to {s}", .{ result.refs_updated, remote });
+        } else {
+            try self.output.errorMessage("Push to {s} failed", .{remote});
+        }
     }
 };
 
