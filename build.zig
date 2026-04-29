@@ -57,27 +57,15 @@ pub fn build(b: *std.Build) void {
     //
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
+    const need_libc = target.result.os.tag == .linux or target.result.os.tag == .windows;
     const exe = b.addExecutable(.{
         .name = "hoz",
         .root_module = b.createModule(.{
-            // b.createModule defines a new module just like b.addModule but,
-            // unlike b.addModule, it does not expose the module to consumers of
-            // this package, which is why in this case we don't have to give it a name.
             .root_source_file = b.path("src/main.zig"),
-            // Target and optimization levels must be explicitly wired in when
-            // defining an executable or library (in the root module), and you
-            // can also hardcode a specific target for an executable or library
-            // definition if desireable (e.g. firmware for embedded devices).
             .target = target,
             .optimize = optimize,
-            // List of modules available for import in source files part of the
-            // root module.
+            .link_libc = need_libc,
             .imports = &.{
-                // Here "hoz" is the name you will use in your source code to
-                // import this module (e.g. `@import("hoz")`). The name is
-                // repeated because you are allowed to rename your imports, which
-                // can be extremely useful in case of collisions (which can happen
-                // importing modules from different packages).
                 .{ .name = "hoz", .module = mod },
             },
         }),
@@ -170,12 +158,15 @@ pub fn build(b: *std.Build) void {
     };
 
     inline for (cross_targets) |ct| {
+        const resolved = b.resolveTargetQuery(ct.triple);
+        const cross_need_libc = resolved.result.os.tag == .linux or resolved.result.os.tag == .windows;
         const cross_target = b.addExecutable(.{
             .name = "hoz",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
-                .target = b.resolveTargetQuery(ct.triple),
+                .target = resolved,
                 .optimize = optimize,
+                .link_libc = cross_need_libc,
                 .imports = &.{
                     .{ .name = "hoz", .module = mod },
                 },
@@ -192,12 +183,15 @@ pub fn build(b: *std.Build) void {
 
     const release_step = b.step("release", "Build release binaries for all platforms");
     inline for (cross_targets) |ct| {
+        const resolved = b.resolveTargetQuery(ct.triple);
+        const rel_need_libc = resolved.result.os.tag == .linux or resolved.result.os.tag == .windows;
         const release_target = b.addExecutable(.{
             .name = b.fmt("hoz-{s}", .{ct.name}),
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
-                .target = b.resolveTargetQuery(ct.triple),
+                .target = resolved,
                 .optimize = .ReleaseSafe,
+                .link_libc = rel_need_libc,
                 .imports = &.{
                     .{ .name = "hoz", .module = mod },
                 },
