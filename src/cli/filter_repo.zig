@@ -6,6 +6,15 @@ const compress_mod = @import("../compress/zlib.zig");
 const c = @cImport({
     @cInclude("sys/stat.h");
 });
+
+fn mkdirP(path: []const u8) void {
+    const builtin = @import("builtin");
+    if (comptime builtin.os.tag == .windows) {
+        _ = c.mkdir(path.ptr);
+    } else {
+        _ = c.mkdir(path.ptr, 0o755);
+    }
+}
 const OID = @import("../object/oid.zig").OID;
 const CommitObj = @import("../object/commit.zig").Commit;
 const TreeObj = @import("../object/tree.zig").Tree;
@@ -660,7 +669,7 @@ pub const FilterBranch = struct {
         const refs_heads = git_dir.openDir(self.io, "refs/heads", .{}) catch {
             const abs_refs = try std.fmt.allocPrint(self.allocator, ".git/refs/heads", .{});
             defer self.allocator.free(abs_refs);
-            _ = c.mkdir(abs_refs.ptr, 0o755);
+            _ = mkdirP(abs_refs);
             const rh2 = git_dir.openDir(self.io, "refs/heads", .{}) catch return;
             defer rh2.close(self.io);
             _ = try rh2.writeFile(self.io, .{ .sub_path = ref_name, .data = content });
@@ -683,7 +692,7 @@ fn writeLooseObject(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocator
     const dir_path = try std.fmt.allocPrint(allocator, ".git/objects/{s}", .{prefix});
     defer allocator.free(dir_path);
 
-    _ = c.mkdir(dir_path.ptr, 0o755);
+    _ = mkdirP(dir_path);
 
     const file_path_rel = try std.fmt.allocPrint(allocator, "objects/{s}/{s}", .{ prefix, suffix });
     defer allocator.free(file_path_rel);
