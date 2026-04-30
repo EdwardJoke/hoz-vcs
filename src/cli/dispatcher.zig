@@ -58,6 +58,7 @@ const Rm = @import("rm.zig").Rm;
 const VerifyTag = @import("verify_tag.zig").VerifyTag;
 const Submodule = @import("submodule.zig").Submodule;
 const FilterRepo = @import("filter_repo.zig").FilterRepo;
+const FilterBranch = @import("filter_repo.zig").FilterBranch;
 const ForEachRef = @import("for_each_ref.zig").ForEachRef;
 const RevList = @import("rev_list.zig").RevList;
 const CommitTree = @import("commit_tree.zig").CommitTree;
@@ -182,6 +183,8 @@ pub const CommandDispatcher = struct {
             try self.runSubmodule(args);
         } else if (std.mem.eql(u8, cmd, "filter-repo") or std.mem.eql(u8, cmd, "filter_repo")) {
             try self.runFilterRepo(args);
+        } else if (std.mem.eql(u8, cmd, "filter-branch")) {
+            try self.runFilterBranch(args);
         } else if (std.mem.eql(u8, cmd, "for-each-ref") or std.mem.eql(u8, cmd, "for_each_ref")) {
             try self.runForEachRef(args);
         } else if (std.mem.eql(u8, cmd, "rev-list") or std.mem.eql(u8, cmd, "rev_list")) {
@@ -778,6 +781,11 @@ pub const CommandDispatcher = struct {
     fn runFilterRepo(self: *CommandDispatcher, args: []const []const u8) !void {
         var filter_cmd = FilterRepo.init(self.allocator, self.io, self.writer, self.style);
         try filter_cmd.run(args);
+    }
+
+    fn runFilterBranch(self: *CommandDispatcher, args: []const []const u8) !void {
+        var filter_branch = FilterBranch.init(self.allocator, self.io, self.writer, self.style);
+        try filter_branch.run(args);
     }
 
     fn runForEachRef(self: *CommandDispatcher, args: []const []const u8) !void {
