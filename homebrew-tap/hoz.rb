@@ -1,10 +1,10 @@
 class Hoz < Formula
   desc "Git-compatible version control system written in Zig"
   homepage "https://github.com/Edward/hoz"
-  url "https://github.com/Edward/hoz/releases/download/v0.2.9/hoz-0.2.9-macos-x86_64.tar.gz"
+  url "https://github.com/Edward/hoz/releases/download/v0.2.10/hoz-0.2.10-macos-x86_64.tar.gz"
   sha256 "PLACEHOLDER_MACOS_X86_64_SHA256"
   license "MIT"
-  version "0.2.9"
+  version "0.2.10"
 
   livecheck do
     url :stable
@@ -13,13 +13,13 @@ class Hoz < Formula
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/Edward/hoz/releases/download/v0.2.9/hoz-0.2.9-macos-aarch64.tar.gz"
+      url "https://github.com/Edward/hoz/releases/download/v0.2.10/hoz-0.2.10-macos-aarch64.tar.gz"
       sha256 "PLACEHOLDER_MACOS_AARCH64_SHA256"
     end
   end
 
   on_linux do
-    url "https://github.com/Edward/hoz/releases/download/v0.2.9/hoz-0.2.9-linux-x86_64.tar.gz"
+    url "https://github.com/Edward/hoz/releases/download/v0.2.10/hoz-0.2.10-linux-x86_64.tar.gz"
     sha256 "PLACEHOLDER_LINUX_X86_64_SHA256"
   end
 
