@@ -3,16 +3,23 @@ const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 const compress_mod = @import("../compress/zlib.zig");
-const c = @cImport({
-    @cInclude("sys/stat.h");
-});
+
+const builtin_target = @import("builtin").os.tag;
+
+const c_mkdir = if (builtin_target == .windows)
+    struct {
+        extern fn mkdir([*c]const u8) c_int;
+    }
+else
+    struct {
+        extern fn mkdir([*c]const u8, u32) c_int;
+    };
 
 fn mkdirP(path: []const u8) void {
-    const builtin = @import("builtin");
-    if (comptime builtin.os.tag == .windows) {
-        _ = c.mkdir(path.ptr);
+    if (comptime builtin_target == .windows) {
+        _ = c_mkdir.mkdir(path.ptr);
     } else {
-        _ = c.mkdir(path.ptr, 0o755);
+        _ = c_mkdir.mkdir(path.ptr, 0o755);
     }
 }
 const OID = @import("../object/oid.zig").OID;
