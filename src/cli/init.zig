@@ -31,7 +31,7 @@ pub const Init = struct {
             try self.initRegular(repo_path, cwd);
         }
 
-        try self.output.successMessage("Initialized empty hoz repository in {s}", .{repo_path});
+        try self.output.successMessage("--→ Initialized empty Hoz repository in {s}", .{repo_path});
     }
 
     fn initRegular(self: *Init, repo_path: []const u8, cwd: Io.Dir) !void {

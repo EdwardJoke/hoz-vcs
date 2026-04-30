@@ -3,6 +3,14 @@ const std = @import("std");
 const object_mod = @import("object.zig");
 const oid_mod = @import("oid.zig");
 
+/// Tagger identity type (used for both field and create param)
+pub const Tagger = struct {
+    name: []const u8,
+    email: []const u8,
+    timestamp: i64,
+    timezone: i32,
+};
+
 /// Annotated tag object
 pub const Tag = struct {
     /// Name of the tag (e.g., "v1.0.0")
@@ -12,12 +20,7 @@ pub const Tag = struct {
     /// Type of the target object (commit, tree, blob, tag)
     target_type: object_mod.Type,
     /// Tagger identity
-    tagger: ?struct {
-        name: []const u8,
-        email: []const u8,
-        timestamp: i64,
-        timezone: i32,
-    },
+    tagger: ?Tagger,
     /// Tag message
     message: []const u8,
     /// Optional GPG signature
@@ -28,12 +31,7 @@ pub const Tag = struct {
         name: []const u8,
         target: oid_mod.OID,
         target_type: object_mod.Type,
-        tagger: ?struct {
-            name: []const u8,
-            email: []const u8,
-            timestamp: i64,
-            timezone: i32,
-        },
+        tagger: ?Tagger,
         message: []const u8,
     ) Tag {
         return Tag{
@@ -69,55 +67,55 @@ pub const Tag = struct {
     ///
     /// <message>
     pub fn serialize(self: Tag, allocator: std.mem.Allocator) ![]u8 {
-        var buffer = std.ArrayList(u8).initCapacity(allocator, 256);
+        var buffer = std.ArrayList(u8).initCapacity(allocator, 256) catch return error.OutOfMemory;
         defer buffer.deinit(allocator);
 
         // Write object
-        try buffer.appendSlice("object ");
-        try buffer.appendSlice(&self.target.toHex());
-        try buffer.append('\n');
+        try buffer.appendSlice(allocator, "object ");
+        try buffer.appendSlice(allocator, &self.target.toHex());
+        try buffer.append(allocator, '\n');
 
         // Write type
-        try buffer.appendSlice("type ");
-        try buffer.appendSlice(self.targetTypeStr());
-        try buffer.append('\n');
+        try buffer.appendSlice(allocator, "type ");
+        try buffer.appendSlice(allocator, self.targetTypeStr());
+        try buffer.append(allocator, '\n');
 
         // Write tag name
-        try buffer.appendSlice("tag ");
-        try buffer.appendSlice(self.name);
-        try buffer.append('\n');
+        try buffer.appendSlice(allocator, "tag ");
+        try buffer.appendSlice(allocator, self.name);
+        try buffer.append(allocator, '\n');
 
         // Write tagger if present
         if (self.tagger) |tagger| {
-            try buffer.appendSlice("tagger ");
-            try buffer.appendSlice(tagger.name);
-            try buffer.appendSlice(" <");
-            try buffer.appendSlice(tagger.email);
-            try buffer.appendSlice("> ");
-            try buffer.appendSlice(try std.fmt.allocPrint(allocator, "{}", .{tagger.timestamp}));
-            try buffer.appendSlice(&timezoneToStr(tagger.timezone));
-            try buffer.append('\n');
+            try buffer.appendSlice(allocator, "tagger ");
+            try buffer.appendSlice(allocator, tagger.name);
+            try buffer.appendSlice(allocator, " <");
+            try buffer.appendSlice(allocator, tagger.email);
+            try buffer.appendSlice(allocator, "> ");
+            try buffer.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{tagger.timestamp}));
+            try buffer.appendSlice(allocator, &timezoneToStr(tagger.timezone));
+            try buffer.append(allocator, '\n');
         }
 
         // GPG signature if present
         if (self.gpg_signature) |sig| {
-            try buffer.appendSlice("gpgsig ");
-            try buffer.appendSlice(sig);
-            try buffer.append('\n');
+            try buffer.appendSlice(allocator, "gpgsig ");
+            try buffer.appendSlice(allocator, sig);
+            try buffer.append(allocator, '\n');
         }
 
         // Blank line before message
-        try buffer.append('\n');
+        try buffer.append(allocator, '\n');
 
         // Write message
-        try buffer.appendSlice(self.message);
+        try buffer.appendSlice(allocator, self.message);
 
         // Wrap with header
         const content = buffer.items;
         const size_str = try std.fmt.allocPrint(allocator, "{}", .{content.len});
         defer allocator.free(size_str);
 
-        const header = try std.fmt.allocPrint(allocator, "tag {}\x00", .{size_str});
+        const header = try std.fmt.allocPrint(allocator, "tag {s}\x00", .{size_str});
         defer allocator.free(header);
 
         var result = try allocator.alloc(u8, header.len + content.len);
@@ -137,16 +135,11 @@ pub const Tag = struct {
         var target_opt: ?oid_mod.OID = null;
         var target_type_opt: ?object_mod.Type = null;
         var name_opt: []const u8 = "";
-        var tagger_opt: ?struct {
-            name: []const u8,
-            email: []const u8,
-            timestamp: i64,
-            timezone: i32,
-        } = null;
+        var tagger_opt: ?Tagger = null;
         var gpg_sig_opt: ?[]const u8 = null;
         var message_start: ?usize = null;
 
-        var lines = std.mem.split(u8, obj.data, "\n");
+        var lines = std.mem.splitSequence(u8, obj.data, "\n");
         while (lines.next()) |line| {
             if (message_start == null and line.len == 0) {
                 message_start = lines.index;
@@ -200,12 +193,7 @@ pub const Tag = struct {
     }
 
     /// Parse tagger identity from string
-    fn parseTagger(str: []const u8) !struct {
-        name: []const u8,
-        email: []const u8,
-        timestamp: i64,
-        timezone: i32,
-    } {
+    fn parseTagger(str: []const u8) !Tagger {
         const email_start = std.mem.indexOf(u8, str, "<") orelse return error.InvalidTagger;
         const name = str[0..email_start];
 
@@ -213,7 +201,7 @@ pub const Tag = struct {
         const email = str[email_start + 1 .. email_end];
 
         const rest = str[email_end + 1 ..];
-        var iter = std.mem.split(u8, rest, " ");
+        var iter = std.mem.splitSequence(u8, rest, " ");
 
         const timestamp_str = iter.next() orelse return error.InvalidTagger;
         const timestamp = try std.fmt.parseInt(i64, timestamp_str, 10);
@@ -277,7 +265,7 @@ test "tag target type string" {
 
 test "tag serialize and parse roundtrip" {
     const target = oid_mod.OID.fromHex("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef") catch unreachable;
-    const tagger = struct { name: []const u8, email: []const u8, timestamp: i64, timezone: i32 }{
+    const tagger = Tagger{
         .name = "Test User",
         .email = "test@example.com",
         .timestamp = 1234567890,
@@ -316,7 +304,7 @@ test "tag without tagger" {
 
 test "tag timezone parsing" {
     const target = oid_mod.OID.zero();
-    const tagger1 = struct { name: []const u8, email: []const u8, timestamp: i64, timezone: i32 }{
+    const tagger1 = Tagger{
         .name = "A",
         .email = "a@b.c",
         .timestamp = 0,
@@ -325,7 +313,7 @@ test "tag timezone parsing" {
     const tag1 = Tag.create("v1", target, .commit, tagger1, "msg");
     try std.testing.expectEqualSlices(u8, "+0000", &timezoneToStr(tag1.tagger.?.timezone));
 
-    const tagger2 = struct { name: []const u8, email: []const u8, timestamp: i64, timezone: i32 }{
+    const tagger2 = Tagger{
         .name = "A",
         .email = "a@b.c",
         .timestamp = 0,

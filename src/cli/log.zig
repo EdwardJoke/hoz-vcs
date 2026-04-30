@@ -47,12 +47,12 @@ pub const Log = struct {
             self.resolveHead(&git_dir) catch null;
 
         const oid = start_oid orelse {
-            try self.output.infoMessage("No commits found", .{});
+            try self.output.infoMessage("--→ No commits found", .{});
             return;
         };
 
         if (oid.isZero()) {
-            try self.output.infoMessage("No commits yet", .{});
+            try self.output.infoMessage("--→ No commits yet", .{});
             return;
         }
 

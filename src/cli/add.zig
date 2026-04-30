@@ -55,13 +55,13 @@ pub const Add = struct {
         }
 
         if (count > 0) {
-            try self.output.successMessage("Added {d} file(s)", .{count});
+            try self.output.successMessage("--→ Added {d} file(s)", .{count});
         }
     }
 
     fn addPath(self: *Add, path: []const u8) !void {
         if (self.dry_run) {
-            try self.output.infoMessage("Would add '{s}'", .{path});
+            try self.output.infoMessage("--→ Would add '{s}'", .{path});
             return;
         }
 

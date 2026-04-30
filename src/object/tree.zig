@@ -218,7 +218,7 @@ test "tree empty entries" {
     const entries = &[_]TreeEntry{};
     const tree = Tree.create(entries);
     try std.testing.expectEqual(0, tree.entries.len);
-    try std.testing.expectEqual(object_mod.Type.tree, tree.objectType());
+    try std.testing.expectEqual(object_mod.Type.tree, Tree.objectType());
 }
 
 test "mode from int" {

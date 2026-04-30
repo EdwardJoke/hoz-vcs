@@ -91,7 +91,7 @@ pub const Rebase = struct {
             return;
         }
 
-        try self.output.infoMessage("Rebasing onto {s}", .{self.upstream.?});
+        try self.output.infoMessage("--→ Rebasing onto {s}", .{self.upstream.?});
 
         const options = PlannerOptions{
             .onto = null,
@@ -114,7 +114,7 @@ pub const Rebase = struct {
             return;
         };
 
-        try self.output.successMessage("Rebase plan created with {d} commits", .{plan.commits.len});
+        try self.output.successMessage("--→ Rebase plan created with {d} commits", .{plan.commits.len});
     }
 
     fn runContinue(self: *Rebase, git_dir: Io.Dir) !void {
@@ -138,7 +138,7 @@ pub const Rebase = struct {
 
     fn runQuit(self: *Rebase, git_dir: Io.Dir) !void {
         _ = git_dir;
-        try self.output.successMessage("Rebase quit", .{});
+        try self.output.successMessage("--→ Rebase quit", .{});
     }
 };
 

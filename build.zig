@@ -123,12 +123,40 @@ pub fn build(b: *std.Build) void {
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
+    // Integration tests: full roundtrip (init/add/commit/log/branch/checkout)
+    const integration_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/integration_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "hoz", .module = mod },
+            },
+        }),
+    });
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+
+    // Fuzz-style edge-case tests for object parsing (blob/commit/tree/tag)
+    const fuzz_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/object_fuzz_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "hoz", .module = mod },
+            },
+        }),
+    });
+    const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
+
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_integration_tests.step);
+    test_step.dependOn(&run_fuzz_tests.step);
 
     // Cross-platform build targets
     const cross_targets = [_]struct {

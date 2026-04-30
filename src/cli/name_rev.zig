@@ -60,7 +60,7 @@ pub const NameRev = struct {
 
         if (self.oids.len == 0 and !self.options.all) {
             if (!self.options.no_undefined) {
-                try self.output.infoMessage("No OIDs provided", .{});
+                try self.output.infoMessage("--→ No OIDs provided", .{});
             }
             return;
         }

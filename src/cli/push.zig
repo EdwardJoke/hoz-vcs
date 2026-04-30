@@ -53,7 +53,7 @@ pub const Push = struct {
             return;
         };
         if (result.success) {
-            try self.output.successMessage("Mirrored {d} ref(s) to {s}", .{ result.refs_updated, remote });
+            try self.output.successMessage("--→ Mirrored {d} ref(s) to {s}", .{ result.refs_updated, remote });
         } else {
             try self.output.errorMessage("Mirror push to {s} failed", .{remote});
         }
@@ -70,7 +70,7 @@ pub const Push = struct {
             return;
         };
         if (result.success) {
-            try self.output.successMessage("Pushed {d} ref(s) to {s}", .{ result.refs_updated, remote });
+            try self.output.successMessage("--→ Pushed {d} ref(s) to {s}", .{ result.refs_updated, remote });
         } else {
             try self.output.errorMessage("Push all to {s} failed", .{remote});
         }
@@ -108,7 +108,7 @@ pub const Push = struct {
             return;
         };
         if (result.success) {
-            try self.output.successMessage("Pushed {d} ref(s) to {s}", .{ result.refs_updated, remote });
+            try self.output.successMessage("--→ Pushed {d} ref(s) to {s}", .{ result.refs_updated, remote });
         } else {
             try self.output.errorMessage("Push to {s} failed", .{remote});
         }

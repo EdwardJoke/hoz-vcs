@@ -74,7 +74,7 @@ pub const Submodule = struct {
         }
 
         if (modules.items.len == 0) {
-            try self.output.infoMessage("No submodules found", .{});
+            try self.output.infoMessage("--→ No submodules found", .{});
             return;
         }
 
@@ -112,7 +112,7 @@ pub const Submodule = struct {
             defer self.allocator.free(section_header);
 
             if (std.mem.indexOf(u8, config_content, section_header) != null) {
-                try self.output.infoMessage("Submodule '{s}' already initialized", .{m.name});
+                try self.output.infoMessage("--→ Submodule '{s}' already initialized", .{m.name});
                 continue;
             }
 
@@ -128,13 +128,13 @@ pub const Submodule = struct {
                     const head_content = sd.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch "";
                     defer if (head_content.len > 0) self.allocator.free(head_content);
                     if (head_content.len > 0) {
-                        try self.output.successMessage("Submodule '{s}' path registered at '{s}'", .{ m.name, m.path });
+                        try self.output.successMessage("--→ Submodule '{s}' path registered at '{s}'", .{ m.name, m.path });
                         continue;
                     }
                 }
             }
 
-            try self.output.successMessage("Submodule '{s}' ({s}) registered for path '{s}'", .{ m.name, m.url, m.path });
+            try self.output.successMessage("--→ Submodule '{s}' ({s}) registered for path '{s}'", .{ m.name, m.url, m.path });
         }
     }
 
@@ -169,7 +169,7 @@ pub const Submodule = struct {
                     const trimmed = if (head_content.len > 0) std.mem.trim(u8, head_content, " \n\r") else "";
 
                     if (trimmed.len > 0) {
-                        try self.output.successMessage("Submodule '{s}' checked out at {s}", .{ m.name, trimmed[0..@min(trimmed.len, 12)] });
+                        try self.output.successMessage("--→ Submodule '{s}' checked out at {s}", .{ m.name, trimmed[0..@min(trimmed.len, 12)] });
                     } else {
                         try self.cloneAndCheckout(sd, m);
                     }
@@ -177,7 +177,7 @@ pub const Submodule = struct {
                 }
             }
 
-            try self.output.infoMessage("Submodule '{s}' not initialized, run 'git submodule init' first", .{m.name});
+            try self.output.infoMessage("--→ Submodule '{s}' not initialized, run 'git submodule init' first", .{m.name});
         }
     }
 
@@ -198,12 +198,12 @@ pub const Submodule = struct {
             defer checkout_argv.deinit(self.allocator);
             try checkout_argv.appendSlice(self.allocator, &.{ "git", "-C", m.path, "checkout", m.oid[0..@min(m.oid.len, 40)] });
             _ = std.process.spawn(self.io, .{ .argv = checkout_argv.items }) catch {
-                try self.output.infoMessage("Submodule '{s}' cloned but checkout of {s} failed", .{ m.name, m.oid[0..@min(m.oid.len, 12)] });
+                try self.output.infoMessage("--→ Submodule '{s}' cloned but checkout of {s} failed", .{ m.name, m.oid[0..@min(m.oid.len, 12)] });
                 return;
             };
 
             sub_dir.writeFile(self.io, .{ .sub_path = "HEAD", .data = m.oid }) catch {};
-            try self.output.successMessage("Submodule '{s}' checked out at {s}", .{ m.name, m.oid[0..@min(m.oid.len, 12)] });
+            try self.output.successMessage("--→ Submodule '{s}' checked out at {s}", .{ m.name, m.oid[0..@min(m.oid.len, 12)] });
         }
     }
 

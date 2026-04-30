@@ -48,7 +48,7 @@ pub const Describe = struct {
 
         const result = describer.describeCommit(self.commitish) catch |err| {
             if (err == error.NoTagsFound) {
-                try self.output.infoMessage("No tags found to describe", .{});
+                try self.output.infoMessage("--→ No tags found to describe", .{});
                 return;
             }
             return err;
@@ -58,7 +58,7 @@ pub const Describe = struct {
         try self.output.writer.print("{s}\n", .{result.description});
 
         if (self.options.long) {
-            try self.output.infoMessage("tag={?s} depth={} dirty={}", .{
+            try self.output.infoMessage("--→ tag={?s} depth={} dirty={}", .{
                 result.tag_name,
                 result.depth,
                 result.is_dirty,
@@ -74,7 +74,7 @@ pub const Describe = struct {
         }
 
         if (tags.len == 0) {
-            try self.output.infoMessage("No tags found", .{});
+            try self.output.infoMessage("--→ No tags found", .{});
             return;
         }
 

@@ -341,10 +341,10 @@ test "identity parse invalid" {
 
 test "commit serialize and parse roundtrip" {
     const tree_hex = "0000000000000000000000000000000000000000";
-    const tree_oid = oid_mod.OID.fromHex(tree_hex);
+    const tree_oid = try oid_mod.OID.fromHex(tree_hex);
 
     const parent_hex = "1111111111111111111111111111111111111111";
-    const parents = &[_]oid_mod.OID{oid_mod.OID.fromHex(parent_hex)};
+    const parents = &[_]oid_mod.OID{try oid_mod.OID.fromHex(parent_hex)};
 
     const author = Identity{
         .name = "Alice",
@@ -368,15 +368,15 @@ test "commit serialize and parse roundtrip" {
 
 test "commit multi-parent" {
     const tree_oid = oid_mod.OID.zero();
-    const parent1 = oid_mod.OID.fromHex("1111111111111111111111111111111111111111");
-    const parent2 = oid_mod.OID.fromHex("2222222222222222222222222222222222222222");
+    const parent1 = try oid_mod.OID.fromHex("1111111111111111111111111111111111111111");
+    const parent2 = try oid_mod.OID.fromHex("2222222222222222222222222222222222222222");
     const parents = &[_]oid_mod.OID{ parent1, parent2 };
 
     const author = Identity.zero();
     const commit = Commit.create(tree_oid, parents, author, author, "Merge branch");
 
     try std.testing.expectEqual(2, commit.parents.len);
-    try std.testing.expectEqual(object_mod.Type.commit, commit.objectType());
+    try std.testing.expectEqual(object_mod.Type.commit, Commit.objectType());
 }
 
 test "commit initial (no parents)" {

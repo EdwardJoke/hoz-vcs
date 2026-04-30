@@ -19,24 +19,26 @@ pub const Blob = struct {
     }
 
     pub fn oid(self: Blob) oid_mod.OID {
-        const size_str_len = std.fmt.count("{}", .{self.data.len});
+        const size_str_len = std.fmt.count("{d}", .{self.data.len});
         const header_len = 5 + size_str_len + 1;
         const total_len = header_len + self.data.len;
 
         if (total_len <= 1024) {
             var buffer: [1024]u8 = undefined;
             @memcpy(buffer[0..5], "blob ");
-            _ = std.fmt.bufPrint(buffer[5..], "{}", .{self.data.len}) catch unreachable;
+            _ = std.fmt.bufPrint(buffer[5..], "{d}", .{self.data.len}) catch unreachable;
             buffer[5 + size_str_len] = 0;
             @memcpy(buffer[header_len..], self.data);
             return oid_mod.oidFromContent(buffer[0..total_len]);
         } else {
-            var buffer = std.ArrayList(u8).init(std.heap.page_allocator);
-            defer buffer.deinit();
-            try buffer.appendSlice("blob ");
-            try std.fmt.allocPrintBuffer(&buffer, "{}", .{self.data.len});
-            try buffer.append(0);
-            try buffer.appendSlice(self.data);
+            var buffer = std.ArrayList(u8).initCapacity(std.heap.page_allocator, total_len) catch return oid_mod.OID.zero();
+            defer buffer.deinit(std.heap.page_allocator);
+            buffer.appendSlice(std.heap.page_allocator, "blob ") catch return oid_mod.OID.zero();
+            var size_buf: [20]u8 = undefined;
+            const size_str = std.fmt.bufPrint(&size_buf, "{d}", .{self.data.len}) catch return oid_mod.OID.zero();
+            buffer.appendSlice(std.heap.page_allocator, size_str) catch return oid_mod.OID.zero();
+            buffer.append(std.heap.page_allocator, 0) catch return oid_mod.OID.zero();
+            buffer.appendSlice(std.heap.page_allocator, self.data) catch return oid_mod.OID.zero();
             return oid_mod.oidFromContent(buffer.items);
         }
     }
@@ -47,7 +49,7 @@ pub const Blob = struct {
         const size_str = try std.fmt.allocPrint(allocator, "{}", .{self.data.len});
         defer allocator.free(size_str);
 
-        const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{size_str});
+        const header = try std.fmt.allocPrint(allocator, "blob {s}\x00", .{size_str});
         defer allocator.free(header);
 
         var result = try allocator.alloc(u8, header.len + self.data.len);
@@ -75,7 +77,7 @@ test "blob create and oid" {
     try std.testing.expectEqualSlices(u8, content, blob.data);
 
     // Verify object type
-    try std.testing.expectEqual(object_mod.Type.blob, blob.objectType());
+    try std.testing.expectEqual(object_mod.Type.blob, Blob.objectType());
 }
 
 test "blob serialize and parse roundtrip" {
@@ -105,7 +107,7 @@ test "blob oid consistency" {
 test "blob empty content" {
     const blob = Blob.create("");
     try std.testing.expectEqual(0, blob.data.len);
-    try std.testing.expectEqual(object_mod.Type.blob, blob.objectType());
+    try std.testing.expectEqual(object_mod.Type.blob, Blob.objectType());
 }
 
 test "blob large content" {

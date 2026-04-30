@@ -57,7 +57,7 @@ pub const VerifyTag = struct {
                     try self.output.writer.print("{s}\n", .{result.message});
                 }
             } else {
-                try self.output.infoMessage("tag '{s}' verified OK", .{tag_name});
+                try self.output.infoMessage("--→ tag '{s}' verified OK", .{tag_name});
 
                 if (self.options.verbose and result.tagger.len > 0) {
                     try self.output.writer.print("  Tagger: {s}\n", .{result.tagger});

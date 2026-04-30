@@ -90,6 +90,18 @@ pub const OID = struct {
         }
         return true;
     }
+
+    /// Create a zero OID (all null bytes)
+    pub fn zero() OID {
+        return OID{ .bytes = [_]u8{0} ** OID_SIZE };
+    }
+
+    /// Create OID from raw 20 bytes
+    pub fn fromBytes(bytes: []const u8) OID {
+        var oid: OID = undefined;
+        @memcpy(&oid.bytes, bytes[0..OID_SIZE]);
+        return oid;
+    }
 };
 
 /// Create OID from raw bytes
@@ -112,7 +124,7 @@ pub fn oidEqual(a: OID, b: OID) bool {
 
 /// OID zero value (all zeros - used for null/unset)
 pub fn oidZero() OID {
-    return OID{ .bytes = .{} };
+    return OID.zero();
 }
 
 /// Check if OID is zero (null)

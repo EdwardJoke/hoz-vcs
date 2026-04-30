@@ -131,10 +131,10 @@ pub fn parse(data: []const u8) !Object {
 /// Serialize object to loose object format
 pub fn serialize(obj: Object, allocator: std.mem.Allocator) ![]u8 {
     const type_str = typeToStr(obj.obj_type);
-    const size_str = try std.fmt.allocPrint(allocator, "{}", .{obj.data.len});
+    const size_str = try std.fmt.allocPrint(allocator, "{d}", .{obj.data.len});
     defer allocator.free(size_str);
 
-    const header = try std.fmt.allocPrint(allocator, "{} {}\x00", .{ type_str, size_str });
+    const header = try std.fmt.allocPrint(allocator, "{s} {s}\x00", .{ type_str, size_str });
     defer allocator.free(header);
 
     var result = try allocator.alloc(u8, header.len + obj.data.len);

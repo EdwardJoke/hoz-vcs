@@ -87,11 +87,11 @@ pub const CherryPick = struct {
             try self.writeCherryPickHead(commit_oid);
 
             if (!self.options.no_commit) {
-                try self.output.infoMessage("Cherry-picked {s} ({d}/{d})", .{ commit_str, i + 1, commits.len });
+                try self.output.infoMessage("--→ Cherry-picked {s} ({d}/{d})", .{ commit_str, i + 1, commits.len });
             }
         }
 
-        try self.output.successMessage("Successfully cherry-picked {d} commit(s)", .{commits.len});
+        try self.output.successMessage("--→ Successfully cherry-picked {d} commit(s)", .{commits.len});
     }
 
     fn resolveCommitOid(self: *CherryPick, spec: []const u8) !OID {

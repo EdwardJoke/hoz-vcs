@@ -32,19 +32,19 @@ pub const Commit = struct {
 
     pub fn run(self: *Commit) !void {
         if (self.message == null) {
-            try self.output.errorMessage("Missing commit message. Use -m \"<message>\"", .{});
+            try self.output.errorMessage("-x- Missing commit message. Use -m \"<message>\"", .{});
             return;
         }
 
         const git_dir = Io.Dir.openDirAbsolute(self.io, ".git", .{}) catch {
-            try self.output.errorMessage("Not a hoz repository", .{});
+            try self.output.errorMessage("-x- Not a Hoz repository", .{});
             return;
         };
         defer git_dir.close(self.io);
 
         const commit_oid = try self.createCommit(&git_dir);
         const hex = commit_oid.toHex();
-        try self.output.successMessage("[{s} {s}] {s}", .{
+        try self.output.successMessage("--→ [{s} {s}] {s}", .{
             if (self.amend) "amended" else "root",
             hex[0..7],
             self.message.?,

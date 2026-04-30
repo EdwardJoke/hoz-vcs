@@ -62,6 +62,7 @@ const ForEachRef = @import("for_each_ref.zig").ForEachRef;
 const RevList = @import("rev_list.zig").RevList;
 const CommitTree = @import("commit_tree.zig").CommitTree;
 const UpdateIndex = @import("update_index.zig").UpdateIndex;
+const Am = @import("am.zig").Am;
 
 pub const CommandDispatcher = struct {
     allocator: std.mem.Allocator,
@@ -97,6 +98,8 @@ pub const CommandDispatcher = struct {
             try self.runStatus(args);
         } else if (std.mem.eql(u8, cmd, "add")) {
             try self.runAdd(args);
+        } else if (std.mem.eql(u8, cmd, "am")) {
+            try self.runAm(args);
         } else if (std.mem.eql(u8, cmd, "commit")) {
             try self.runCommit(args);
         } else if (std.mem.eql(u8, cmd, "log")) {
@@ -400,6 +403,15 @@ pub const CommandDispatcher = struct {
             try add.run(args[1..]);
         } else {
             try add.run(&.{});
+        }
+    }
+
+    fn runAm(self: *CommandDispatcher, args: []const []const u8) !void {
+        var am_cmd = Am.init(self.allocator, self.io, self.writer, self.style);
+        if (args.len > 1) {
+            try am_cmd.run(args[1..]);
+        } else {
+            try am_cmd.run(&.{});
         }
     }
 
