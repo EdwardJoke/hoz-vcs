@@ -1,6 +1,6 @@
 # Hoz Roadmap & Open Issues
 
-> Last updated: 2026-04-30 | Target Release: **v0.2.12**
+> Last updated: 2026-05-01 | Target Release: **v0.3.0**
 
 ---
 
@@ -15,15 +15,17 @@
 
 ---
 
-## 1. Missing Git Commands
+## 1. Git Compatibility Gaps
 
-| # | Priority | Command | Why It Matters | Status |
-|---|----------|---------|---------------|--------|
-| 1 | 🟡 High | **`filter-branch`** | Rewrite branch history. Complex, rarely used in modern git (superseded by filter-repo). `cli/filter_repo.zig` exists as basic stub. | — |
-| 2 | ⚪ Low | **`instaweb` / `web--browse`** | Launch web browser for gitweb. UI helper, not core Git functionality. | — |
-| 3 | ⚪ Low | **`quiltimport`** | Import quilt patch series into Git. Niche workflow tool. | — |
-| 4 | ⚪ Low | **`send-email`** | Format and send patches via email (SMTP). Mailing-list workflow tool. | — |
-| 5 | ⚪ Low | **`request-pull`** | Generate pull request summary text. Niche — most users use GitHub/GitLab PRs instead. | — |
+| # | Priority | Area | Gap Description | Status |
+|---|----------|------|-----------------|--------|
+| 1 | 🟡 High | **Network protocol** | `sideband-64k demux` — multiplexed data channel for progress/error during push/fetch. Required for full smart protocol compliance. | ✅ Done |
+| 2 | 🟡 High | **Security** | Full GPG signature verification in `verify-tag` / `verify-commit`. Currently basic validation only. | ✅ Done |
+| 3 | 🟢 Medium | **SSH transport** | Native SSH via libssh2 instead of shell-out to system `ssh`. Improves portability and error handling on Windows. | ✅ Done |
+| 4 | ⚪ Low | **`instaweb` / `web--browse`** | Launch web browser for gitweb. UI helper, not core Git functionality. | — |
+| 5 | ⚪ Low | **`quiltimport`** | Import quilt patch series into Git. Niche workflow tool. | — |
+| 6 | ⚪ Low | **`send-email`** | Format and send patches via email (SMTP). Mailing-list workflow tool. | — |
+| 7 | ⚪ Low | **`request-pull`** | Generate pull request summary text. Niche — most users use GitHub/GitLab PRs instead. | — |
 
 ---
 
@@ -31,32 +33,42 @@
 
 | Category | Coverage | Status |
 |----------|----------|--------|
-| **Porcelain commands** (user-facing) | ~82% | init, clone, add, commit, log, diff, status, branch, checkout, stash, tag, merge, rebase, reset, push, pull, fetch, remote, cherry-pick, revert, show, notes, bundle, blame, bisect, describe, fsck, format-patch, archive work |
-| **Plumbing commands** (low-level) | ~78% | cat-file, hash-object, ls-files, ls-tree, show-ref, for-each-ref, rev-parse, write-tree, commit-tree, update-index, rev-list, name-rev, verify-tag, rm, am work. Missing: filter-branch |
-| **Network operations** | ~60% | fetch, push, ls-remote, clone over HTTP/smart protocol. SSH delegates to shell. Pack receive/send with delta resolution. Missing: sideband-64k demux |
+| **Porcelain commands** (user-facing) | ~85% | init, clone, add, commit, log, diff, status, branch, checkout, stash, tag, merge, rebase, reset, push, pull, fetch, remote, cherry-pick, revert, show, notes, bundle, blame, bisect, describe, fsck, format-patch, archive, filter-branch work |
+| **Plumbing commands** (low-level) | ~82% | cat-file, hash-object, ls-files, ls-tree, show-ref, for-each-ref, rev-parse, write-tree, commit-tree, update-index, rev-list, name-rev, verify-tag, rm, am, filter-branch work |
+| **Network operations** | ~65% | fetch, push, ls-remote, clone over HTTP/smart protocol. SSH delegates to shell. Pack receive/send with delta resolution. Missing: sideband-64k demux |
 | **Object storage** | ~85% | Loose objects read/write, pack file parsing, zlib compress/decompress, SHA-1/SHA-256, delta resolution (main path), thin pack detection |
 | **Index/staging** | ~85% | Index read/write/parse/serialize, stage add/rm/move/reset, tree cache, checksums, extensions |
 | **Merge/conflict** | ~70% | Three-way merge (LCS diff3), fast-forward, conflict markers, abort/continue, rerere |
 | **History traversal** | ~70% | Log formatting (6 formats), date parsing (7 formats), pretty-print (4 styles), rev-list, show-ref, for-each-ref, rev-parse |
-| **Overall compatibility** | **~74%** | Daily workflows fully functional. Advanced/niche commands (filter-branch) missing. Some features shell out to system `git`. Integration and fuzz test suites in place. |
+| **Overall compatibility** | **~77%** | Daily workflows fully functional. Network protocol gaps and niche commands remain. Some features shell out to system `git`. Integration and fuzz test suites in place. |
 
 ---
 
-## 3. Release v0.2.12 Checklist
+## 3. Release v0.3.0 Checklist
 
-> Prerequisites for v0.2.12 release.
+> Minor release — medium scope feature additions and compatibility improvements.
 
-### Should Have (�)
+### Should Have
 
-- [x] **Implement `filter-branch`** — complete `cli/filter_repo.zig` from basic stub to functional history rewriting
-  - File: `src/cli/filter_repo.zig`
-  - Milestone: `filter-branch --subdirectory-filter <dir> <branch>` end-to-end roundtrip
+- [x] **Implement `sideband-64k demux`** — complete smart protocol multiplexed channel support
+  - Enables proper progress output during clone/push/pack operations
+  - File: `src/network/sideband.zig`
+  - Milestone: `git clone` over smart protocol shows remote progress correctly
 
-### Won't Have (deferred to v0.3.0+)
+- [x] **GPG signature verification in `verify-tag`** — extend beyond basic checksum validation
+  - Parse OpenPGP signatures embedded in tag objects
+  - Validate against trusted keyring
+  - Files: `src/git/gpg.zig`, `src/tag/verify.zig`, `src/cli/verify_tag.zig`
 
-- `instaweb`, `quiltimport`, `send-email`, `request-pull` — niche workflows
-- Native SSH (libssh2) — shell-out approach is pragmatic
-- Full GPG signature verification in `verify-tag`
-- `sideband-64k demux` in network protocol
+### Nice to Have
+
+- [x] **Native SSH transport (libssh2)** — replace shell-out `ssh` invocation
+  - Improves Windows support and connection error diagnostics
+  - File: `src/network/ssh_native.zig`
+  - Milestone: `git push/pull` over SSH without system `ssh` dependency
+
+### Won't Have (deferred to v0.4.0+)
+
+- `instaweb`, `quiltimport`, `send-email`, `request-pull` — niche workflows with minimal user demand
 
 ---
