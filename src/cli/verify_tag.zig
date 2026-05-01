@@ -10,6 +10,7 @@ const OID = @import("../object/oid.zig").OID;
 pub const VerifyTagOptions = struct {
     verbose: bool = false,
     raw: bool = false,
+    gpg_verify: bool = false,
 };
 
 pub const VerifyTag = struct {
@@ -39,7 +40,14 @@ pub const VerifyTag = struct {
 
         var any_error = false;
         for (self.tags) |tag_name| {
-            const result = self.verifyOne(tag_name) catch {
+            var verifier = TagVerifier.init(self.allocator, self.io);
+            defer verifier.deinit();
+
+            if (self.options.gpg_verify) {
+                try verifier.enableGpgVerification();
+            }
+
+            const result = verifier.verify(tag_name) catch {
                 try self.output.errorMessage("fatal: could not verify '{s}'", .{tag_name});
                 any_error = true;
                 continue;
@@ -65,6 +73,20 @@ pub const VerifyTag = struct {
                         try self.output.writer.print("  Message:\n{s}\n", .{result.message});
                     }
                 }
+
+                if (self.options.gpg_verify) {
+                    if (result.signature_valid) {
+                        try self.output.infoMessage("  GPG Signature: VALID", .{});
+                        if (self.options.verbose) {
+                            try self.output.writer.print("  Signer Key ID: {x:0>16}\n", .{
+                                std.mem.readInt(u64, &result.signer_key_id, .big),
+                            });
+                        }
+                    } else {
+                        try self.output.warningMessage("  GPG Signature: INVALID or NOT FOUND", .{});
+                        any_error = true;
+                    }
+                }
             }
 
             self.allocator.free(result.tagger);
@@ -72,11 +94,6 @@ pub const VerifyTag = struct {
         }
 
         if (any_error) return error.VerificationFailed;
-    }
-
-    fn verifyOne(self: *VerifyTag, tag_name: []const u8) !TagVerifyResult {
-        var verifier = TagVerifier.init(self.allocator, self.io);
-        return verifier.verify(tag_name);
     }
 
     fn parseArgs(self: *VerifyTag, args: []const []const u8) void {
@@ -88,6 +105,8 @@ pub const VerifyTag = struct {
                 self.options.verbose = true;
             } else if (std.mem.eql(u8, arg, "--raw")) {
                 self.options.raw = true;
+            } else if (std.mem.eql(u8, arg, "--gpg-verify") or std.mem.eql(u8, arg, "-g")) {
+                self.options.gpg_verify = true;
             } else if (!std.mem.startsWith(u8, arg, "-")) {
                 tag_list.append(self.allocator, arg) catch {};
             }
