@@ -58,6 +58,8 @@ pub fn build(b: *std.Build) void {
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
     const need_libc = target.result.os.tag == .linux or target.result.os.tag == .windows;
+    const native_arch = target.result.cpu.arch == b.graph.host.result.cpu.arch;
+
     const exe = b.addExecutable(.{
         .name = "hoz",
         .root_module = b.createModule(.{
@@ -70,6 +72,12 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+
+    if (native_arch) {
+        exe.root_module.linkSystemLibrary("ssh2", .{});
+        exe.root_module.linkSystemLibrary("ssl", .{});
+        exe.root_module.linkSystemLibrary("crypto", .{});
+    }
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
