@@ -241,7 +241,7 @@ fn printHelp(writer: *Io.Writer, style: OutputStyle) !void {
 
 fn printVersion(writer: *Io.Writer, style: OutputStyle) !void {
     var out = Output.init(writer, style, std.heap.page_allocator);
-    try out.result(.{ .success = true, .code = 0, .message = "hoz version 0.2.10" });
+    try out.result(.{ .success = true, .code = 0, .message = "hoz version 0.3.0" });
 }
 
 fn printUnknown(writer: *Io.Writer, cmd: []const u8, style: OutputStyle) !void {
