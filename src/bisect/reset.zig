@@ -30,8 +30,13 @@ pub const BisectReset = struct {
         const git_dir = cwd.openDir(self.io, self.path, .{}) catch return;
         defer git_dir.close(self.io);
 
-        const head_ref = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(1024)) catch return;
-        defer self.allocator.free(head_ref);
+        const head_original = git_dir.readFileAlloc(self.io, "bisect/head-original", self.allocator, .limited(256)) catch return;
+        defer self.allocator.free(head_original);
+        const trimmed = std.mem.trim(u8, head_original, " \t\r\n");
+
+        if (trimmed.len == 0) return;
+
+        try git_dir.writeFile(self.io, .{ .sub_path = "HEAD", .data = trimmed });
     }
 
     pub fn isBisecting(self: *BisectReset) bool {
@@ -55,7 +60,7 @@ test "BisectReset init" {
     try std.testing.expectEqualStrings(".git", bisect.path);
 }
 
-test "BisectReset isBisecting" {
+test "BisectReset isBisecting returns false outside git repo" {
     var buf: [1]u8 = undefined;
     const io: Io = .init(.{
         .stdin = .empty,
@@ -63,8 +68,7 @@ test "BisectReset isBisecting" {
         .stderr = .buffered(&buf),
     });
     const bisect = BisectReset.init(std.testing.allocator, io);
-    _ = bisect.isBisecting();
-    try std.testing.expect(true);
+    try std.testing.expect(bisect.isBisecting() == false);
 }
 
 test "BisectReset reset method exists" {
@@ -75,6 +79,7 @@ test "BisectReset reset method exists" {
         .stderr = .buffered(&buf),
     });
     var bisect = BisectReset.init(std.testing.allocator, io);
-    bisect.reset() catch {};
-    try std.testing.expect(true);
+    if (bisect.reset()) |_| {} else |err| {
+        try std.testing.expect(err == error.NotAGitRepository);
+    }
 }

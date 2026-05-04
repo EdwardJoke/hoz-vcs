@@ -66,14 +66,14 @@ pub const Clean = struct {
 
     fn cleanUntracked(self: *Clean, cwd: Io.Dir) !void {
         _ = cwd;
-        var cleaner = CleanForce.init(self.allocator);
+        var cleaner = CleanForce.init(self.allocator, self.io);
         var count: usize = 0;
 
         if (self.only_ignored) {
-            var ignored_cleaner = CleanOnlyIgnored.init(self.allocator);
+            var ignored_cleaner = CleanOnlyIgnored.init(self.allocator, self.io);
             count = try ignored_cleaner.clean(&.{});
         } else if (self.include_ignored) {
-            var ignored_cleaner = CleanIgnoredToo.init(self.allocator);
+            var ignored_cleaner = CleanIgnoredToo.init(self.allocator, self.io);
             count = try ignored_cleaner.clean(&.{});
         } else {
             count = try cleaner.clean(&.{});

@@ -13,11 +13,11 @@ pub const CleanInteractive = struct {
     io: Io,
     selected: std.ArrayList([]const u8),
 
-    pub fn init(allocator: std.mem.Allocator, io: Io) CleanInteractive {
+    pub fn init(allocator: std.mem.Allocator, io: Io) !CleanInteractive {
         return .{
             .allocator = allocator,
             .io = io,
-            .selected = std.ArrayList([]const u8).init(allocator),
+            .selected = try std.ArrayList([]const u8).initCapacity(allocator, 0),
         };
     }
 
@@ -25,7 +25,7 @@ pub const CleanInteractive = struct {
         self.selected.deinit(self.allocator);
     }
 
-    pub fn prompt(self: *CleanInteractive, path: []const u8) !bool {
+    pub fn prompt(_: *CleanInteractive, path: []const u8) !bool {
         const stdout = Io.File.stdout().writer(&.{});
         try stdout.interface.print("Remove {s}? [y/N] ", .{path});
 
@@ -53,14 +53,14 @@ pub const CleanInteractive = struct {
 
         switch (parsed) {
             .select => {
-                self.selected.clearAndFree(self.allocator);
+                self.selected.shrinkRetainingCapacity(0);
                 for (paths) |p| {
                     if (try self.prompt(p)) {
                         try self.selected.append(self.allocator, p);
                     }
                 }
             },
-            .quit => {},
+            .quit => return error.UserQuit,
             .help => try self.showMenu(),
         }
     }
@@ -69,28 +69,28 @@ pub const CleanInteractive = struct {
         return self.selected.items;
     }
 
-    pub fn isInteractive(self: *CleanInteractive) bool {
+    pub fn isInteractive(_: *CleanInteractive) bool {
         return true;
     }
 };
 
 test "CleanInteractive init" {
     const io = Io.Threaded.global_single_threaded.ioBasic();
-    const cleaner = CleanInteractive.init(std.testing.allocator, io);
+    const cleaner = try CleanInteractive.init(std.testing.allocator, io);
     defer cleaner.deinit();
     try std.testing.expect(cleaner.isInteractive() == true);
 }
 
 test "CleanInteractive isInteractive" {
     const io = Io.Threaded.global_single_threaded.ioBasic();
-    const cleaner = CleanInteractive.init(std.testing.allocator, io);
+    const cleaner = try CleanInteractive.init(std.testing.allocator, io);
     defer cleaner.deinit();
     try std.testing.expect(cleaner.isInteractive() == true);
 }
 
 test "CleanInteractive select action parses" {
     const io = Io.Threaded.global_single_threaded.ioBasic();
-    var cleaner = CleanInteractive.init(std.testing.allocator, io);
+    var cleaner = try CleanInteractive.init(std.testing.allocator, io);
     defer cleaner.deinit();
 
     const test_paths = [_][]const u8{ "file1.txt", "file2.zig" };

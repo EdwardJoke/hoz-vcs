@@ -61,5 +61,6 @@ test "BisectLog formatLog" {
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
     try log.formatLog(&writer.interface);
-    try std.testing.expect(true);
+    const written = writer.interface.getWritten();
+    try std.testing.expectEqualStrings("good abc123: test passed\n", written);
 }

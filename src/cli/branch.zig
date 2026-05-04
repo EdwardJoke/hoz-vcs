@@ -68,7 +68,7 @@ pub const Branch = struct {
     fn runList(self: *Branch, git_dir: Io.Dir) !void {
         var ref_store = RefStore.init(git_dir, self.allocator, self.io);
 
-        var lister = BranchLister.init(self.allocator, &ref_store, self.options);
+        var lister = BranchLister.init(self.allocator, self.io, &ref_store, self.options);
         const branches = try lister.list();
         defer self.allocator.free(branches);
 
@@ -105,7 +105,7 @@ pub const Branch = struct {
 
             var ref_store = RefStore.init(git_dir, self.allocator, self.io);
             const options = DeleteOptions{};
-            var deleter = BranchDeleter.init(self.allocator, &ref_store, options);
+            var deleter = BranchDeleter.init(self.allocator, self.io, &ref_store, options);
 
             const result = try deleter.delete(name);
             if (result.deleted) {
@@ -151,7 +151,7 @@ pub const Branch = struct {
                 var ref_store = RefStore.init(git_dir, self.allocator, self.io);
                 const options = UpstreamOptions{};
 
-                var branch_upstream = BranchUpstream.init(self.allocator, &ref_store, options);
+                var branch_upstream = BranchUpstream.init(self.allocator, self.io, &ref_store, options);
 
                 const upstream_ref = try std.fmt.allocPrint(self.allocator, "refs/remotes/{s}", .{upstream});
                 defer self.allocator.free(upstream_ref);
@@ -175,7 +175,7 @@ pub const Branch = struct {
             var ref_store = RefStore.init(git_dir, self.allocator, self.io);
             const options = UpstreamOptions{};
 
-            var branch_upstream = BranchUpstream.init(self.allocator, &ref_store, options);
+            var branch_upstream = BranchUpstream.init(self.allocator, self.io, &ref_store, options);
 
             const result = try branch_upstream.unsetUpstream(branch);
             if (result.was_updated) {

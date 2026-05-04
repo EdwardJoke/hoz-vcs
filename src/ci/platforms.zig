@@ -38,13 +38,14 @@ pub const PlatformPackages = struct {
         try self.addPlatform("windows", "x86_64", "zip");
     }
 
-    pub fn getPlatformName(self: *PlatformPackages, platform: Platform) []const u8 {
-        return std.fmt.comptimePrint("{s}-{s}", .{ platform.os, platform.arch });
+    pub fn getPlatformName(self: *PlatformPackages, platform: Platform) ![]const u8 {
+        return std.fmt.allocPrint(self.allocator, "{s}-{s}", .{ platform.os, platform.arch });
     }
 };
 
 test "PlatformPackages init" {
-    const packages = PlatformPackages.init(std.testing.allocator);
+    var packages = PlatformPackages.init(std.testing.allocator);
+    defer packages.deinit();
     try std.testing.expect(packages.platforms.items.len == 0);
 }
 

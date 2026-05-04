@@ -115,7 +115,7 @@ pub const Bisect = struct {
     fn runBisectRun(self: *Bisect, args: []const []const u8) !void {
         _ = args;
         var bisect_run = BisectRun.init(self.allocator, self.io);
-        const next = try bisect_run.getNextCommit("HEAD");
+        const next = try bisect_run.getNextCommit();
         if (next.len > 0) {
             try self.output.infoMessage("Bisecting: testing {s}", .{next});
         } else {

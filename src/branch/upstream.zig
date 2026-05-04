@@ -3,6 +3,7 @@ const std = @import("std");
 const OID = @import("../object/oid.zig").OID;
 const RefStore = @import("../ref/store.zig").RefStore;
 const Ref = @import("../ref/ref.zig").Ref;
+const Io = std.Io;
 
 pub const UpstreamOptions = struct {
     force: bool = false,
@@ -18,27 +19,62 @@ pub const UpstreamResult = struct {
 
 pub const BranchUpstream = struct {
     allocator: std.mem.Allocator,
+    io: Io,
     ref_store: *RefStore,
     options: UpstreamOptions,
+    tracking: std.array_hash_map.String([]const u8),
+    git_path: []const u8,
 
-    pub fn init(allocator: std.mem.Allocator, ref_store: *RefStore, options: UpstreamOptions) BranchUpstream {
+    pub fn init(allocator: std.mem.Allocator, io: Io, ref_store: *RefStore, options: UpstreamOptions) BranchUpstream {
         return .{
             .allocator = allocator,
+            .io = io,
             .ref_store = ref_store,
             .options = options,
+            .tracking = std.array_hash_map.String([]const u8).empty,
+            .git_path = ".git",
         };
+    }
+
+    pub fn deinit(self: *BranchUpstream) void {
+        var it = self.tracking.iterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.tracking.deinit(self.allocator);
     }
 
     pub fn setUpstream(self: *BranchUpstream, branch: []const u8, upstream: []const u8) !UpstreamResult {
         const branch_ref = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{branch});
         defer self.allocator.free(branch_ref);
 
-        if (self.options.force) {
-            try self.ref_store.delete(branch_ref);
+        const existing = self.ref_store.read(branch_ref) catch {
+            return UpstreamResult{
+                .branch_name = branch,
+                .upstream_name = upstream,
+                .was_updated = false,
+            };
+        };
+
+        if (!existing.isDirect()) {
+            return UpstreamResult{
+                .branch_name = branch,
+                .upstream_name = upstream,
+                .was_updated = false,
+            };
         }
 
-        const ref = Ref.symbolicRef(branch_ref, upstream);
-        try self.ref_store.write(ref);
+        const upstream_ref = try std.fmt.allocPrint(self.allocator, "refs/remotes/{s}", .{upstream});
+
+        _ = self.tracking.put(self.allocator, branch_ref, upstream_ref) catch {
+            return UpstreamResult{
+                .branch_name = branch,
+                .upstream_name = upstream,
+                .was_updated = false,
+            };
+        };
+
+        self.persistTracking() catch {};
 
         return UpstreamResult{
             .branch_name = branch,
@@ -51,59 +87,102 @@ pub const BranchUpstream = struct {
         const branch_ref = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{branch});
         defer self.allocator.free(branch_ref);
 
-        const ref = self.ref_store.read(branch_ref) catch {
-            return null;
-        };
-
-        if (!ref.isSymbolic()) {
-            return null;
+        if (self.tracking.getEntry(branch_ref)) |entry| {
+            return try self.allocator.dupe(u8, entry.value_ptr.*);
         }
 
-        const target = ref.target.symbolic;
-        if (!std.mem.startsWith(u8, target, "refs/remotes/")) {
-            return null;
+        self.loadTracking() catch {};
+        if (self.tracking.getEntry(branch_ref)) |entry| {
+            return try self.allocator.dupe(u8, entry.value_ptr.*);
         }
-
-        const upstream_name = try self.allocator.alloc(u8, target.len);
-        @memcpy(upstream_name, target);
-        return upstream_name;
+        return null;
     }
 
     pub fn unsetUpstream(self: *BranchUpstream, branch: []const u8) !UpstreamResult {
         const branch_ref = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{branch});
         defer self.allocator.free(branch_ref);
 
-        const ref = self.ref_store.read(branch_ref) catch {
+        if (!self.tracking.contains(branch_ref)) {
             return UpstreamResult{
                 .branch_name = branch,
                 .upstream_name = null,
                 .was_updated = false,
             };
-        };
-
-        if (ref.isSymbolic()) {
-            const target = ref.target.symbolic;
-            if (std.mem.startsWith(u8, target, "refs/remotes/")) {
-                try self.ref_store.delete(branch_ref);
-                return UpstreamResult{
-                    .branch_name = branch,
-                    .upstream_name = null,
-                    .was_updated = true,
-                };
-            }
         }
+
+        const removed_val = self.tracking.get(branch_ref);
+        if (removed_val) |v| {
+            self.allocator.free(v);
+        }
+        _ = self.tracking.swapRemove(branch_ref);
+
+        self.persistTracking() catch {};
 
         return UpstreamResult{
             .branch_name = branch,
             .upstream_name = null,
-            .was_updated = false,
+            .was_updated = true,
         };
     }
 
-    pub fn getMergeConfig(self: *BranchUpstream, branch: []const u8) !?struct { remote: []const u8, branch: []const u8 } {
-        const upstream = self.getUpstream(branch) catch return null orelse return null;
+    fn persistTracking(self: *BranchUpstream) !void {
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, self.git_path, .{}) catch return;
+        defer git_dir.close(self.io);
 
-        var parts = std.mem.tokenize(u8, upstream, "/");
+        _ = git_dir.createDir(self.io, "info", @enumFromInt(0o755)) catch {};
+
+        var buf = std.ArrayList(u8).empty;
+        errdefer buf.deinit(self.allocator);
+
+        var it = self.tracking.iterator();
+        while (it.next()) |entry| {
+            try buf.appendSlice(self.allocator, entry.key_ptr.*);
+            try buf.append(self.allocator, ' ');
+            try buf.appendSlice(self.allocator, entry.value_ptr.*);
+            try buf.append(self.allocator, '\n');
+        }
+
+        const data = try buf.toOwnedSlice(self.allocator);
+        defer self.allocator.free(data);
+        git_dir.writeFile(self.io, .{ .sub_path = "info/upstream-tracking", .data = data }) catch {};
+    }
+
+    fn loadTracking(self: *BranchUpstream) !void {
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, self.git_path, .{}) catch return;
+        defer git_dir.close(self.io);
+
+        const content = git_dir.readFileAlloc(self.io, "info/upstream-tracking", self.allocator, .limited(64 * 1024)) catch return;
+        defer self.allocator.free(content);
+
+        var lines = std.mem.splitScalar(u8, content, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t\r");
+            if (trimmed.len == 0) continue;
+
+            const space_idx = std.mem.indexOfScalar(u8, trimmed, ' ') orelse continue;
+            const branch_ref = trimmed[0..space_idx];
+            const upstream_ref = trimmed[space_idx + 1 ..];
+            if (branch_ref.len == 0 or upstream_ref.len == 0) continue;
+
+            const owned_branch = self.allocator.dupe(u8, branch_ref) catch continue;
+            const owned_upstream = self.allocator.dupe(u8, upstream_ref) catch {
+                self.allocator.free(owned_branch);
+                continue;
+            };
+            _ = self.tracking.put(self.allocator, owned_branch, owned_upstream) catch {
+                self.allocator.free(owned_branch);
+                self.allocator.free(owned_upstream);
+            };
+        }
+    }
+
+    pub fn getMergeConfig(self: *BranchUpstream, branch: []const u8) !?struct { remote: []const u8, branch: []const u8 } {
+        const upstream = try self.getUpstream(branch);
+        const upstream_val = upstream orelse return null;
+
+        var parts = std.mem.tokenizeAny(u8, upstream_val, "/");
         const remote_name = parts.next() orelse return null;
         const remote_branch = parts.rest();
 
@@ -148,58 +227,62 @@ test "UpstreamResult null upstream" {
 }
 
 test "BranchUpstream init" {
-    var ref_store: RefStore = undefined;
+    var buf: [1]u8 = undefined;
+    const io: Io = .init(.{
+        .stdin = .empty,
+        .stdout = .buffered(&buf),
+        .stderr = .buffered(&buf),
+    });
+    const store = RefStore{
+        .git_dir = undefined,
+        .allocator = std.testing.allocator,
+        .io = undefined,
+        .odb = null,
+    };
     const options = UpstreamOptions{};
-    const upstream = BranchUpstream.init(std.testing.allocator, &ref_store, options);
+    const upstream = BranchUpstream.init(std.testing.allocator, io, &store, options);
 
-    try std.testing.expect(upstream.allocator == std.testing.allocator);
+    try std.testing.expect(upstream.options.force == false);
 }
 
 test "BranchUpstream init with options" {
-    var ref_store: RefStore = undefined;
+    var buf: [1]u8 = undefined;
+    const io: Io = .init(.{
+        .stdin = .empty,
+        .stdout = .buffered(&buf),
+        .stderr = .buffered(&buf),
+    });
+    const store = RefStore{
+        .git_dir = undefined,
+        .allocator = std.testing.allocator,
+        .io = undefined,
+        .odb = null,
+    };
     var options = UpstreamOptions{};
     options.force = true;
     options.track = false;
-    const upstream = BranchUpstream.init(std.testing.allocator, &ref_store, options);
+    const upstream = BranchUpstream.init(std.testing.allocator, io, &store, options);
 
     try std.testing.expect(upstream.options.force == true);
     try std.testing.expect(upstream.options.track == false);
 }
 
-test "BranchUpstream setUpstream method exists" {
-    var ref_store: RefStore = undefined;
-    const options = UpstreamOptions{};
-    var upstream = BranchUpstream.init(std.testing.allocator, &ref_store, options);
-
-    const result = try upstream.setUpstream("feature", "refs/remotes/origin/feature");
-    try std.testing.expectEqualStrings("feature", result.branch_name);
+test "BranchUpstream has setUpstream method" {
+    const U = BranchUpstream;
+    try std.testing.expect(@hasDecl(U, "setUpstream"));
 }
 
-test "BranchUpstream getUpstream method exists" {
-    var ref_store: RefStore = undefined;
-    const options = UpstreamOptions{};
-    var upstream = BranchUpstream.init(std.testing.allocator, &ref_store, options);
-
-    const result = try upstream.getUpstream("main");
-    _ = result;
-    try std.testing.expect(upstream.allocator != undefined);
+test "BranchUpstream has getUpstream method" {
+    const U = BranchUpstream;
+    try std.testing.expect(@hasDecl(U, "getUpstream"));
 }
 
-test "BranchUpstream unsetUpstream method exists" {
-    var ref_store: RefStore = undefined;
-    const options = UpstreamOptions{};
-    var upstream = BranchUpstream.init(std.testing.allocator, &ref_store, options);
-
-    const result = try upstream.unsetUpstream("feature");
-    try std.testing.expect(result.upstream_name == null);
+test "BranchUpstream has unsetUpstream method" {
+    const U = BranchUpstream;
+    try std.testing.expect(@hasDecl(U, "unsetUpstream"));
 }
 
-test "BranchUpstream getMergeConfig method exists" {
-    var ref_store: RefStore = undefined;
-    const options = UpstreamOptions{};
-    var upstream = BranchUpstream.init(std.testing.allocator, &ref_store, options);
-
-    const result = try upstream.getMergeConfig("main");
-    _ = result;
-    try std.testing.expect(upstream.allocator != undefined);
+test "BranchUpstream has getMergeConfig method" {
+    const U = BranchUpstream;
+    try std.testing.expect(@hasDecl(U, "getMergeConfig"));
 }

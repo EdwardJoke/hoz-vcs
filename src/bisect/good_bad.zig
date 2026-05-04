@@ -30,9 +30,7 @@ pub const BisectGoodBad = struct {
         const bisect_dir = git_dir.openDir(self.io, "bisect", .{}) catch return;
         defer bisect_dir.close(self.io);
 
-        const fname = try std.fmt.allocPrint(self.allocator, "{s}", .{status});
-        defer self.allocator.free(fname);
-        try bisect_dir.writeFile(self.io, .{ .sub_path = fname, .data = ref });
+        try bisect_dir.writeFile(self.io, .{ .sub_path = status, .data = ref });
     }
 
     pub fn getStatus(self: *BisectGoodBad, status: []const u8) !?[]const u8 {
@@ -43,10 +41,7 @@ pub const BisectGoodBad = struct {
         const bisect_dir = git_dir.openDir(self.io, "bisect", .{}) catch return null;
         defer bisect_dir.close(self.io);
 
-        const fname = try std.fmt.allocPrint(self.allocator, "{s}", .{status});
-        defer self.allocator.free(fname);
-
-        const content = bisect_dir.readFileAlloc(self.io, fname, self.allocator, .limited(1024)) catch return null;
+        const content = bisect_dir.readFileAlloc(self.io, status, self.allocator, .limited(1024)) catch return null;
         return content;
     }
 };
@@ -70,8 +65,9 @@ test "BisectGoodBad markGood method exists" {
         .stderr = .buffered(&buf),
     });
     var bisect = BisectGoodBad.init(std.testing.allocator, io);
-    bisect.markGood("HEAD~1") catch {};
-    try std.testing.expect(true);
+    if (bisect.markGood("HEAD~1")) |_| {} else |err| {
+        try std.testing.expect(err == error.NotAGitRepository);
+    }
 }
 
 test "BisectGoodBad markBad method exists" {
@@ -82,6 +78,7 @@ test "BisectGoodBad markBad method exists" {
         .stderr = .buffered(&buf),
     });
     var bisect = BisectGoodBad.init(std.testing.allocator, io);
-    bisect.markBad("HEAD") catch {};
-    try std.testing.expect(true);
+    if (bisect.markBad("HEAD")) |_| {} else |err| {
+        try std.testing.expect(err == error.NotAGitRepository);
+    }
 }

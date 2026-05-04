@@ -54,7 +54,7 @@ pub const Switch = struct {
             .force = self.options.force,
         };
 
-        var switcher = BranchSwitcher.init(self.allocator, self.io, &ref_store, sw_opts);
+        var switcher = BranchSwitcher.init(self.allocator, self.io, &ref_store, sw_opts, ".git");
 
         if (self.options.create) {
             const result = try switcher.createAndSwitch(target);

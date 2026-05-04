@@ -64,6 +64,10 @@ const RevList = @import("rev_list.zig").RevList;
 const CommitTree = @import("commit_tree.zig").CommitTree;
 const UpdateIndex = @import("update_index.zig").UpdateIndex;
 const Am = @import("am.zig").Am;
+const Instaweb = @import("instaweb.zig").Instaweb;
+const QuiltImport = @import("quiltimport.zig").QuiltImport;
+const SendEmail = @import("send_email.zig").SendEmail;
+const RequestPull = @import("request_pull.zig").RequestPull;
 
 pub const CommandDispatcher = struct {
     allocator: std.mem.Allocator,
@@ -199,6 +203,14 @@ pub const CommandDispatcher = struct {
             try self.runVerifyTag(args);
         } else if (std.mem.eql(u8, cmd, "update-index") or std.mem.eql(u8, cmd, "update_index")) {
             try self.runUpdateIndex(args);
+        } else if (std.mem.eql(u8, cmd, "instaweb") or std.mem.eql(u8, cmd, "web-browse") or std.mem.eql(u8, cmd, "web_browse")) {
+            try self.runInstaweb(args);
+        } else if (std.mem.eql(u8, cmd, "quiltimport") or std.mem.eql(u8, cmd, "quilt-import") or std.mem.eql(u8, cmd, "quilt_import")) {
+            try self.runQuiltImport(args);
+        } else if (std.mem.eql(u8, cmd, "send-email") or std.mem.eql(u8, cmd, "send_email")) {
+            try self.runSendEmail(args);
+        } else if (std.mem.eql(u8, cmd, "request-pull") or std.mem.eql(u8, cmd, "request_pull")) {
+            try self.runRequestPull(args);
         } else {
             var out = Output.init(self.writer, self.style, self.allocator);
             try out.errorMessage("Unknown command: {s}", .{cmd});
@@ -824,6 +836,26 @@ pub const CommandDispatcher = struct {
         var update_index = try UpdateIndex.init(self.allocator, self.io, self.writer, self.style);
         defer update_index.deinit();
         try update_index.run(args);
+    }
+
+    fn runInstaweb(self: *CommandDispatcher, args: []const []const u8) !void {
+        var instaweb = Instaweb.init(self.allocator, self.io, self.writer, self.style);
+        try instaweb.run(args);
+    }
+
+    fn runQuiltImport(self: *CommandDispatcher, args: []const []const u8) !void {
+        var quiltimport = QuiltImport.init(self.allocator, self.io, self.writer, self.style);
+        try quiltimport.run(args);
+    }
+
+    fn runSendEmail(self: *CommandDispatcher, args: []const []const u8) !void {
+        var send_email = SendEmail.init(self.allocator, self.io, self.writer, self.style);
+        try send_email.run(args);
+    }
+
+    fn runRequestPull(self: *CommandDispatcher, args: []const []const u8) !void {
+        var request_pull = RequestPull.init(self.allocator, self.io, self.writer, self.style);
+        try request_pull.run(args);
     }
 };
 

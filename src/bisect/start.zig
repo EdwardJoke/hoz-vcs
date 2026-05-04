@@ -33,6 +33,10 @@ pub const BisectStart = struct {
         const bisect_dir = git_dir.openDir(self.io, "bisect", .{}) catch return;
         defer bisect_dir.close(self.io);
 
+        const head_original = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch "";
+        defer self.allocator.free(head_original);
+        bisect_dir.writeFile(self.io, .{ .sub_path = "head-original", .data = head_original }) catch {};
+
         try self.writeRef("bad", bad);
         for (goods) |good| {
             try self.writeRef("good", good);
@@ -67,8 +71,8 @@ pub const BisectStart = struct {
         defer self.allocator.free(bad_content);
         const bad_oid = std.mem.trim(u8, bad_content, " \t\r\n");
 
-        var visited = std.StringHashMap(void).initCapacity(std.heap.page_allocator, 4096);
-        defer visited.deinit();
+        var visited = std.StringHashMap(void).initCapacity(self.allocator, 4096);
+        defer visited.deinit(self.allocator);
 
         var current = try self.allocator.dupe(u8, bad_oid);
         defer self.allocator.free(current);
@@ -77,8 +81,11 @@ pub const BisectStart = struct {
         var depth: u32 = 0;
 
         while (depth < max_depth) : (depth += 1) {
-            if (visited.contains(current)) break;
-            try visited.put(std.heap.page_allocator, current, {});
+            if (visited.contains(current)) {
+                self.allocator.free(current);
+                break;
+            }
+            try visited.put(self.allocator, current, {});
 
             const owned = try self.allocator.dupe(u8, current);
             try revs.append(self.allocator, owned);
@@ -98,7 +105,9 @@ pub const BisectStart = struct {
     }
 
     fn getParentOids(self: *BisectStart, oid_str: []const u8) ![][]const u8 {
-        const obj_path = try std.fmt.allocPrint(self.allocator, ".git/objects/{s}/{s}", .{ oid_str[0..2], oid_str[2..] });
+        if (oid_str.len < 40) return &.{};
+
+        const obj_path = try std.fmt.allocPrint(self.allocator, ".git/objects/{s}/{s}", .{ oid_str[0..2], oid_str[2..40] });
         defer self.allocator.free(obj_path);
 
         const cwd = Io.Dir.cwd();
@@ -106,7 +115,12 @@ pub const BisectStart = struct {
         defer file.close(self.io);
 
         var reader = file.reader(self.io, &.{});
-        const data = reader.interface.allocRemaining(self.allocator, .limited(10 * 1024 * 1024)) catch return &.{};
+        const compressed = try reader.interface.allocRemaining(self.allocator, .limited(10 * 1024 * 1024));
+        defer self.allocator.free(compressed);
+
+        const compress_mod = @import("../compress/zlib.zig");
+        const data = compress_mod.Zlib.decompress(compressed, self.allocator) catch return error.ObjectNotFound;
+        defer self.allocator.free(data);
 
         var parents = std.ArrayList([]const u8).empty;
         errdefer {
@@ -118,11 +132,11 @@ pub const BisectStart = struct {
         _ = iter.next();
         while (iter.next()) |line| {
             if (!std.mem.startsWith(u8, line, "parent ")) break;
-            const parent_oid = line[7..];
-            try parents.append(self.allocator, try self.allocator.dupe(u8, parent_oid));
+            const parent_oid = line["parent ".len..];
+            if (parent_oid.len >= 40) {
+                try parents.append(self.allocator, try self.allocator.dupe(u8, parent_oid));
+            }
         }
-        self.allocator.free(data);
-
         return parents.toOwnedSlice(self.allocator);
     }
 };
@@ -146,8 +160,9 @@ test "BisectStart start method exists" {
         .stderr = .buffered(&buf),
     });
     var bisect = BisectStart.init(std.testing.allocator, io);
-    bisect.start("HEAD", &.{"HEAD~5"}) catch {};
-    try std.testing.expect(true);
+    if (bisect.start("HEAD", &.{"HEAD~5"})) |_| {} else |err| {
+        try std.testing.expect(err == error.NotAGitRepository);
+    }
 }
 
 test "BisectStart getRevList method exists" {

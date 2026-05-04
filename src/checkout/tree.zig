@@ -1,6 +1,7 @@
 //! Tree Checkout - Recursively checkout trees
 const std = @import("std");
-const OID = @Import("../object/oid.zig").OID;
+const Io = std.Io;
+const OID = @import("../object/oid.zig").OID;
 const Tree = @import("../object/tree.zig").Tree;
 const TreeEntry = @import("../object/tree.zig").TreeEntry;
 const ODB = @import("../object/odb.zig").ODB;
@@ -9,14 +10,16 @@ const FileCheckout = @import("file.zig").FileCheckout;
 
 pub const TreeCheckout = struct {
     allocator: std.mem.Allocator,
+    io: Io,
     odb: *ODB,
     file_checkout: FileCheckout,
 
-    pub fn init(allocator: std.mem.Allocator, odb: *ODB) TreeCheckout {
+    pub fn init(allocator: std.mem.Allocator, io: Io, odb: *ODB) TreeCheckout {
         return .{
             .allocator = allocator,
+            .io = io,
             .odb = odb,
-            .file_checkout = FileCheckout.init(allocator, odb),
+            .file_checkout = FileCheckout.init(allocator, io, odb),
         };
     }
 
@@ -49,7 +52,7 @@ pub const TreeCheckout = struct {
 
             switch (entry.mode) {
                 .directory => {
-                    try std.fs.cwd().makePath(full_path);
+                    Io.Dir.cwd().makePath(self.io, full_path) catch {};
                     const subtree_data = try self.odb.readObject(entry.oid);
                     defer self.allocator.free(subtree_data);
                     const subtree = try Tree.parse(subtree_data);
@@ -70,63 +73,57 @@ pub const TreeCheckout = struct {
     }
 
     fn checkoutSymlink(self: *TreeCheckout, entry: TreeEntry, path: []const u8) !void {
-        _ = self;
-        _ = entry;
-        _ = path;
+        const link_target = try self.odb.readObject(entry.oid);
+        defer self.allocator.free(link_target);
+
+        const cwd = Io.Dir.cwd();
+        cwd.symLink(self.io, link_target, path, .{}) catch |err| switch (err) {
+            error.PathAlreadyExists => {
+                cwd.deleteFile(self.io, path) catch {};
+                try cwd.symLink(self.io, link_target, path, .{});
+            },
+            else => return err,
+        };
     }
 
     fn checkoutGitlink(self: *TreeCheckout, entry: TreeEntry, path: []const u8) !void {
-        _ = self;
-        _ = entry;
-        _ = path;
+        const cwd = Io.Dir.cwd();
+        cwd.makePath(self.io, path) catch {};
+
+        const git_file = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{path});
+        defer self.allocator.free(git_file);
+
+        const gitlink_content = try std.fmt.allocPrint(
+            self.allocator,
+            "gitdir: ../.git/modules/{s}\n",
+            .{entry.oid.toHex()},
+        );
+        defer self.allocator.free(gitlink_content);
+
+        var file = cwd.createFile(self.io, git_file, .{}) catch return;
+        defer file.close(self.io);
+        var writer = file.writer(self.io, &.{});
+        try writer.interface.writeAll(gitlink_content);
     }
 };
 
 test "TreeCheckout init" {
     var odb: ODB = undefined;
-    var checkout = TreeCheckout.init(std.testing.allocator, &odb);
+    const checkout = TreeCheckout.init(std.testing.allocator, undefined, &odb);
 
     try std.testing.expect(checkout.allocator == std.testing.allocator);
 }
 
 test "TreeCheckout init with odb" {
     var odb: ODB = undefined;
-    var checkout = TreeCheckout.init(std.testing.allocator, &odb);
+    const checkout = TreeCheckout.init(std.testing.allocator, undefined, &odb);
 
     try std.testing.expect(checkout.odb == &odb);
 }
 
-test "TreeCheckout allocator access" {
+test "TreeCheckout file_checkout shares odb" {
     var odb: ODB = undefined;
-    var checkout = TreeCheckout.init(std.testing.allocator, &odb);
+    const checkout = TreeCheckout.init(std.testing.allocator, undefined, &odb);
 
-    try std.testing.expectEqual(std.testing.allocator, checkout.allocator);
-}
-
-test "TreeCheckout init sets allocator" {
-    var odb: ODB = undefined;
-    const checkout = TreeCheckout.init(std.testing.allocator, &odb);
-
-    try std.testing.expect(checkout.allocator.ptr != null);
-}
-
-test "TreeCheckout init sets odb reference" {
-    var odb: ODB = undefined;
-    const checkout = TreeCheckout.init(std.testing.allocator, &odb);
-
-    try std.testing.expect(checkout.odb != null);
-}
-
-test "TreeCheckout file_checkout access" {
-    var odb: ODB = undefined;
-    var checkout = TreeCheckout.init(std.testing.allocator, &odb);
-
-    try std.testing.expect(checkout.file_checkout.allocator == std.testing.allocator);
-}
-
-test "TreeCheckout file_checkout odb reference" {
-    var odb: ODB = undefined;
-    var checkout = TreeCheckout.init(std.testing.allocator, &odb);
-
-    try std.testing.expect(checkout.file_checkout.odb == &odb);
+    try std.testing.expect(checkout.file_checkout.odb == checkout.odb);
 }
