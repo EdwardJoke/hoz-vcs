@@ -447,7 +447,7 @@ pub const CommandDispatcher = struct {
     }
 
     fn runDiff(self: *CommandDispatcher, args: []const []const u8) !void {
-        var diff = Diff.init(self.allocator, self.writer, self.style);
+        var diff = Diff.init(self.allocator, self.io, self.writer, self.style);
         try diff.run(args);
     }
 

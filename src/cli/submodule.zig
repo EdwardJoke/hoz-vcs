@@ -61,7 +61,16 @@ pub const Submodule = struct {
     }
 
     fn listSubmodules(self: *Submodule, git_dir: *const Io.Dir) !void {
-        _ = git_dir;
+        const cwd = Io.Dir.cwd();
+        _ = git_dir.access(self.io, "HEAD", .{}) catch {
+            try self.output.errorMessage("Not a valid git repository", .{});
+            return;
+        };
+        _ = cwd.openFile(self.io, ".gitmodules", .{}) catch {
+            try self.output.infoMessage("--→ No .gitmodules file found", .{});
+            return;
+        };
+
         var modules = try self.parseGitmodules();
         defer {
             for (modules.items) |m| {
@@ -185,29 +194,40 @@ pub const Submodule = struct {
         const cwd = Io.Dir.cwd();
         cwd.createDirPath(self.io, m.path) catch {};
 
-        var clone_argv = std.ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
-        defer clone_argv.deinit(self.allocator);
-        try clone_argv.appendSlice(self.allocator, &.{ "git", "clone", "--no-checkout", m.url, m.path });
-        _ = std.process.spawn(self.io, .{ .argv = clone_argv.items }) catch {
-            try self.output.errorMessage("Failed to clone submodule '{s}' from {s}", .{ m.name, m.url });
+        const sub_git_dir = try std.fs.path.join(self.allocator, &.{ m.path, ".git" });
+        defer self.allocator.free(sub_git_dir);
+
+        const sub_cwd = cwd.openDir(self.io, m.path, .{}) catch {
+            try self.output.errorMessage("Failed to open submodule path: {s}", .{m.path});
             return;
+        };
+        defer sub_cwd.close(self.io);
+
+        _ = sub_cwd.openDir(self.io, ".git", .{}) catch {
+            sub_cwd.createDirPath(self.io, ".git") catch {};
+            sub_cwd.writeFile(self.io, .{ .sub_path = ".git/HEAD", .data = "ref: refs/heads/main\n" }) catch {};
+            sub_cwd.createDirPath(self.io, ".git/objects") catch {};
+            sub_cwd.createDirPath(self.io, ".git/refs") catch {};
+            sub_cwd.createDirPath(self.io, ".git/refs/heads") catch {};
+            sub_cwd.writeFile(self.io, .{ .sub_path = ".git/config", .data = "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n" }) catch {};
         };
 
         if (m.oid.len >= 7) {
-            var checkout_argv = std.ArrayList([]const u8){ .items = &.{}, .capacity = 0 };
-            defer checkout_argv.deinit(self.allocator);
-            try checkout_argv.appendSlice(self.allocator, &.{ "git", "-C", m.path, "checkout", m.oid[0..@min(m.oid.len, 40)] });
-            _ = std.process.spawn(self.io, .{ .argv = checkout_argv.items }) catch {
-                try self.output.infoMessage("--→ Submodule '{s}' cloned but checkout of {s} failed", .{ m.name, m.oid[0..@min(m.oid.len, 12)] });
-                return;
-            };
+            sub_cwd.writeFile(self.io, .{ .sub_path = ".git/HEAD", .data = m.oid }) catch {};
 
             sub_dir.writeFile(self.io, .{ .sub_path = "HEAD", .data = m.oid }) catch {};
-            try self.output.successMessage("--→ Submodule '{s}' checked out at {s}", .{ m.name, m.oid[0..@min(m.oid.len, 12)] });
+            try self.output.successMessage("--→ Submodule '{s}' initialized at {s}", .{ m.name, m.oid[0..@min(m.oid.len, 12)] });
+        } else {
+            try self.output.infoMessage("--→ Submodule '{s}' initialized (no OID to checkout)", .{m.name});
         }
     }
 
     fn deinitSubmodules(self: *Submodule, git_dir: *const Io.Dir) !void {
+        _ = git_dir.openDir(self.io, "modules", .{}) catch {
+            try self.output.infoMessage("--→ No modules directory found", .{});
+            return;
+        };
+
         var modules = try self.parseGitmodules();
         defer {
             for (modules.items) |m| {
@@ -234,8 +254,6 @@ pub const Submodule = struct {
 
             try self.output.successMessage("Submodule '{s}' ({s}) deinitialized", .{ m.name, m.path });
         }
-
-        _ = git_dir;
     }
 
     fn parseGitmodules(self: *Submodule) !std.ArrayList(SubmoduleEntry) {
@@ -501,20 +519,20 @@ pub const ModuleManager = struct {
 
     pub fn createModuleDir(self: *ModuleManager, git_dir: *Io.Dir, module_name: []const u8) !void {
         const modules_dir = git_dir.openDir(self.io, "modules", .{}) catch {
-            git_dir.makeDir(self.io, "modules") catch return error.FailedToCreateModulesDir;
+            git_dir.createDirPath(self.io, "modules") catch return error.FailedToCreateModulesDir;
             return git_dir.openDir(self.io, "modules", .{}) orelse return error.FailedToCreateModulesDir;
         };
         defer modules_dir.close(self.io);
 
         _ = modules_dir.openDir(self.io, module_name, .{}) catch {
-            modules_dir.makeDir(self.io, module_name) catch return error.FailedToCreateModuleDir;
+            modules_dir.createDirPath(self.io, module_name) catch return error.FailedToCreateModuleDir;
         };
 
         const sub_dir = modules_dir.openDir(self.io, module_name, .{}) orelse return;
         defer sub_dir.close(self.io);
 
         for (&[_][]const u8{ "objects", "refs/heads", "refs/tags", "info" }) |subdir| {
-            sub_dir.makeDirPath(self.io, subdir) catch {};
+            sub_dir.createDirPath(self.io, subdir) catch {};
         }
     }
 

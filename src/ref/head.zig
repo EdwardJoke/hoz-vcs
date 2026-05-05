@@ -4,7 +4,7 @@ const std = @import("std");
 const RefStore = @import("store.zig").RefStore;
 const Ref = @import("ref.zig").Ref;
 const RefError = @import("ref.zig").RefError;
-const Oid = @import("../object/oid.zig").Oid;
+const Oid = @import("../object/oid.zig").OID;
 
 /// HEAD state - either symbolic (pointing to branch) or detached (pointing to OID)
 pub const HeadState = enum {

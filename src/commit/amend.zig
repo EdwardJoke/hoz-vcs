@@ -50,6 +50,9 @@ pub const Amender = struct {
         defer {
             self.allocator.free(old_commit.parents);
             self.allocator.free(old_commit.message);
+            if (old_commit.gpg_signature) |sig| {
+                self.allocator.free(sig);
+            }
         }
 
         const new_tree = options.tree orelse old_commit.tree;
@@ -57,13 +60,18 @@ pub const Amender = struct {
         const new_committer = options.committer orelse old_commit.committer;
         const new_message = options.message orelse old_commit.message;
 
+        const gpg_sig = if (options.author != null or options.committer != null or options.message != null)
+            null
+        else
+            old_commit.gpg_signature;
+
         const new_commit = Commit{
             .tree = new_tree,
             .parents = old_commit.parents,
             .author = new_author,
             .committer = new_committer,
             .message = new_message,
-            .gpg_signature = null,
+            .gpg_signature = gpg_sig,
         };
 
         const serialized = new_commit.serialize(self.allocator) catch return AmendError.WriteError;
@@ -86,16 +94,16 @@ pub const Amender = struct {
 };
 
 test "Amender init" {
-    const odb: ODB = undefined;
-    const ref_store: RefStore = undefined;
+    var odb: ODB = std.mem.zeroes(ODB);
+    var ref_store: RefStore = std.mem.zeroes(RefStore);
     const amender = Amender.init(std.testing.allocator, &odb, &ref_store);
 
     try std.testing.expect(amender.allocator == std.testing.allocator);
 }
 
 test "Amender init with odbs and refstore" {
-    const odb: ODB = undefined;
-    const ref_store: RefStore = undefined;
+    var odb: ODB = std.mem.zeroes(ODB);
+    var ref_store: RefStore = std.mem.zeroes(RefStore);
     const amender = Amender.init(std.testing.allocator, &odb, &ref_store);
 
     try std.testing.expect(amender.odb == &odb);

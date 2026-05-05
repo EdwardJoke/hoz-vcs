@@ -91,7 +91,7 @@ pub const Blame = struct {
                 self.options.color_lines = true;
             } else if (std.mem.startsWith(u8, arg, "--abbrev=")) {
                 const val = arg["--abbrev=".len..];
-                _ = std.fmt.parseInt(u32, val, 10) catch continue;
+                self.options.abbrev_oid = std.fmt.parseInt(u32, val, 10) catch continue;
             } else if (!std.mem.startsWith(u8, arg, "-")) {
                 self.target = arg;
             }

@@ -240,9 +240,26 @@ pub const Log = struct {
         };
     }
 
-    fn formatDate(_: *Log, timestamp: i64) []const u8 {
-        _ = timestamp;
-        return "Unknown";
+    fn formatDate(self: *Log, timestamp: i64) []const u8 {
+        _ = self;
+
+        const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(timestamp) };
+        const day = epoch.getEpochDay();
+        const year_day = day.calculateYearDay();
+        const month_date = year_day.calculateMonthDay();
+
+        const months = [_][]const u8{
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        };
+
+        var buf: [32]u8 = undefined;
+        const result = std.fmt.bufPrint(buf[0..], "{s} {d}", .{
+            months[@intFromEnum(month_date.month)],
+            month_date.day_index + 1,
+        }) catch return "Unknown";
+
+        return result;
     }
 
     fn firstLine(_: *Log, msg: []const u8) []const u8 {

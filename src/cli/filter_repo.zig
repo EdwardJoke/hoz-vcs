@@ -3,24 +3,10 @@ const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 const compress_mod = @import("../compress/zlib.zig");
+const crypto_sha1 = @import("../crypto/sha1.zig");
 
-const builtin_target = @import("builtin").os.tag;
-
-const c_mkdir = if (builtin_target == .windows)
-    struct {
-        extern fn mkdir([*c]const u8) c_int;
-    }
-else
-    struct {
-        extern fn mkdir([*c]const u8, u32) c_int;
-    };
-
-fn mkdirP(path: []const u8) void {
-    if (comptime builtin_target == .windows) {
-        _ = c_mkdir.mkdir(path.ptr);
-    } else {
-        _ = c_mkdir.mkdir(path.ptr, 0o755);
-    }
+fn mkdirP(io: Io, path: []const u8) void {
+    _ = std.Io.Dir.cwd().createDirPath(io, path) catch {};
 }
 const OID = @import("../object/oid.zig").OID;
 const CommitObj = @import("../object/commit.zig").Commit;
@@ -152,9 +138,20 @@ pub const FilterRepo = struct {
                     const new_data = try std.fmt.allocPrint(self.allocator, "commit {d}\x00{s}", .{ new_message.len, new_message });
                     defer self.allocator.free(new_data);
 
+                    const digest = crypto_sha1.sha1(new_data);
+                    var new_oid_hex: [40]u8 = undefined;
+                    @memset(&new_oid_hex, 0);
+                    for (digest, 0..) |byte, i| {
+                        _ = std.fmt.bufPrint(new_oid_hex[i * 2 ..][0..2], "{x:0>2}", .{byte}) catch return error.OidHexFormatFailed;
+                    }
+
+                    if (!self.options.dry_run) {
+                        _ = try writeLooseObject(git_dir, self.io, self.allocator, new_data);
+                    }
+
                     try rewritten.append(self.allocator, .{
                         .old_oid = try self.allocator.dupe(u8, oid_hex[0..40]),
-                        .new_oid = try self.allocator.dupe(u8, oid_hex[0..40]),
+                        .new_oid = try self.allocator.dupe(u8, &new_oid_hex),
                     });
                 }
             }
@@ -170,7 +167,7 @@ pub const FilterRepo = struct {
                     if (std.mem.indexOf(u8, file_path, filter_path) != null) return true;
                 }
             }
-            return false;
+            return self.options.invert_paths;
         }
 
         if (self.options.email) |filter_email| {
@@ -193,7 +190,7 @@ pub const FilterRepo = struct {
             return false;
         }
 
-        return false;
+        return true;
     }
 
     fn applyFilters(self: *FilterRepo, message: []const u8) ![]const u8 {
@@ -289,6 +286,9 @@ pub const FilterRepo = struct {
             for (rewritten) |rc| {
                 if (std.mem.eql(u8, target, rc.old_oid)) {
                     try self.output.infoMessage("Updated ref {s}: {s} -> {s}", .{ ref_name, rc.old_oid[0..@min(rc.old_oid.len, 12)], rc.new_oid[0..@min(rc.new_oid.len, 12)] });
+                    const new_content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{rc.new_oid});
+                    defer self.allocator.free(new_content);
+                    refs_heads.writeFile(self.io, .{ .sub_path = entry.path, .data = new_content }) catch {};
                     break;
                 }
             }
@@ -573,10 +573,7 @@ pub const FilterBranch = struct {
         const sub_tree = try self.rewriteTree(git_dir, &match_entry.oid, remaining, tree_map);
 
         var new_entries = std.ArrayList(TreeEntry).empty;
-        errdefer {
-            for (new_entries.items) |*e| _ = e;
-            new_entries.deinit(self.allocator);
-        }
+        errdefer new_entries.deinit(self.allocator);
 
         for (tree.entries) |entry| {
             if (std.mem.eql(u8, entry.name, first_part)) {
@@ -676,7 +673,7 @@ pub const FilterBranch = struct {
         const refs_heads = git_dir.openDir(self.io, "refs/heads", .{}) catch {
             const abs_refs = try std.fmt.allocPrint(self.allocator, ".git/refs/heads", .{});
             defer self.allocator.free(abs_refs);
-            _ = mkdirP(abs_refs);
+            _ = mkdirP(self.io, abs_refs);
             const rh2 = git_dir.openDir(self.io, "refs/heads", .{}) catch return;
             defer rh2.close(self.io);
             _ = try rh2.writeFile(self.io, .{ .sub_path = ref_name, .data = content });
@@ -689,9 +686,8 @@ pub const FilterBranch = struct {
 };
 
 fn writeLooseObject(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocator, data: []const u8) ![20]u8 {
-    const sha1_mod = @import("../crypto/sha1.zig");
     var hash: [20]u8 = undefined;
-    sha1_mod.Sha1.hash(data, &hash, .{});
+    crypto_sha1.Sha1.hash(data, &hash, .{});
 
     const prefix = hexLower(hash[0..2]);
     const suffix = hexLower(hash[2..]);
@@ -699,7 +695,7 @@ fn writeLooseObject(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocator
     const dir_path = try std.fmt.allocPrint(allocator, ".git/objects/{s}", .{prefix});
     defer allocator.free(dir_path);
 
-    _ = mkdirP(dir_path);
+    _ = mkdirP(io, dir_path);
 
     const file_path_rel = try std.fmt.allocPrint(allocator, "objects/{s}/{s}", .{ prefix, suffix });
     defer allocator.free(file_path_rel);

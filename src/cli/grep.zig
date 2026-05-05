@@ -169,6 +169,7 @@ pub const Grep = struct {
                 else
                     arg["--context=".len..];
                 _ = std.fmt.parseInt(u32, val, 10) catch continue;
+                self.options.context_lines = std.fmt.parseInt(u32, val, 10) catch continue;
             } else if (!std.mem.startsWith(u8, arg, "-")) {
                 if (self.options.pattern == null) {
                     self.options.pattern = arg;

@@ -74,9 +74,16 @@ pub const Shortlog = struct {
         const git_dir = cwd.openDir(self.io, ".git", .{}) catch return;
         defer git_dir.close(self.io);
 
-        _ = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch return;
+        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch return;
+        defer self.allocator.free(head_content);
 
-        const log_path = try std.fmt.allocPrint(self.allocator, "logs/refs/heads/{s}", .{"master"});
+        const head_trimmed = std.mem.trim(u8, head_content, " \t\r\n");
+        const branch_name = if (std.mem.startsWith(u8, head_trimmed, "ref: refs/heads/"))
+            head_trimmed["ref: refs/heads/".len .. std.mem.indexOfScalar(u8, head_trimmed, '\n').?]
+        else
+            "master";
+
+        const log_path = try std.fmt.allocPrint(self.allocator, "logs/refs/heads/{s}", .{branch_name});
         defer self.allocator.free(log_path);
 
         const log_data = git_dir.readFileAlloc(self.io, log_path, self.allocator, .limited(1024 * 1024)) catch return;
@@ -161,7 +168,7 @@ pub const Shortlog = struct {
             } else if (std.mem.eql(u8, arg, "--no-compress")) {
                 self.options.compress = false;
             } else if (std.mem.startsWith(u8, arg, "--width=")) {
-                _ = std.fmt.parseInt(u32, arg["--width=".len..], 10) catch continue;
+                self.options.width = std.fmt.parseInt(u32, arg["--width=".len..], 10) catch continue;
             }
         }
     }

@@ -164,8 +164,8 @@ pub const PatchFormat = struct {
         const target_lines = try self.splitLines(target_content);
         defer self.allocator.free(target_lines);
 
-        var result_lines = std.ArrayList([]const u8).init(self.allocator);
-        defer result_lines.deinit();
+        var result_lines = std.ArrayList([]const u8).initCapacity(self.allocator, 0) catch return error.OutOfMemory;
+        defer result_lines.deinit(self.allocator);
 
         var hunks_applied: u32 = 0;
         var hunks_failed: u32 = 0;
@@ -175,7 +175,7 @@ pub const PatchFormat = struct {
             const match_pos = self.findHunkStart(target_lines, current_line, hunk.old_start);
             if (match_pos) |pos| {
                 while (current_line < pos) : (current_line += 1) {
-                    try result_lines.append(target_lines[current_line]);
+                    try result_lines.append(self.allocator, target_lines[current_line]);
                 }
                 const applied = try self.applyHunk(&result_lines, target_lines, &current_line, hunk);
                 if (applied) {
@@ -189,18 +189,18 @@ pub const PatchFormat = struct {
         }
 
         while (current_line < target_lines.len) : (current_line += 1) {
-            try result_lines.append(target_lines[current_line]);
+            try result_lines.append(self.allocator, target_lines[current_line]);
         }
 
-        var result_buf = std.ArrayList(u8).init(self.allocator);
+        var result_buf = std.ArrayList(u8).initCapacity(self.allocator, 0) catch return error.OutOfMemory;
         for (result_lines.items) |line| {
-            try result_buf.appendSlice(line);
-            try result_buf.append('\n');
+            try result_buf.appendSlice(self.allocator, line);
+            try result_buf.append(self.allocator, '\n');
         }
 
         return ApplyResult{
             .success = hunks_failed == 0,
-            .content = try result_buf.toOwnedSlice(),
+            .content = try result_buf.toOwnedSlice(self.allocator),
             .hunks_applied = hunks_applied,
             .hunks_failed = hunks_failed,
         };
@@ -215,57 +215,58 @@ pub const PatchFormat = struct {
     };
 
     const HunkLine = struct {
-        kind: enum { context, add, remove },
+        const Kind = enum { context, add, remove };
+        kind: Kind,
         content: []const u8,
     };
 
     fn parseHunks(self: *PatchFormat, patch: []const u8) ![]const Hunk {
-        var hunks = std.ArrayList(Hunk).init(self.allocator);
-        errdefer hunks.deinit();
+        var hunks = std.ArrayList(Hunk).initCapacity(self.allocator, 0) catch return error.OutOfMemory;
+        errdefer hunks.deinit(self.allocator);
 
         var lines = std.mem.splitScalar(u8, patch, '\n');
-        var current_lines = std.ArrayList(HunkLine).init(self.allocator);
-        defer current_lines.deinit();
+        var current_lines = std.ArrayList(HunkLine).initCapacity(self.allocator, 0) catch return error.OutOfMemory;
+        defer current_lines.deinit(self.allocator);
 
         var current_header: ?Hunk = null;
 
         while (lines.next()) |line| {
             if (std.mem.startsWith(u8, line, "@@")) {
                 if (current_header) |*hdr| {
-                    hdr.lines = try current_lines.toOwnedSlice();
-                    try hunks.append(hdr.*);
+                    hdr.lines = try current_lines.toOwnedSlice(self.allocator);
+                    try hunks.append(self.allocator, hdr.*);
                 }
                 current_header = try self.parseHunkHeader(line);
-                current_lines.clearAndFree();
+                current_lines.clearAndFree(self.allocator);
             } else if (current_header != null) {
                 if (line.len == 0) {
-                    try current_lines.append(.{ .kind = .context, .content = "" });
+                    try current_lines.append(self.allocator, .{ .kind = .context, .content = "" });
                 } else if (line[0] == ' ' or line[0] == '-' or line[0] == '+') {
-                    const kind: enum { context, add, remove } = switch (line[0]) {
+                    const kind: HunkLine.Kind = switch (line[0]) {
                         ' ' => .context,
                         '-' => .remove,
                         '+' => .add,
                         else => .context,
                     };
-                    try current_lines.append(.{
+                    try current_lines.append(self.allocator, .{
                         .kind = kind,
                         .content = if (line.len > 1) line[1..] else "",
                     });
                 } else if (std.mem.startsWith(u8, line, "\\ ") or std.mem.startsWith(u8, line, "\\")) {
-                    try current_lines.append(.{ .kind = .context, .content = line });
+                    try current_lines.append(self.allocator, .{ .kind = .context, .content = line });
                 }
             }
         }
 
         if (current_header) |*hdr| {
-            hdr.lines = try current_lines.toOwnedSlice();
-            try hunks.append(hdr.*);
+            hdr.lines = try current_lines.toOwnedSlice(self.allocator);
+            try hunks.append(self.allocator, hdr.*);
         }
 
-        return hunks.toOwnedSlice();
+        return hunks.toOwnedSlice(self.allocator);
     }
 
-    fn parseHunkHeader(self: *PatchFormat, header: []const u8) !Hunk {
+    fn parseHunkHeader(_: *PatchFormat, header: []const u8) !Hunk {
         var old_start: u32 = 0;
         var old_count: u32 = 1;
         var new_start: u32 = 0;
@@ -336,13 +337,11 @@ pub const PatchFormat = struct {
         current: *usize,
         hunk: Hunk,
     ) !bool {
-        _ = self;
-
         for (hunk.lines) |hunk_line| {
             switch (hunk_line.kind) {
                 .context => {
                     if (current.* < target.len) {
-                        try result.append(target[current.*]);
+                        try result.append(self.allocator, target[current.*]);
                         current.* += 1;
                     }
                 },
@@ -352,7 +351,7 @@ pub const PatchFormat = struct {
                     }
                 },
                 .add => {
-                    try result.append(hunk_line.content);
+                    try result.append(self.allocator, hunk_line.content);
                 },
             }
         }
@@ -361,22 +360,22 @@ pub const PatchFormat = struct {
     }
 
     fn splitLines(self: *PatchFormat, text: []const u8) ![]const []const u8 {
-        var lines = std.ArrayList([]const u8).init(self.allocator);
-        errdefer lines.deinit();
+        var lines = std.ArrayList([]const u8).initCapacity(self.allocator, 0) catch return error.OutOfMemory;
+        errdefer lines.deinit(self.allocator);
 
         var start: usize = 0;
         for (text, 0..) |byte, i| {
             if (byte == '\n') {
-                try lines.append(text[start..i]);
+                try lines.append(self.allocator, text[start..i]);
                 start = i + 1;
             }
         }
 
         if (start < text.len) {
-            try lines.append(text[start..]);
+            try lines.append(self.allocator, text[start..]);
         }
 
-        return lines.toOwnedSlice();
+        return lines.toOwnedSlice(self.allocator);
     }
 };
 

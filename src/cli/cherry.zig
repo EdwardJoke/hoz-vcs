@@ -119,32 +119,58 @@ pub const Cherry = struct {
             if (line.len >= 48) {
                 const to_oid = line[41..81];
                 if (to_oid.len == 40 and !std.mem.eql(u8, to_oid, "0000000000000000000000000000000000000000")) {
-                    _ = set.put(self.allocator, to_oid, {}) catch continue;
+                    try set.put(self.allocator, to_oid, {});
                 }
             }
         }
     }
 
     fn collectUpstreamOids(self: *Cherry, git_dir: *const Io.Dir, base_oid: []const u8, set: *std.array_hash_map.String(void)) !void {
-        _ = set.put(self.allocator, base_oid, {}) catch {};
+        try set.put(self.allocator, base_oid, {});
 
         const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ base_oid[0..2], base_oid[2..] });
         defer self.allocator.free(obj_path);
 
-        _ = git_dir.openFile(self.io, obj_path, .{}) catch return;
-        _ = self.allocator;
+        const compressed = git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024)) catch return;
+        defer self.allocator.free(compressed);
+
+        const decompressed = @import("../compress/zlib.zig").Zlib.decompress(compressed, self.allocator) catch return;
+        defer self.allocator.free(decompressed);
+
+        var lines = std.mem.tokenizeAny(u8, decompressed, "\n");
+        while (lines.next()) |line| {
+            if (!std.mem.startsWith(u8, line, "parent ")) continue;
+            const parent_oid = line["parent ".len..][0..40];
+            if (parent_oid.len == 40) {
+                _ = set.put(self.allocator, parent_oid, {}) catch {};
+                self.collectUpstreamOids(git_dir, parent_oid, set) catch |err| {
+                    self.output.warningMessage("Failed to collect upstream OIDs from {s}: {}", .{ parent_oid, err }) catch {};
+                    return;
+                };
+            }
+        }
     }
 
     fn compareCommits(self: *Cherry, git_dir: *const Io.Dir, head_oid: []const u8, upstream_set: *std.array_hash_map.String(void), entries: *std.ArrayList(CherryEntry)) !void {
-        _ = head_oid;
-        const log_path = "logs/refs/heads/master";
+        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch return;
+        defer self.allocator.free(head_content);
+
+        const head_trimmed = std.mem.trim(u8, head_content, " \t\r\n");
+        const branch_name = if (std.mem.startsWith(u8, head_trimmed, "ref: refs/heads/"))
+            head_trimmed["ref: refs/heads/".len..std.mem.indexOfScalar(u8, head_trimmed, '\n').?]
+        else
+            "master";
+
+        const log_path = try std.fmt.allocPrint(self.allocator, "logs/refs/heads/{s}", .{branch_name});
         const log_data = git_dir.readFileAlloc(self.io, log_path, self.allocator, .limited(4 * 1024 * 1024)) catch return;
         defer self.allocator.free(log_data);
 
+        var found_head = false;
         var lines = std.mem.tokenizeAny(u8, log_data, "\n\r");
         while (lines.next()) |line| {
             if (line.len < 48 or line[0] != ' ') continue;
             const oid = line[1..41];
+            if (std.mem.eql(u8, oid, head_oid)) found_head = true;
             if (upstream_set.contains(oid)) {
                 const subject = extractSubject(line[42..]);
                 const owned_oid = try self.allocator.dupe(u8, oid);
@@ -171,7 +197,7 @@ pub const Cherry = struct {
             if (std.mem.eql(u8, arg, "-v") or std.mem.eql(u8, arg, "--verbose")) {
                 self.options.verbose = true;
             } else if (std.mem.startsWith(u8, arg, "--abbrev=")) {
-                _ = std.fmt.parseInt(u32, arg["--abbrev=".len..], 10) catch continue;
+                self.options.abbrev = std.fmt.parseInt(u32, arg["--abbrev=".len..], 10) catch continue;
             } else if (!std.mem.startsWith(u8, arg, "-")) {
                 if (self.options.upstream == null) {
                     self.options.upstream = arg;

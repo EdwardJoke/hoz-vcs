@@ -124,20 +124,20 @@ pub const CommitGraph = struct {
     pub fn isReachable(self: *CommitGraph, from: oid_mod.OID, to: oid_mod.OID) bool {
         var visited = std.array_hash_map.Auto(oid_mod.OID, void).empty;
         defer visited.deinit(self.allocator);
-        try visited.put(self.allocator, from, {});
+        visited.put(self.allocator, from, {}) catch return false;
 
-        var queue = std.ArrayListUnmanaged(oid_mod.OID).empty;
-        defer queue.deinit(self.allocator);
-        try queue.append(self.allocator, from);
+        var stack = std.ArrayListUnmanaged(oid_mod.OID).empty;
+        defer stack.deinit(self.allocator);
+        stack.append(self.allocator, from) catch return false;
 
-        while (queue.popOrNull()) |current| {
+        while (stack.popOrNull()) |current| {
             if (std.mem.eql(u8, &current.bytes, &to.bytes)) {
                 return true;
             }
-            for (self.getChildren(current)) |child| {
-                if (!visited.contains(child)) {
-                    try visited.put(self.allocator, child, {});
-                    try queue.append(self.allocator, child);
+            for (self.getParents(current)) |parent| {
+                if (!visited.contains(parent)) {
+                    visited.put(self.allocator, parent, {}) catch return false;
+                    stack.append(self.allocator, parent) catch return false;
                 }
             }
         }
@@ -152,11 +152,11 @@ pub const CommitGraph = struct {
         var parent_map = std.array_hash_map.Auto(oid_mod.OID, oid_mod.OID).empty;
         defer parent_map.deinit(self.allocator);
 
-        var queue = std.ArrayListUnmanaged(oid_mod.OID).empty;
-        defer queue.deinit(self.allocator);
-        try queue.append(self.allocator, from);
+        var stack = std.ArrayListUnmanaged(oid_mod.OID).empty;
+        defer stack.deinit(self.allocator);
+        try stack.append(self.allocator, from);
 
-        while (queue.popOrNull()) |current| {
+        while (stack.popOrNull()) |current| {
             if (std.mem.eql(u8, &current.bytes, &to.bytes)) {
                 var path = std.ArrayListUnmanaged(oid_mod.OID).empty;
                 errdefer path.deinit(self.allocator);
@@ -170,11 +170,11 @@ pub const CommitGraph = struct {
                 std.mem.reverse(oid_mod.OID, path.items);
                 return path.toOwnedSlice(self.allocator);
             }
-            for (self.getChildren(current)) |child| {
-                if (!visited.contains(child)) {
-                    try visited.put(self.allocator, child, {});
-                    try parent_map.put(self.allocator, child, current);
-                    try queue.append(self.allocator, child);
+            for (self.getParents(current)) |parent| {
+                if (!visited.contains(parent)) {
+                    try visited.put(self.allocator, parent, {});
+                    try parent_map.put(self.allocator, parent, current);
+                    try stack.append(self.allocator, parent);
                 }
             }
         }

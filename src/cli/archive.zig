@@ -1,6 +1,9 @@
 //! Git Archive - Create archive from tree object
 const std = @import("std");
 const Io = std.Io;
+extern fn time([*c]c_long) c_long;
+extern fn getuid() c_uint;
+extern fn getgid() c_uint;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 const oid_mod = @import("../object/oid.zig");
@@ -126,7 +129,7 @@ pub const Archive = struct {
         }
 
         if (std.mem.startsWith(u8, spec, "refs/") or std.mem.startsWith(u8, spec, "heads/") or std.mem.startsWith(u8, spec, "tags/")) {
-            var ref_path: []u8 = undefined;
+            var ref_path: []u8 = "";
             if (!std.mem.startsWith(u8, spec, "refs/")) {
                 ref_path = std.fmt.bufPrint(&buf, "refs/{s}", .{spec}) catch return error.InvalidSpec;
             } else {
@@ -137,13 +140,12 @@ pub const Archive = struct {
         }
 
         if (spec.len >= 7 and spec.len <= 40) {
-            _ = oid_mod.OID.fromHex(spec) catch return error.InvalidSpec;
             var hex_buf: [40]u8 = undefined;
             @memset(hex_buf[0..(40 - spec.len)], '0');
             for (spec, 0..) |c, j| {
                 hex_buf[(40 - spec.len) + j] = c;
             }
-            const oid = oid_mod.OID.fromHex(&hex_buf) catch unreachable;
+            const oid = oid_mod.OID.fromHex(&hex_buf) catch return error.InvalidSpec;
             const obj_data = self.readObject(git_dir, &hex_buf) catch return error.ObjectNotFound;
 
             if (obj_data.len > 5 and std.mem.eql(u8, obj_data[0..5], "tree ")) {
@@ -225,7 +227,16 @@ pub const Archive = struct {
         }
 
         for (entries.items) |entry| {
-            if (entry.mode == 0o755) continue;
+            if (entry.mode == 0o755) {
+                const full_name = if (prefix.len > 0)
+                    try std.fmt.allocPrint(self.allocator, "{s}{s}/", .{ prefix, entry.name })
+                else
+                    try std.fmt.allocPrint(self.allocator, "{s}/", .{entry.name});
+                defer self.allocator.free(full_name);
+
+                try self.writeTarHeader(out, full_name, 0, entry.mode);
+                continue;
+            }
 
             const full_name = if (prefix.len > 0)
                 try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ prefix, entry.name })
@@ -259,17 +270,16 @@ pub const Archive = struct {
         const name_len = @min(name.len, 100);
         @memcpy(header[0..name_len], name[0..name_len]);
 
-        const mode_str = try std.fmt.bufPrint(header[100..108], "{o:0>7}", .{@as(u32, mode)});
-        _ = mode_str;
+        _ = try std.fmt.bufPrint(header[100..108], "{o:0>7}", .{@as(u32, mode)});
 
-        _ = try std.fmt.bufPrint(header[108..116], "{o:0>7}", .{@as(u32, 0)});
-        _ = try std.fmt.bufPrint(header[116..124], "{o:0>7}", .{@as(u32, 0)});
+        _ = try std.fmt.bufPrint(header[108..116], "{o:0>7}", .{@as(u32, getuid())});
+        _ = try std.fmt.bufPrint(header[116..124], "{o:0>7}", .{@as(u32, getgid())});
         _ = try std.fmt.bufPrint(header[124..136], "{d:0>11}", .{@as(u64, size)});
 
-        _ = try std.fmt.bufPrint(header[136..148], "{d:0>11}", .{@as(u64, 0)});
-        header[148] = '0';
-        header[149] = 0;
-
+        var now: c_long = 0;
+        _ = time(&now);
+        const mtime: u64 = @intCast(@max(0, now));
+        _ = try std.fmt.bufPrint(header[136..148], "{d:0>11}", .{mtime});
         header[156] = '0';
         header[157] = 0;
 
@@ -279,6 +289,7 @@ pub const Archive = struct {
             "";
         @memcpy(header[345 .. 345 + prefix_part.len], prefix_part);
 
+        @memset(header[148..156], ' ');
         var checksum: u32 = 0;
         for (header[0..512]) |b| checksum +%= b;
         _ = try std.fmt.bufPrint(header[148..156], "{o:0>7}\x00", .{@as(u32, checksum)});
@@ -394,9 +405,9 @@ pub const Archive = struct {
             const content_start = std.mem.indexOfScalar(u8, blob_data, 0x00) orelse 0;
             const content = if (content_start < blob_data.len) blob_data[content_start + 1 ..] else "";
 
-            const entry_offset: u32 = @intCast(out.items.len);
+            const entry_offset: u32 = std.math.cast(u32, out.items.len) orelse return error.ArchiveTooLarge;
             const entry_crc = crc32(content);
-            const entry_size: u32 = @intCast(content.len);
+            const entry_size: u32 = std.math.cast(u32, content.len) orelse return error.EntryTooLarge;
 
             try writeZipLocalFileHeader(out, self.allocator, full_name, entry_crc, entry_size);
             try out.appendSlice(self.allocator, content);
@@ -410,9 +421,9 @@ pub const Archive = struct {
             });
         }
 
-        const central_dir_offset: u32 = @intCast(out.items.len);
+        const central_dir_offset: u32 = std.math.cast(u32, out.items.len) orelse return error.ArchiveTooLarge;
         for (entries.items) |e| {
-            const name_len: u16 = @intCast(e.name.len);
+            const name_len: u16 = std.math.cast(u16, e.name.len) orelse return error.NameTooLong;
             const w = struct {
                 fn le16(v: u16) [2]u8 {
                     return .{ @intCast(v & 0xFF), @intCast((v >> 8) & 0xFF) };
@@ -448,7 +459,7 @@ pub const Archive = struct {
                 return .{ @intCast(v & 0xFF), @intCast((v >> 8) & 0xFF), @intCast((v >> 16) & 0xFF), @intCast((v >> 24) & 0xFF) };
             }
         };
-        const entry_count: u16 = @intCast(entries.items.len);
+        const entry_count: u16 = std.math.cast(u16, entries.items.len) orelse return error.TooManyEntries;
         try out.appendSlice(self.allocator, &eocd.le32(0x06054b50));
         try out.appendSlice(self.allocator, &eocd.le16(0));
         try out.appendSlice(self.allocator, &eocd.le16(0));

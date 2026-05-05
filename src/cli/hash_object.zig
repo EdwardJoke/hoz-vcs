@@ -47,7 +47,7 @@ pub const HashObject = struct {
         }
 
         if (self.options.stdin) {
-            try self.output.errorMessage("Stdin not supported in this version", .{});
+            try self.hashStdin(git_dir);
             return;
         }
 
@@ -87,6 +87,20 @@ pub const HashObject = struct {
                 self.options.type_name = arg[2..];
             }
         }
+    }
+
+    fn hashStdin(self: *HashObject, git_dir: ?Io.Dir) !void {
+        var stdin_file = std.Io.File.stdin();
+        var reader = stdin_file.reader(self.io, &.{});
+        const content = try reader.interface.allocRemaining(self.allocator, .limited(16 * 1024 * 1024));
+        defer self.allocator.free(content);
+
+        const oid = self.hashObject(content, git_dir) catch {
+            try self.output.errorMessage("Failed to hash object from stdin", .{});
+            return;
+        };
+
+        try self.output.writer.print("{s}\n", .{oid.toHex()});
     }
 
     fn readFile(self: *HashObject, cwd: Io.Dir, path: []const u8) ![]u8 {

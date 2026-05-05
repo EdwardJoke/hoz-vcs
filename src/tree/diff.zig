@@ -45,7 +45,7 @@ pub const TreeDiff = struct {
     pub fn init(allocator: std.mem.Allocator) TreeDiff {
         return .{
             .allocator = allocator,
-            .changes = std.ArrayList(TreeChange).init(allocator),
+            .changes = std.ArrayList(TreeChange).empty,
         };
     }
 
@@ -54,7 +54,7 @@ pub const TreeDiff = struct {
             if (change.old_path) |path| self.allocator.free(path);
             if (change.new_path) |path| self.allocator.free(path);
         }
-        self.changes.deinit();
+        self.changes.deinit(self.allocator);
     }
 
     pub fn compute(self: *TreeDiff, old_tree: ?tree_mod.Tree, new_tree: ?tree_mod.Tree) !void {
@@ -99,7 +99,7 @@ pub const TreeDiff = struct {
     }
 
     fn addChange(self: *TreeDiff, change_type: ChangeType, path: []const u8, old_entry: ?tree_mod.TreeEntry, new_entry: ?tree_mod.TreeEntry) !void {
-        try self.changes.append(.{
+        try self.changes.append(self.allocator, .{
             .change_type = change_type,
             .old_path = if (old_entry != null) try self.allocator.dupe(u8, path) else null,
             .new_path = if (new_entry != null) try self.allocator.dupe(u8, path) else null,
@@ -132,7 +132,7 @@ pub fn diffTrees(
     try differ.compute(old_tree, new_tree);
 
     return .{
-        .changes = try differ.changes.toOwnedSlice(),
+        .changes = try differ.changes.toOwnedSlice(allocator),
         .has_changes = differ.hasChanges(),
     };
 }

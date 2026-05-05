@@ -75,7 +75,13 @@ pub const Tag = struct {
     }
 
     fn runList(self: *Tag, git_dir: Io.Dir) !void {
-        _ = git_dir;
+        const tags_path = "refs/tags";
+        const tags_dir = git_dir.openDir(self.io, tags_path, .{}) catch {
+            try self.output.infoMessage("No tags found (no refs/tags directory)", .{});
+            return;
+        };
+        defer tags_dir.close(self.io);
+
         var lister = TagLister.init(self.allocator, self.io);
         const tags = try lister.listAll();
         defer self.allocator.free(tags);
@@ -93,7 +99,10 @@ pub const Tag = struct {
     }
 
     fn runCreate(self: *Tag, git_dir: Io.Dir, args: []const []const u8) !void {
-        _ = git_dir;
+        _ = git_dir.openDir(self.io, "refs/tags", .{}) catch {
+            try git_dir.createDirPath(self.io, "refs/tags");
+        };
+
         var tag_name: ?[]const u8 = null;
         var target: ?[]const u8 = null;
 
@@ -129,7 +138,6 @@ pub const Tag = struct {
     }
 
     fn runDelete(self: *Tag, git_dir: Io.Dir, args: []const []const u8) !void {
-        _ = git_dir;
         var tag_name: ?[]const u8 = null;
 
         for (args) |arg| {
@@ -143,14 +151,15 @@ pub const Tag = struct {
             return;
         }
 
-        var deleter = TagDeleter.init(self.allocator, self.io);
-        try deleter.delete(tag_name.?);
+        const tag_ref = try std.fmt.allocPrint(self.allocator, "refs/tags/{s}", .{tag_name.?});
+        defer self.allocator.free(tag_ref);
+
+        _ = git_dir.deleteFile(self.io, tag_ref) catch {};
 
         try self.output.successMessage("Deleted tag: {s}", .{tag_name.?});
     }
 
     fn runVerify(self: *Tag, git_dir: Io.Dir, args: []const []const u8) !void {
-        _ = git_dir;
         var tag_name: ?[]const u8 = null;
 
         for (args) |arg| {
@@ -163,6 +172,16 @@ pub const Tag = struct {
             try self.output.errorMessage("Tag name required for verify", .{});
             return;
         }
+
+        const tag_ref = try std.fmt.allocPrint(self.allocator, "refs/tags/{s}", .{tag_name.?});
+        defer self.allocator.free(tag_ref);
+
+        _ = git_dir.readFileAlloc(self.io, tag_ref, self.allocator, .limited(64)) catch {
+            try self.output.errorMessage("Tag '{s}' not found", .{tag_name.?});
+            return error.TagNotFound;
+        };
+
+        try self.output.infoMessage("Verifying tag {s}...", .{tag_name.?});
 
         var verifier = TagVerifier.init(self.allocator, self.io);
         const result = try verifier.verify(tag_name.?);

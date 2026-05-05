@@ -134,7 +134,7 @@ pub const Notes = struct {
             return;
         };
 
-        var all_notes: []NoteEntry = undefined;
+        var all_notes: []NoteEntry = &.{};
         var notes_owned = false;
         all_notes = self.listAllNotes(git_dir, notes_tree_oid) catch |err| {
             try self.output.errorMessage("Failed to list notes: {}", .{err});
@@ -352,7 +352,7 @@ pub const Notes = struct {
         const obj_file = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ hex[0..2], hex[2..] });
         defer self.allocator.free(obj_file);
 
-        git_dir.createDirPath(self.io, obj_dir) catch {};
+        git_dir.createDirPath(self.io, obj_dir) catch return oid;
 
         const compressed = compress_mod.Zlib.compress(combined, self.allocator) catch return oid;
         defer self.allocator.free(compressed);
@@ -360,7 +360,10 @@ pub const Notes = struct {
         var file = git_dir.createFile(self.io, obj_file, .{}) catch return oid;
         defer file.close(self.io);
         var writer = file.writer(self.io, &.{});
-        writer.interface.writeAll(compressed) catch {};
+        writer.interface.writeAll(compressed) catch {
+            file.close(self.io);
+            return oid;
+        };
 
         return oid;
     }
@@ -433,7 +436,7 @@ pub const Notes = struct {
         const obj_file = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ hex[0..2], hex[2..] });
         defer self.allocator.free(obj_file);
 
-        git_dir.createDirPath(self.io, obj_dir) catch {};
+        git_dir.createDirPath(self.io, obj_dir) catch return tree_oid;
 
         const compressed = compress_mod.Zlib.compress(combined, self.allocator) catch return tree_oid;
         defer self.allocator.free(compressed);
@@ -441,7 +444,10 @@ pub const Notes = struct {
         var file = git_dir.createFile(self.io, obj_file, .{}) catch return tree_oid;
         defer file.close(self.io);
         var w = file.writer(self.io, &.{});
-        w.interface.writeAll(compressed) catch {};
+        w.interface.writeAll(compressed) catch {
+            file.close(self.io);
+            return tree_oid;
+        };
 
         return tree_oid;
     }

@@ -120,7 +120,9 @@ pub const Output = struct {
                     value_text,
                 });
             },
-            .json => {},
+            .json => {
+                try self.writer.print("  \"{s}\": \"{s}\",\n", .{ label_text, value_text });
+            },
             .porcelain => {
                 try self.writer.print("{s}\t{s}\n", .{ label_text, value_text });
             },

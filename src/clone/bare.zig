@@ -44,10 +44,7 @@ pub const BareCloner = struct {
     pub fn createBareRepository(self: *BareCloner, path: []const u8, depth: u32) !void {
         const cwd = std.Io.Dir.cwd();
         try cwd.createDirPath(self.io, path);
-        const git_dir_path = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{path});
-        defer self.allocator.free(git_dir_path);
-        try cwd.createDirPath(self.io, git_dir_path);
-        try self.createGitDirContents(git_dir_path, depth);
+        try self.createGitDirContents(path, depth);
     }
 
     fn createGitDirContents(self: *BareCloner, git_dir_path: []const u8, depth: u32) !void {
@@ -123,8 +120,17 @@ pub const BareCloner = struct {
         defer self.allocator.free(pack_data);
 
         var receiver = pack_recv.PackReceiver.init(self.allocator, .{});
-        _ = try receiver.receiveAndStore(self.io, self.allocator, git_dir, pack_data);
+        const received_count = try receiver.receiveAndStore(self.io, self.allocator, git_dir, pack_data);
         receiver.deinit();
+
+        if (received_count == 0) {
+            const empty_pack_path = try std.fmt.allocPrint(self.allocator, "{s}/info/empty-pack", .{git_dir});
+            defer self.allocator.free(empty_pack_path);
+            // Empty-pack sentinel: marks that a fetch was performed but resulted in no objects.
+            // This distinguishes "fetch returned nothing" from "no fetch attempted yet",
+            // preventing redundant refetches in subsequent operations.
+            _ = std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = empty_pack_path, .data = "" }) catch {};
+        }
 
         for (remote_refs) |ref| {
             try self.createLocalRef(git_dir, ref.name, ref.oid);
@@ -145,7 +151,7 @@ pub const BareCloner = struct {
         }
 
         const cwd = std.Io.Dir.cwd();
-        const shallow_path = try std.mem.concat(self.allocator, u8, &.{ git_dir, "/shallow" });
+        const shallow_path = try std.mem.concat(self.allocator, u8, &.{ git_dir, "/objects/info/shallow" });
         defer self.allocator.free(shallow_path);
 
         try cwd.writeFile(self.io, .{ .sub_path = shallow_path, .data = content.items });

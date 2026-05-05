@@ -3,6 +3,10 @@ const std = @import("std");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
+const OID = @import("../object/oid.zig").OID;
+const compress_mod = @import("../compress/zlib.zig");
+const object_mod = @import("../object/object.zig");
+const patch_mod = @import("../diff/patch.zig");
 
 pub const AmOptions = struct {
     signoff: bool = false,
@@ -138,8 +142,7 @@ pub const Am = struct {
         }
     }
 
-    fn findMboxPath(self: *Am, args: []const []const u8) ?[]const u8 {
-        _ = self;
+    fn findMboxPath(_: *Am, args: []const []const u8) ?[]const u8 {
         for (args) |arg| {
             if (!std.mem.startsWith(u8, arg, "-") and !std.mem.endsWith(u8, arg, ".mbox") and
                 !std.mem.eql(u8, arg, "-") and arg.len > 0)
@@ -248,39 +251,127 @@ pub const Am = struct {
     }
 
     fn applyPatch(self: *Am, patch: *const MboxPatch, index: usize) !void {
-        _ = index;
-        _ = self;
-
         const body = patch.body orelse return error.EmptyPatchBody;
-
-        const has_diff = patch.diff_start != null or
-            std.mem.indexOf(u8, body, "diff --git") != null or
-            std.mem.indexOf(u8, body, "--- ") != null;
-
-        if (!has_diff) {
-            return error.PatchContainsNoDiff;
-        }
 
         const diff_start = std.mem.indexOf(u8, body, "diff --git") orelse
             std.mem.indexOf(u8, body, "--- a/") orelse
             std.mem.indexOf(u8, body, "--- /dev/null");
 
-        if (diff_start == null) {
-            return error.CannotFindDiffHeader;
+        if (diff_start == null) return error.CannotFindDiffHeader;
+
+        const diff_content = body[diff_start.?..];
+
+        var pf = patch_mod.PatchFormat.init(self.allocator);
+        defer pf.deinit();
+
+        var file_patches = try self.splitFileDiffs(diff_content);
+        defer {
+            for (file_patches.items) |fp| {
+                self.allocator.free(fp.old_path);
+                if (fp.new_path) |np| self.allocator.free(np);
+                self.allocator.free(fp.hunk_data);
+            }
+            file_patches.deinit(self.allocator);
         }
 
-        _ = body[diff_start.?..];
-        return {};
+        for (file_patches.items) |fp| {
+            const target_path = if (fp.new_path) |np| np else fp.old_path;
+            const cwd = Io.Dir.cwd();
+
+            var target_data: []const u8 = "";
+            var target_owned = false;
+            {
+                const maybe_content = cwd.readFileAlloc(self.io, target_path, self.allocator, .limited(16 * 1024 * 1024)) catch null;
+                if (maybe_content) |content| {
+                    target_data = content;
+                    target_owned = true;
+                }
+            }
+            defer if (target_owned) self.allocator.free(target_data);
+
+            const result = pf.apply(fp.hunk_data, target_data) catch return error.ApplyFailed;
+            defer self.allocator.free(result.content);
+
+            if (!result.success) return error.ApplyFailed;
+
+            cwd.writeFile(self.io, .{ .sub_path = target_path, .data = result.content }) catch return error.WriteFailed;
+        }
+
+        try self.output.infoMessage("Applied patch {d}", .{index + 1});
+    }
+
+    const FilePatch = struct { old_path: []const u8, new_path: ?[]const u8, hunk_data: []const u8 };
+
+    fn splitFileDiffs(self: *Am, diff: []const u8) !std.ArrayList(FilePatch) {
+        var result = try std.ArrayList(FilePatch).initCapacity(self.allocator, 4);
+        errdefer {
+            for (result.items) |fp| {
+                self.allocator.free(fp.old_path);
+                if (fp.new_path) |np| self.allocator.free(np);
+                self.allocator.free(fp.hunk_data);
+            }
+            result.deinit(self.allocator);
+        }
+
+        var lines = std.mem.splitScalar(u8, diff, '\n');
+        var current_old: ?[]const u8 = null;
+        var current_new: ?[]const u8 = null;
+        var hunk_buf = try std.ArrayList(u8).initCapacity(self.allocator, 4096);
+
+        while (lines.next()) |line| {
+            if (std.mem.startsWith(u8, line, "diff --git")) {
+                if (current_old) |old| {
+                    try result.append(self.allocator, .{
+                        .old_path = old,
+                        .new_path = current_new,
+                        .hunk_data = try hunk_buf.toOwnedSlice(self.allocator),
+                    });
+                    hunk_buf = try std.ArrayList(u8).initCapacity(self.allocator, 4096);
+                    current_old = null;
+                    current_new = null;
+                }
+                const rest = line["diff --git ".len..];
+                const space_idx = std.mem.lastIndexOfScalar(u8, rest, ' ') orelse continue;
+                const a_part = rest[0..space_idx];
+                const b_part = rest[space_idx + 1 ..];
+                current_old = try self.allocator.dupe(u8, a_part);
+                if (!std.mem.eql(u8, a_part, b_part)) {
+                    current_new = try self.allocator.dupe(u8, b_part);
+                } else {
+                    current_new = null;
+                }
+            } else if (current_old != null) {
+                try hunk_buf.appendSlice(self.allocator, line);
+                try hunk_buf.appendSlice(self.allocator, "\n");
+            }
+        }
+
+        if (current_old) |old| {
+            try result.append(self.allocator, .{
+                .old_path = old,
+                .new_path = current_new,
+                .hunk_data = try hunk_buf.toOwnedSlice(self.allocator),
+            });
+        } else {
+            hunk_buf.deinit(self.allocator);
+        }
+
+        return result;
     }
 
     fn amAbort(self: *Am, git_dir: *const Io.Dir) void {
-        _ = self;
-        _ = git_dir;
+        const state_dir = git_dir.openDir(self.io, "rebase-apply", .{}) catch return;
+        defer state_dir.close(self.io);
+
+        state_dir.deleteTree(self.io, ".") catch {};
     }
 
     fn cleanupState(self: *Am, git_dir: *const Io.Dir) void {
-        _ = self;
-        _ = git_dir;
+        const state_dir = git_dir.openDir(self.io, "rebase-apply", .{}) catch return;
+        defer state_dir.close(self.io);
+
+        _ = state_dir.deleteFile(self.io, "next") catch {};
+        _ = state_dir.deleteFile(self.io, "last") catch {};
     }
 };
 

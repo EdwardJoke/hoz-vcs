@@ -66,8 +66,8 @@ pub const Revert = struct {
 
                 const parent_obj = object_mod.parse(parent_data) catch continue;
 
-                const parent_tree_hex = self.extractTreeHex(parent_obj.data) catch "";
-                defer if (parent_tree_hex.len > 0) self.allocator.free(parent_tree_hex);
+                const parent_tree_hex = try self.extractTreeHex(parent_obj.data);
+                defer self.allocator.free(parent_tree_hex);
 
                 if (parent_tree_hex.len > 0) {
                     try self.applyParentTreeToWorkdir(parent_tree_hex);
@@ -169,7 +169,7 @@ pub const Revert = struct {
             }
             if (line.len == 0) break;
         }
-        return "";
+        return error.TreeNotFound;
     }
 
     fn applyParentTreeToWorkdir(self: *Revert, tree_hex: []const u8) !void {

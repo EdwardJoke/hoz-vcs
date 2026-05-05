@@ -150,6 +150,15 @@ pub const Worktree = struct {
             return;
         }
 
+        const wt_dir_path = try std.fmt.allocPrint(self.allocator, ".git/worktrees/{s}", .{path.?});
+        defer self.allocator.free(wt_dir_path);
+
+        const cwd = Io.Dir.cwd();
+        _ = cwd.deleteTree(self.io, wt_dir_path) catch {
+            try self.output.errorMessage("Failed to remove worktree at {s}", .{path.?});
+            return;
+        };
+
         try self.output.successMessage("Removed worktree at {s}", .{path.?});
     }
 
@@ -211,6 +220,16 @@ pub const Worktree = struct {
         }
 
         if (path) |p| {
+            const lock_path = try std.fmt.allocPrint(self.allocator, ".git/worktrees/{s}/locked", .{p});
+            defer self.allocator.free(lock_path);
+
+            const reason = if (self.force) "force" else "manual";
+            const cwd = Io.Dir.cwd();
+            cwd.writeFile(self.io, .{ .sub_path = lock_path, .data = reason }) catch {
+                try self.output.errorMessage("Failed to lock worktree at {s}", .{p});
+                return;
+            };
+
             try self.output.successMessage("Locked worktree at {s}", .{p});
         } else {
             try self.output.errorMessage("fatal: 'lock' requires a worktree path", .{});
@@ -229,6 +248,15 @@ pub const Worktree = struct {
         }
 
         if (path) |p| {
+            const lock_path = try std.fmt.allocPrint(self.allocator, ".git/worktrees/{s}/locked", .{p});
+            defer self.allocator.free(lock_path);
+
+            const cwd = Io.Dir.cwd();
+            cwd.deleteFile(self.io, lock_path) catch {
+                try self.output.errorMessage("Failed to unlock worktree at {s} (not locked?)", .{p});
+                return;
+            };
+
             try self.output.successMessage("Unlocked worktree at {s}", .{p});
         } else {
             try self.output.errorMessage("fatal: 'unlock' requires a worktree path", .{});
@@ -240,7 +268,7 @@ pub const Worktree = struct {
         var dst: ?[]const u8 = null;
 
         for (args) |arg| {
-            if (std.mem.eql(u8, arg, "move")) continue;
+            if (std.mem.eql(u8, arg, "move") or std.mem.eql(u8, arg, "mv")) continue;
             if (std.mem.startsWith(u8, arg, "-")) continue;
             if (src == null) {
                 src = arg;
@@ -254,6 +282,18 @@ pub const Worktree = struct {
             return;
         }
 
+        const wt_src = try std.fmt.allocPrint(self.allocator, ".git/worktrees/{s}", .{src.?});
+        defer self.allocator.free(wt_src);
+
+        const wt_dst = try std.fmt.allocPrint(self.allocator, ".git/worktrees/{s}", .{dst.?});
+        defer self.allocator.free(wt_dst);
+
+        const cwd = Io.Dir.cwd();
+        Io.Dir.rename(cwd, wt_src, cwd, wt_dst, self.io) catch {
+            try self.output.errorMessage("Failed to move worktree from {s} to {s}", .{ src.?, dst.? });
+            return;
+        };
+
         try self.output.successMessage("Moved worktree from {s} to {s}", .{ src.?, dst.? });
     }
 
@@ -263,16 +303,32 @@ pub const Worktree = struct {
         for (args) |arg| {
             if (std.mem.eql(u8, arg, "repair")) continue;
             if (std.mem.startsWith(u8, arg, "-")) continue;
-            if (path == null) {
-                path = arg;
-            }
+            if (path == null) path = arg;
         }
 
+        const target = if (path) |p| p else ".";
+
+        const gitlink_path = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{target});
+        defer self.allocator.free(gitlink_path);
+
+        var repaired: usize = 0;
+
+        const cwd = Io.Dir.cwd();
+        if (cwd.openFile(self.io, gitlink_path, .{})) |f| {
+            f.close(self.io);
+            repaired += 1;
+        } else |_| {}
+
         if (path) |p| {
-            try self.output.successMessage("Repaired worktree at {s}", .{p});
-        } else {
-            try self.output.successMessage("Repaired all worktrees", .{});
+            const wt_admin = try std.fmt.allocPrint(self.allocator, ".git/worktrees/{s}", .{p});
+            defer self.allocator.free(wt_admin);
+            if (cwd.openDir(self.io, wt_admin, .{})) |d| {
+                d.close(self.io);
+                repaired += 1;
+            } else |_| {}
         }
+
+        try self.output.successMessage("Checked worktree at {s} ({d} items verified)", .{ target, repaired });
     }
 };
 

@@ -39,37 +39,37 @@ pub const ThreeWayMerger = struct {
         return try self.mergeLines(ancestor_lines, ours_lines, theirs_lines);
     }
 
-    fn splitLines(self: *ThreeWayMerger, content: []const u8) ![][:0]const u8 {
-        var lines = std.ArrayList([]u8).init(self.allocator);
-        errdefer lines.deinit();
+    fn splitLines(self: *ThreeWayMerger, content: []const u8) ![][]u8 {
+        var lines = try std.ArrayList([]u8).initCapacity(self.allocator, 16);
+        defer lines.deinit(self.allocator);
 
         var start: usize = 0;
         for (content, 0..) |byte, i| {
             if (byte == '\n') {
                 const line = try self.allocator.dupe(u8, content[start..i]);
                 errdefer self.allocator.free(line);
-                try lines.append(line);
+                try lines.append(self.allocator, line);
                 start = i + 1;
             }
         }
         if (start < content.len) {
             const line = try self.allocator.dupe(u8, content[start..]);
             errdefer self.allocator.free(line);
-            try lines.append(line);
+            try lines.append(self.allocator, line);
         }
 
         const result = try self.allocator.alloc([]u8, lines.items.len);
         for (lines.items, 0..) |line, i| {
             result[i] = line;
         }
-        lines.deinit();
+        lines.deinit(self.allocator);
 
         return result;
     }
 
     fn mergeLines(self: *ThreeWayMerger, ancestor: [][]u8, ours: [][]u8, theirs: [][]u8) !ThreeWayResult {
-        var chunks = std.ArrayList(MergeChunk).init(self.allocator);
-        errdefer chunks.deinit();
+        var chunks = try std.ArrayList(MergeChunk).initCapacity(self.allocator, 16);
+        defer chunks.deinit(self.allocator);
 
         const ours_edits = try self.computeEdits(ancestor, ours);
         defer self.allocator.free(ours_edits);
@@ -91,7 +91,7 @@ pub const ThreeWayMerger = struct {
 
             if (ours_edit == null and theirs_edit == null) {
                 while (a_idx < ancestor.len) {
-                    try chunks.append(MergeChunk{ .content = ancestor[a_idx], .source = .ancestor });
+                    try chunks.append(self.allocator, MergeChunk{ .content = ancestor[a_idx], .source = .ancestor });
                     a_idx += 1;
                 }
                 break;
@@ -102,7 +102,7 @@ pub const ThreeWayMerger = struct {
             while (a_idx < next_change) {
                 if (o_idx < ours.len and std.mem.eql(u8, ours[o_idx], ancestor[a_idx])) o_idx += 1;
                 if (t_idx < theirs.len and std.mem.eql(u8, theirs[t_idx], ancestor[a_idx])) t_idx += 1;
-                try chunks.append(MergeChunk{ .content = ancestor[a_idx], .source = .ancestor });
+                try chunks.append(self.allocator, MergeChunk{ .content = ancestor[a_idx], .source = .ancestor });
                 a_idx += 1;
             }
 
@@ -115,8 +115,8 @@ pub const ThreeWayMerger = struct {
                     const te = theirs_edit.?;
                     const overlap_end = @max(e.ancestor_end, te.ancestor_end);
 
-                    const ours_changed = !self.editsEqual(e, ancestor, ours);
-                    const theirs_changed = !self.editsEqual(te, ancestor, theirs);
+                    const ours_changed = !self.editsEqual(e.*, ancestor, ours);
+                    const theirs_changed = !self.editsEqual(te.*, ancestor, theirs);
 
                     if (!ours_changed and !theirs_changed) {
                         a_idx = overlap_end;
@@ -124,14 +124,14 @@ pub const ThreeWayMerger = struct {
                         t_idx = te.new_end;
                     } else if (ours_changed and !theirs_changed) {
                         while (o_idx < e.new_end) : (o_idx += 1) {
-                            try chunks.append(MergeChunk{ .content = ours[o_idx], .source = .ours });
+                            try chunks.append(self.allocator, MergeChunk{ .content = ours[o_idx], .source = .ours });
                         }
                         a_idx = overlap_end;
                         t_idx = te.new_end;
                     } else if (!ours_changed and theirs_changed) {
                         a_idx = e.new_end;
                         while (t_idx < te.new_end) : (t_idx += 1) {
-                            try chunks.append(MergeChunk{ .content = theirs[t_idx], .source = .theirs });
+                            try chunks.append(self.allocator, MergeChunk{ .content = theirs[t_idx], .source = .theirs });
                         }
                         a_idx = overlap_end;
                     } else {
@@ -139,22 +139,22 @@ pub const ThreeWayMerger = struct {
                         const theirs_slice = theirs[te.new_start..te.new_end];
                         if (self.slicesEqual(ours_slice, theirs_slice)) {
                             for (ours_slice) |line| {
-                                try chunks.append(MergeChunk{ .content = line, .source = .ours });
+                                try chunks.append(self.allocator, MergeChunk{ .content = line, .source = .ours });
                             }
                         } else if (self.options.favor == .ours) {
                             for (ours_slice) |line| {
-                                try chunks.append(MergeChunk{ .content = line, .source = .ours });
+                                try chunks.append(self.allocator, MergeChunk{ .content = line, .source = .ours });
                             }
                         } else if (self.options.favor == .theirs) {
                             for (theirs_slice) |line| {
-                                try chunks.append(MergeChunk{ .content = line, .source = .theirs });
+                                try chunks.append(self.allocator, MergeChunk{ .content = line, .source = .theirs });
                             }
                         } else {
                             for (ours_slice) |line| {
-                                try chunks.append(MergeChunk{ .content = line, .source = .conflict });
+                                try chunks.append(self.allocator, MergeChunk{ .content = line, .source = .conflict });
                             }
                             for (theirs_slice) |line| {
-                                try chunks.append(MergeChunk{ .content = line, .source = .conflict });
+                                try chunks.append(self.allocator, MergeChunk{ .content = line, .source = .conflict });
                             }
                         }
                         a_idx = overlap_end;
@@ -167,7 +167,7 @@ pub const ThreeWayMerger = struct {
                 } else {
                     a_idx = e.ancestor_end;
                     while (o_idx < e.new_end) : (o_idx += 1) {
-                        try chunks.append(MergeChunk{ .content = ours[o_idx], .source = .ours });
+                        try chunks.append(self.allocator, MergeChunk{ .content = ours[o_idx], .source = .ours });
                     }
                     oe_idx += 1;
                 }
@@ -175,7 +175,7 @@ pub const ThreeWayMerger = struct {
                 const e = theirs_edit.?;
                 a_idx = e.ancestor_end;
                 while (t_idx < e.new_end) : (t_idx += 1) {
-                    try chunks.append(MergeChunk{ .content = theirs[t_idx], .source = .theirs });
+                    try chunks.append(self.allocator, MergeChunk{ .content = theirs[t_idx], .source = .theirs });
                 }
                 te_idx += 1;
             }
@@ -185,7 +185,7 @@ pub const ThreeWayMerger = struct {
             if (chunk.source == .conflict) break true;
         } else false;
 
-        const result_chunks = try chunks.toOwnedSlice();
+        const result_chunks = try chunks.toOwnedSlice(self.allocator);
         return ThreeWayResult{
             .success = !has_conflicts,
             .has_conflicts = has_conflicts,
@@ -204,8 +204,8 @@ pub const ThreeWayMerger = struct {
         const lcs_result = try self.lcs(old, new);
         defer self.allocator.free(lcs_result);
 
-        var edits = std.ArrayList(EditRange).init(self.allocator);
-        errdefer edits.deinit();
+        var edits = try std.ArrayList(EditRange).initCapacity(self.allocator, 16);
+        defer edits.deinit(self.allocator);
 
         var old_idx: usize = 0;
         var new_idx: usize = 0;
@@ -214,7 +214,7 @@ pub const ThreeWayMerger = struct {
         while (lcs_idx < lcs_result.len) {
             const match = lcs_result[lcs_idx];
             if (old_idx < match.old_idx or new_idx < match.new_idx) {
-                try edits.append(EditRange{
+                try edits.append(self.allocator, EditRange{
                     .ancestor_start = old_idx,
                     .ancestor_end = match.old_idx,
                     .new_start = new_idx,
@@ -227,7 +227,7 @@ pub const ThreeWayMerger = struct {
         }
 
         if (old_idx < old.len or new_idx < new.len) {
-            try edits.append(EditRange{
+            try edits.append(self.allocator, EditRange{
                 .ancestor_start = old_idx,
                 .ancestor_end = old.len,
                 .new_start = new_idx,
@@ -235,7 +235,7 @@ pub const ThreeWayMerger = struct {
             });
         }
 
-        return edits.toOwnedSlice();
+        return edits.toOwnedSlice(self.allocator);
     }
 
     const LcsMatch = struct {
@@ -272,7 +272,7 @@ pub const ThreeWayMerger = struct {
         var j: usize = n;
         while (i > 0 and j > 0) {
             if (std.mem.eql(u8, a[i - 1], b[j - 1])) {
-                try result.append(LcsMatch{ .old_idx = i - 1, .new_idx = j - 1 });
+                try result.append(self.allocator, LcsMatch{ .old_idx = i - 1, .new_idx = j - 1 });
                 i -= 1;
                 j -= 1;
             } else if (dp[(i - 1) * (n + 1) + j] >= dp[i * (n + 1) + (j - 1)]) {
@@ -293,7 +293,7 @@ pub const ThreeWayMerger = struct {
             right -= 1;
         }
 
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(self.allocator);
     }
 
     fn editsEqual(self: *ThreeWayMerger, edit: EditRange, ancestor: [][]u8, new_lines: [][]u8) bool {

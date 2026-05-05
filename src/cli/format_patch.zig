@@ -269,6 +269,25 @@ pub const FormatPatch = struct {
             }
         }
 
+        var parent_entry_oids = std.array_hash_map.String([]const u8).empty;
+        defer parent_entry_oids.deinit(self.allocator);
+
+        if (parent_tree_hex) |pth| {
+            const pt_data = self.readObjectByHex(git_dir, pth) catch null;
+            defer if (pt_data) |ptd| self.allocator.free(ptd);
+            if (pt_data) |ptd| {
+                var pe_it = std.mem.splitScalar(u8, ptd, '\n');
+                while (pe_it.next()) |pe| {
+                    if (pe.len > 0) {
+                        const ename = treeEntryName(pe);
+                        const eoid = treeEntryOid(pe);
+                        parent_entry_set.put(self.allocator, ename, {}) catch {};
+                        parent_entry_oids.put(self.allocator, ename, eoid) catch {};
+                    }
+                }
+            }
+        }
+
         var files_changed: u32 = 0;
         var total_ins: u32 = 0;
         var total_del: u32 = 0;
@@ -282,18 +301,21 @@ pub const FormatPatch = struct {
 
             var old_blob: []const u8 = "";
             var new_blob: []const u8 = "";
+            var old_oid_str: []const u8 = "0000000000000000000000000000000000000000";
 
-            const new_data = self.readBlobContent(git_dir, blob_hex) catch "";
+            const new_data = self.readBlobContent(git_dir, blob_hex) catch continue;
             defer self.allocator.free(new_data);
             new_blob = new_data;
 
             if (!is_new) {
-                const old_data = self.readBlobContent(git_dir, blob_hex) catch "";
+                const parent_blob_oid = parent_entry_oids.get(name) orelse blob_hex;
+                old_oid_str = parent_blob_oid;
+                const old_data = self.readBlobContent(git_dir, parent_blob_oid) catch continue;
                 defer self.allocator.free(old_data);
                 old_blob = old_data;
             }
 
-            const diff_text = self.textDiff(name, new_mode, old_blob, new_blob, is_new);
+            const diff_text = try self.textDiff(name, new_mode, old_blob, new_blob, is_new, old_oid_str, blob_hex);
             try buf.appendSlice(self.allocator, diff_text);
             self.allocator.free(diff_text);
 
@@ -317,7 +339,7 @@ pub const FormatPatch = struct {
         return buf.toOwnedSlice(self.allocator);
     }
 
-    fn textDiff(self: *FormatPatch, path: []const u8, new_mode: []const u8, old_content: []const u8, new_content: []const u8, is_new: bool) []const u8 {
+    fn textDiff(self: *FormatPatch, path: []const u8, new_mode: []const u8, old_content: []const u8, new_content: []const u8, is_new: bool, old_oid_hex: []const u8, new_oid_hex: []const u8) ![]const u8 {
         const mode = if (is_new) new_mode else "100644";
         const old_lines = if (old_content.len > 0) blk: {
             var count: u32 = 0;
@@ -331,60 +353,58 @@ pub const FormatPatch = struct {
         while (ni.next()) |_| new_line_count += 1;
 
         var buf = std.ArrayListUnmanaged(u8).empty;
-        buf.appendSlice(self.allocator, " ") catch return "";
-        buf.appendSlice(self.allocator, path) catch return "";
-        buf.appendSlice(self.allocator, " | ") catch return "";
+        try buf.appendSlice(self.allocator, " ");
+        try buf.appendSlice(self.allocator, path);
+        try buf.appendSlice(self.allocator, " | ");
 
         var stat_buf: [64]u8 = undefined;
-        const stat_str = std.fmt.bufPrint(&stat_buf, "{d} {s}{d}, {d} deletion(-)", .{
+        const stat_str = try std.fmt.bufPrint(&stat_buf, "{d} {s}{d}, {d} deletion(-)", .{
             if (is_new) @as(i32, 1) else 0,
             mode,
             new_line_count,
             old_lines,
-        }) catch "";
-        buf.appendSlice(self.allocator, stat_str) catch return "";
-        buf.appendSlice(self.allocator, "\n\n") catch return "";
-        buf.appendSlice(self.allocator, "diff --git a/") catch return "";
-        buf.appendSlice(self.allocator, path) catch return "";
-        buf.appendSlice(self.allocator, " b/") catch return "";
-        buf.appendSlice(self.allocator, path) catch return "";
-        buf.appendSlice(self.allocator, "\n") catch return "";
+        });
+        try buf.appendSlice(self.allocator, stat_str);
+        try buf.appendSlice(self.allocator, "\n\n");
+        try buf.appendSlice(self.allocator, "diff --git a/");
+        try buf.appendSlice(self.allocator, path);
+        try buf.appendSlice(self.allocator, " b/");
+        try buf.appendSlice(self.allocator, path);
+        try buf.appendSlice(self.allocator, "\n");
 
-        const fake_old = "0000000000000000000000000000000000000000";
-        const fake_new = "1234567890123456789012345678901234567890";
-        const old_ref = if (is_new) fake_old else fake_old;
-        const new_ref = fake_new;
+        const old_ref = if (is_new) "0000000000000000000000000000000000000000" else old_oid_hex;
+        const new_ref = new_oid_hex;
 
-        buf.appendSlice(self.allocator, "index ") catch return "";
-        buf.appendSlice(self.allocator, old_ref) catch return "";
-        buf.appendSlice(self.allocator, "..") catch return "";
-        buf.appendSlice(self.allocator, new_ref) catch return "";
-        buf.appendSlice(self.allocator, " 100644\n") catch return "";
-        buf.appendSlice(self.allocator, "--- a/") catch return "";
-        buf.appendSlice(self.allocator, path) catch return "";
-        buf.appendSlice(self.allocator, "\n+++ b/") catch return "";
-        buf.appendSlice(self.allocator, path) catch return "";
-        buf.appendSlice(self.allocator, "\n") catch return "";
+        try buf.appendSlice(self.allocator, "index ");
+        try buf.appendSlice(self.allocator, old_ref);
+        try buf.appendSlice(self.allocator, "..");
+        try buf.appendSlice(self.allocator, new_ref);
+        try buf.appendSlice(self.allocator, " 100644\n");
+        try buf.appendSlice(self.allocator, "--- a/");
+        try buf.appendSlice(self.allocator, path);
+        try buf.appendSlice(self.allocator, "\n+++ b/");
+        try buf.appendSlice(self.allocator, path);
+        try buf.appendSlice(self.allocator, "\n");
 
         if (is_new) {
-            buf.appendSlice(self.allocator, "@@ -0,0 +1 @@\n") catch return "";
+            try buf.appendSlice(self.allocator, "@@ -0,0 +1 @@\n");
         } else {
             var hunk_buf: [64]u8 = undefined;
-            const hunk = std.fmt.bufPrint(&hunk_buf, "@@ -{d},{d} +{d},{d} @@\n", .{
+            const hunk = try std.fmt.bufPrint(&hunk_buf, "@@ -{d},{d} +{d},{d} @@\n", .{
                 @as(u32, 1), old_lines, @as(u32, 1), new_line_count,
-            }) catch "";
-            buf.appendSlice(self.allocator, hunk) catch return "";
+            });
+            try buf.appendSlice(self.allocator, hunk);
         }
 
         var line_iter = std.mem.tokenizeAny(u8, new_content, "\n");
         while (line_iter.next()) |lc| {
-            buf.appendSlice(self.allocator, "+") catch return "";
-            buf.appendSlice(self.allocator, lc) catch return "";
-            buf.appendSlice(self.allocator, "\n") catch return "";
+            try buf.appendSlice(self.allocator, "+");
+            try buf.appendSlice(self.allocator, lc);
+            try buf.appendSlice(self.allocator, "\n");
         }
 
-        buf.appendSlice(self.allocator, "\n") catch return "";
-        return buf.toOwnedSlice(self.allocator) catch "";
+        try buf.appendSlice(self.allocator, "\n");
+        return buf.toOwnedSlice(self.allocator);
     }
 
     fn readBlobContent(self: *FormatPatch, git_dir: *const Io.Dir, oid_hex: []const u8) ![]const u8 {
@@ -431,7 +451,7 @@ pub const FormatPatch = struct {
     fn parseArgs(self: *FormatPatch, args: []const []const u8) void {
         for (args) |arg| {
             if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output-directory")) {
-                _ = &self.options.output_directory;
+                self.options.output_directory = ".";
             } else if (std.mem.eql(u8, arg, "-n") or std.mem.eql(u8, arg, "--numbered")) {
                 self.options.numbered_files = true;
             } else if (std.mem.eql(u8, arg, "-N") or std.mem.eql(u8, arg, "--no-numbered")) {
@@ -469,7 +489,7 @@ pub const FormatPatch = struct {
                 if (val.len > 0)
                     self.options.max_count = std.fmt.parseInt(u32, val, 10) catch null;
             } else if (!std.mem.startsWith(u8, arg, "-")) {
-                _ = &self.options.zero_commit;
+                self.options.zero_commit = arg;
             }
         }
     }

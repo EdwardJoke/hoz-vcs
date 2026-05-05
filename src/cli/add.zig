@@ -78,7 +78,8 @@ pub const Add = struct {
         defer self.allocator.free(content);
 
         const blob_oid = self.hashBlob(content);
-        _ = try self.writeBlob(&git_dir, content, blob_oid);
+        const written_oid = try self.writeBlob(&git_dir, content, blob_oid);
+        defer self.allocator.free(written_oid);
 
         try self.updateIndex(&git_dir, path, blob_oid);
 
@@ -110,7 +111,7 @@ pub const Add = struct {
         const hex = oid.toHex();
         const obj_dir = try std.fmt.allocPrint(self.allocator, "objects/{s}", .{hex[0..2]});
         defer self.allocator.free(obj_dir);
-        git_dir.createDirPath(self.io, obj_dir) catch {};
+        git_dir.createDirPath(self.io, obj_dir) catch return error.CreateObjectDirFailed;
 
         const header = try std.fmt.allocPrint(self.allocator, "blob {d}\x00", .{content.len});
 
@@ -129,7 +130,7 @@ pub const Add = struct {
         const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
         defer self.allocator.free(obj_path);
 
-        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch {};
+        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch return error.WriteObjectFailed;
 
         const oid_hex = try self.allocator.dupe(u8, &hex);
         return oid_hex;

@@ -142,7 +142,8 @@ pub const Rerere = struct {
         };
         defer rr_dir.close(self.io);
 
-        const hash = self.pathToHash(path);
+        var hash_buf: [64]u8 = undefined;
+        const hash = try self.pathToHash(path, &hash_buf);
         const preimage_path = try std.fmt.allocPrint(self.allocator, "{s}/preimage", .{hash});
         defer self.allocator.free(preimage_path);
         const postimage_path = try std.fmt.allocPrint(self.allocator, "{s}/postimage", .{hash});
@@ -215,7 +216,12 @@ pub const Rerere = struct {
     fn hasPreimage(self: *Rerere, rr_dir: *const Io.Dir, hash: []const u8) bool {
         var buf: [256]u8 = undefined;
         const path = std.fmt.bufPrint(&buf, "{s}/{s}/preimage", .{ self.rerere_dir, hash }) catch return false;
-        _ = rr_dir.openFile(self.io, path, .{}) catch return false;
+        const file = rr_dir.openFile(self.io, path, .{}) catch |err| {
+            if (err == error.FileNotFound or err == error.NotFound)
+                return false;
+            return false;
+        };
+        file.close(self.io);
         return true;
     }
 
@@ -225,16 +231,23 @@ pub const Rerere = struct {
 
         var post_buf: [256]u8 = undefined;
         const postimage_path = std.fmt.bufPrint(&post_buf, "{s}/postimage", .{hash}) catch return .pending;
-        _ = rr_dir.openFile(self.io, postimage_path, .{}) catch return .pending;
+        const post_file = rr_dir.openFile(self.io, postimage_path, .{}) catch |err| {
+            if (err == error.FileNotFound or err == error.NotFound)
+                return .pending;
+            return .pending;
+        };
+        post_file.close(self.io);
         return .resolved;
     }
 
-    fn pathToHash(_: *Rerere, path: []const u8) []const u8 {
+    fn pathToHash(_: *Rerere, path: []const u8, out: []u8) ![]const u8 {
         var hasher = std.hash.Wyhash.init(0);
         hasher.update(path);
         const digest = hasher.final();
         const hex = std.fmt.hex(digest);
-        return hex[0..];
+        if (out.len < hex.len) return error.BufferTooSmall;
+        @memcpy(out[0..hex.len], &hex);
+        return out[0..hex.len];
     }
 
     fn parseArgs(self: *Rerere, args: []const []const u8) void {

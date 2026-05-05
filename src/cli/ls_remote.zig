@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
+const transport = @import("../network/transport.zig");
 
 pub const LsRemote = struct {
     allocator: std.mem.Allocator,
@@ -31,8 +32,67 @@ pub const LsRemote = struct {
         }
     }
 
-    fn runRemote(self: *LsRemote, remote: []const u8) !void {
-        try self.output.successMessage("Showing refs for {s}", .{remote});
+    fn runRemote(self: *LsRemote, remote_url: []const u8) !void {
+        var t = transport.Transport.init(self.allocator, self.io, .{ .url = remote_url });
+        try t.connect();
+        defer t.disconnect();
+
+        const all_refs = try t.fetchRefs();
+        defer self.allocator.free(all_refs);
+
+        if (all_refs.len == 0) {
+            try self.output.infoMessage("No refs found on {s}", .{remote_url});
+            return;
+        }
+
+        var shown: usize = 0;
+        for (all_refs) |ref| {
+            if (!self.shouldShowRef(ref.name)) continue;
+
+            if (self.styleIsHuman()) {
+                try self.output.writer.print("{s}\t{s}\n", .{ ref.oid, ref.name });
+            } else {
+                try self.output.writer.print("{s} {s}\n", .{ ref.oid, ref.name });
+            }
+
+            if (ref.peeled) |peeled_oid| {
+                if (self.styleIsHuman()) {
+                    try self.output.writer.print("{s}\t{s}^{{}}\n", .{ peeled_oid, ref.name });
+                } else {
+                    try self.output.writer.print("{s} {s}^{{}}\n", .{ peeled_oid, ref.name });
+                }
+            }
+
+            shown += 1;
+        }
+
+        if (shown == 0 and (self.heads or self.tags)) {
+            try self.output.infoMessage("No matching refs found for the given filter on {s}", .{remote_url});
+        }
+    }
+
+    fn shouldShowRef(self: *LsRemote, ref_name: []const u8) bool {
+        const is_head = std.mem.startsWith(u8, ref_name, "refs/heads/");
+        const is_tag = std.mem.startsWith(u8, ref_name, "refs/tags/");
+        const is_peeled = std.mem.endsWith(u8, ref_name, "^{}");
+
+        if (is_peeled) return false;
+
+        if (self.heads and !self.tags and !self.refs) {
+            return is_head;
+        }
+        if (self.tags and !self.heads and !self.refs) {
+            return is_tag;
+        }
+        if (self.refs) {
+            return true;
+        }
+
+        return true;
+    }
+
+    fn styleIsHuman(self: *LsRemote) bool {
+        return self.output.style.format == .human;
     }
 };
 
@@ -80,6 +140,6 @@ test "LsRemoteOptions default" {
 }
 
 test "parseLsRemoteArgs basic" {
-    const result = parseLsRemoteArgs(&.{ "origin" });
+    const result = parseLsRemoteArgs(&.{"origin"});
     try std.testing.expectEqualStrings("origin", result.remote);
 }

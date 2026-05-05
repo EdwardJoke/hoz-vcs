@@ -11,6 +11,22 @@ const compress_mod = @import("../compress/zlib.zig");
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 
+const c_tm = extern struct {
+    tm_sec: c_int,
+    tm_min: c_int,
+    tm_hour: c_int,
+    tm_mday: c_int,
+    tm_mon: c_int,
+    tm_year: c_int,
+    tm_wday: c_int,
+    tm_yday: c_int,
+    tm_isdst: c_int,
+    tm_gmtoff: c_long,
+    tm_zone: [*c]const u8,
+};
+extern fn localtime_r([*c]const c_long, [*c]c_tm) [*c]c_tm;
+extern fn time([*c]c_long) c_long;
+
 pub const Commit = struct {
     allocator: std.mem.Allocator,
     io: Io,
@@ -44,8 +60,9 @@ pub const Commit = struct {
 
         const commit_oid = try self.createCommit(&git_dir);
         const hex = commit_oid.toHex();
+        const is_root = (self.resolveHead(&git_dir) catch null) == null;
         try self.output.successMessage("--→ [{s} {s}] {s}", .{
-            if (self.amend) "amended" else "root",
+            if (self.amend) "amended" else if (is_root) "root" else "commit",
             hex[0..7],
             self.message.?,
         });
@@ -150,7 +167,11 @@ pub const Commit = struct {
         }
 
         const tree = tree_builder.buildTreeFromIndex(self.allocator, index) catch {
-            return oid_mod.oidFromContent("tree 0\x00");
+            const empty_tree = try std.fmt.allocPrint(self.allocator, "tree 0\x00", .{});
+            defer self.allocator.free(empty_tree);
+            const empty_oid = oid_mod.oidFromContent(empty_tree);
+            try self.writeLooseObject(git_dir, empty_tree);
+            return empty_oid;
         };
 
         const serialized = try tree.serialize(self.allocator);
@@ -237,7 +258,7 @@ pub const Commit = struct {
         const hex = oid.toHex();
         const obj_dir = try std.fmt.allocPrint(self.allocator, "objects/{s}", .{hex[0..2]});
         defer self.allocator.free(obj_dir);
-        git_dir.createDirPath(self.io, obj_dir) catch {};
+        git_dir.createDirPath(self.io, obj_dir) catch return error.CreateObjectDirFailed;
 
         const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
         defer self.allocator.free(obj_path);
@@ -245,7 +266,7 @@ pub const Commit = struct {
         const compressed = compress_mod.Zlib.compress(data, self.allocator) catch return;
         defer self.allocator.free(compressed);
 
-        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch {};
+        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch return error.WriteObjectFailed;
     }
 
     fn readObject(self: *Commit, git_dir: *const Io.Dir, oid: OID) ![]u8 {
@@ -264,7 +285,11 @@ pub const Commit = struct {
     }
 
     fn timezoneOffset(_: *Commit) i32 {
-        return 0;
+        var tm: c_tm = undefined;
+        var now: c_long = 0;
+        _ = time(&now);
+        _ = localtime_r(&now, &tm);
+        return @intCast(@divTrunc(tm.tm_gmtoff, 60));
     }
 };
 

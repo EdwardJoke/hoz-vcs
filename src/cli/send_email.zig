@@ -183,9 +183,10 @@ pub const SendEmail = struct {
     }
 
     fn generatePatchesFromCommits(self: *SendEmail, cwd: *const Io.Dir) !std.ArrayList([]const u8) {
-        _ = cwd;
-
         var files = try std.ArrayList([]const u8).initCapacity(self.allocator, 16);
+
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch return files;
+        defer git_dir.close(self.io);
 
         const output_dir = "hoz-email-patches";
 
@@ -262,7 +263,7 @@ pub const SendEmail = struct {
             const subject = self.extractSubject(content);
             const body = self.formatEmailBody(content, index, patch_files.len);
             const message_id = self.generateMessageId(index);
-            const from_addr = self.resolveFromAddress();
+            const from_addr = try self.resolveFromAddress();
 
             var msg = EmailMessage{
                 .to = self.options.to.?,
@@ -349,8 +350,19 @@ pub const SendEmail = struct {
             }
         }
 
-        _ = index;
-        _ = total;
+        if (body.items.len == 0) {
+            body.appendSlice(self.allocator, patch_content) catch {};
+        }
+
+        if (total > 1) {
+            var prefixed = std.ArrayList(u8).initCapacity(self.allocator, body.items.len + 32) catch return patch_content;
+            errdefer prefixed.deinit(self.allocator);
+            var prefix_buf: [64]u8 = undefined;
+            const prefix = std.fmt.bufPrint(&prefix_buf, "[{d}/{d}] ", .{ index + 1, total }) catch "[0/0] ";
+            prefixed.appendSlice(self.allocator, prefix) catch return patch_content;
+            prefixed.appendSlice(self.allocator, body.items) catch return patch_content;
+            return prefixed.toOwnedSlice(self.allocator) catch return patch_content;
+        }
 
         const result = body.toOwnedSlice(self.allocator) catch return patch_content;
         return result;
@@ -363,7 +375,14 @@ pub const SendEmail = struct {
         const timestamp = @divTrunc(now.nanoseconds, std.time.ns_per_s);
 
         var random_bytes: [4]u8 = undefined;
-        self.io.randomSecure(&random_bytes) catch {};
+        self.io.randomSecure(&random_bytes) catch {
+            @memset(&random_bytes, 0);
+            const ns = now.nanoseconds;
+            random_bytes[0] = @intCast(ns & 0xFF);
+            random_bytes[1] = @intCast((ns >> 8) & 0xFF);
+            random_bytes[2] = @intCast((ns >> 16) & 0xFF);
+            random_bytes[3] = @intCast((ns >> 24) & 0xFF);
+        };
 
         const rand_val: u32 = (@as(u32, random_bytes[0]) << 24) | (@as(u32, random_bytes[1]) << 16) | (@as(u32, random_bytes[2]) << 8) | @as(u32, random_bytes[3]);
 
@@ -378,9 +397,9 @@ pub const SendEmail = struct {
         };
     }
 
-    fn resolveFromAddress(self: *SendEmail) ?[]u8 {
+    fn resolveFromAddress(self: *SendEmail) ![]u8 {
         if (self.options.from) |f| {
-            return self.allocator.dupe(u8, f) catch null;
+            return try self.allocator.dupe(u8, f);
         }
 
         const name_env = std.c.getenv("GIT_AUTHOR_NAME");
@@ -389,13 +408,13 @@ pub const SendEmail = struct {
         const name = if (name_env) |n| n else "Author";
         const email = if (email_env) |e| e else "author@example.com";
 
-        var addr = std.ArrayList(u8).initCapacity(self.allocator, @as(usize, std.mem.len(name)) + @as(usize, std.mem.len(email)) + 4) catch return null;
-        addr.appendSlice(self.allocator, name[0..std.mem.len(name)]) catch return null;
-        addr.appendSlice(self.allocator, " <") catch return null;
-        addr.appendSlice(self.allocator, email[0..std.mem.len(email)]) catch return null;
-        addr.appendSlice(self.allocator, ">") catch return null;
+        var addr = try std.ArrayList(u8).initCapacity(self.allocator, @as(usize, std.mem.len(name)) + @as(usize, std.mem.len(email)) + 4);
+        try addr.appendSlice(self.allocator, name[0..std.mem.len(name)]);
+        try addr.appendSlice(self.allocator, " <");
+        try addr.appendSlice(self.allocator, email[0..std.mem.len(email)]);
+        try addr.appendSlice(self.allocator, ">");
 
-        return addr.toOwnedSlice(self.allocator) catch null;
+        return try addr.toOwnedSlice(self.allocator);
     }
 
     fn printDryRun(self: *SendEmail, messages: []const EmailMessage) !void {

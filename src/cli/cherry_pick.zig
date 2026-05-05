@@ -67,18 +67,18 @@ pub const CherryPick = struct {
 
                 const parent_obj = object_mod.parse(parent_data) catch continue;
 
-                const parent_tree = self.extractTreeHex(parent_obj.data) catch "";
-                defer if (parent_tree.len > 0) self.allocator.free(parent_tree);
+                const parent_tree = try self.extractTreeHex(parent_obj.data);
+                defer self.allocator.free(parent_tree);
 
-                const our_tree = self.extractTreeHex(obj.data) catch "";
-                defer if (our_tree.len > 0) self.allocator.free(our_tree);
+                const our_tree = try self.extractTreeHex(obj.data);
+                defer self.allocator.free(our_tree);
 
                 if (parent_tree.len > 0 and our_tree.len > 0) {
                     try self.applyTreeDiff(parent_tree, our_tree);
                 }
             } else {
-                const tree_hex = self.extractTreeHex(obj.data) catch "";
-                defer if (tree_hex.len > 0) self.allocator.free(tree_hex);
+                const tree_hex = try self.extractTreeHex(obj.data);
+                defer self.allocator.free(tree_hex);
                 if (tree_hex.len > 0) {
                     try self.applyTreeToWorkdir(tree_hex);
                 }
@@ -177,7 +177,7 @@ pub const CherryPick = struct {
             }
             if (line.len == 0) break;
         }
-        return "";
+        return error.TreeNotFound;
     }
 
     fn applyTreeDiff(self: *CherryPick, parent_tree_hex: []const u8, our_tree_hex: []const u8) !void {

@@ -36,7 +36,7 @@ pub const Signer = struct {
 
     pub fn sign(self: *Signer, data: []const u8) !?[]const u8 {
         if (self.options.signing_key == null) {
-            return null;
+            return error.NoSigningKey;
         }
 
         const key_arg = self.options.signing_key.?;
@@ -65,7 +65,8 @@ pub const Signer = struct {
             return stdout;
         }
 
-        return null;
+        std.log.warn("GPG signing failed (exit code: {}, stderr: {s})", .{ term.Exited, stderr });
+        return error.GpgSigningFailed;
     }
 
     pub fn verify(self: *Signer, signature: []const u8, data: []const u8) !SignatureStatus {
@@ -73,8 +74,11 @@ pub const Signer = struct {
             return .no_signature;
         }
 
-        const temp_dir = std.fs.cwd().makeOpenPath("tmp", .{}) catch return error.Unexpected;
-        defer std.fs.cwd().deleteTree("tmp") catch {};
+        const tmp_name = try std.fmt.allocPrint(self.allocator, "hoz-gpg-verify-{d}", .{@as(usize, @intFromFloat(std.time.nanoTimestamp()))});
+        defer self.allocator.free(tmp_name);
+
+        const temp_dir = std.fs.cwd().makeOpenPath(tmp_name, .{}) catch return error.TempDirFailed;
+        defer std.fs.cwd().deleteTree(tmp_name) catch {};
 
         const sig_path = try std.fs.path.join(self.allocator, &.{ temp_dir, "signature.asc" });
         defer self.allocator.free(sig_path);

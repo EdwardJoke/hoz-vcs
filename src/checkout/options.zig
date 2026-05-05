@@ -77,40 +77,40 @@ test "CheckoutOptions init" {
 
 test "CheckoutOptions withForce" {
     var options = CheckoutOptions.init();
-    options.withForce(true);
+    _ = options.withForce(true);
     try std.testing.expect(options.force == true);
 }
 
 test "CheckoutOptions withStrategy" {
     var options = CheckoutOptions.init();
-    options.withStrategy(.force);
+    _ = options.withStrategy(.force);
     try std.testing.expect(options.strategy == .force);
 }
 
 test "CheckoutOptions withPaths" {
     var options = CheckoutOptions.init();
     const paths = &.{ "src/", "lib/" };
-    options.withPaths(paths);
+    _ = options.withPaths(paths);
     try std.testing.expect(options.paths != null);
 }
 
 test "CheckoutOptions withQuiet" {
     var options = CheckoutOptions.init();
-    options.withQuiet(true);
+    _ = options.withQuiet(true);
     try std.testing.expect(options.quiet == true);
 }
 
 test "CheckoutOptions withSourceOid" {
     var options = CheckoutOptions.init();
     const oid = try OID.fromHex("abc123def456789012345678901234567890abcd");
-    options.withSourceOid(oid);
+    _ = options.withSourceOid(oid);
     try std.testing.expect(options.source_oid != null);
 }
 
 test "CheckoutOptions withTargetOid" {
     var options = CheckoutOptions.init();
     const oid = try OID.fromHex("abc123def456789012345678901234567890abcd");
-    options.withTargetOid(oid);
+    _ = options.withTargetOid(oid);
     try std.testing.expect(options.target_oid != null);
 }
 

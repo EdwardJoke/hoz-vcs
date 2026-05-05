@@ -10,6 +10,7 @@ const compress_mod = @import("../compress/zlib.zig");
 pub const WriteTreeOptions = struct {
     missing_ok: bool = false,
     prefix: ?[]const u8 = null,
+    pathspec: ?[]const u8 = null,
 };
 
 pub const WriteTree = struct {
@@ -91,8 +92,8 @@ pub const WriteTree = struct {
         });
         defer self.allocator.free(obj_path);
 
-        git_dir.createDir(self.io, obj_path[0..(obj_path.len - 9)], @enumFromInt(0o755)) catch {};
-        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch {};
+        git_dir.createDir(self.io, obj_path[0..(obj_path.len - 9)], @enumFromInt(0o755)) catch return error.CreateObjectDirFailed;
+        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch return error.WriteObjectFailed;
 
         try self.output.writer.print("{s}\n", .{oid_hex});
     }
@@ -103,7 +104,11 @@ pub const WriteTree = struct {
                 self.options.missing_ok = true;
             } else if (std.mem.startsWith(u8, arg, "--prefix=")) {
                 self.options.prefix = arg["--prefix=".len..];
-            } else if (!std.mem.startsWith(u8, arg, "-")) {}
+            } else if (!std.mem.startsWith(u8, arg, "-")) {
+                self.options.pathspec = arg;
+            } else {
+                std.log.warn("write-tree: unknown option '{s}'", .{arg});
+            }
         }
     }
 };

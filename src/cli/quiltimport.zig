@@ -3,6 +3,13 @@ const std = @import("std");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
+const OID = @import("../object/oid.zig").OID;
+const oid_mod = @import("../object/oid.zig");
+const compress_mod = @import("../compress/zlib.zig");
+const object_mod = @import("../object/object.zig");
+const patch_mod = @import("../diff/patch.zig");
+const Index = @import("../index/index.zig").Index;
+const tree_builder = @import("../tree/builder.zig");
 
 pub const QuiltImportOptions = struct {
     series_file: ?[]const u8 = null,
@@ -154,10 +161,11 @@ pub const QuiltImport = struct {
 
         try self.output.infoMessage("[{d}/{d}] Importing: {s}", .{ index + 1, patch.index + 1, patch.name });
 
-        _ = Io.Dir.cwd().openFile(self.io, patch_path, .{}) catch {
+        const access_result = Io.Dir.cwd().access(self.io, patch_path, .{});
+        if (access_result) |_| {} else |err| {
             try self.output.errorMessage("Patch file not found: {s}", .{patch_path});
-            return;
-        };
+            return err;
+        }
 
         if (self.options.dry_run) {
             try self.output.infoMessage("  [DRY RUN] Would apply patch: {s}", .{patch.name});
@@ -172,7 +180,7 @@ pub const QuiltImport = struct {
 
         const subject = self.extractSubject(patch_content) orelse patch.name;
         const author_name = self.options.author orelse self.extractAuthorName(patch_content);
-        const author_email = self.options.email orelse self.extractAuthorEmail(patch_content);
+        const author_email = self.options.email orelse self.extractAuthorEmail(patch_content) orelse "importer@hoz.local";
 
         const commit_msg = try self.buildCommitMessage(subject, patch.description, index);
 
@@ -181,8 +189,7 @@ pub const QuiltImport = struct {
         try self.output.successMessage("  ✓ Applied: {s}", .{patch.name});
     }
 
-    fn extractSubject(_self: *QuiltImport, patch_content: []const u8) ?[]const u8 {
-        _ = _self;
+    fn extractSubject(_: *QuiltImport, patch_content: []const u8) ?[]const u8 {
         var lines = std.mem.tokenizeAny(u8, patch_content, "\n\r");
         while (lines.next()) |line| {
             if (std.mem.startsWith(u8, line, "Subject: ")) {
@@ -198,8 +205,7 @@ pub const QuiltImport = struct {
         return null;
     }
 
-    fn extractAuthorName(_self: *QuiltImport, patch_content: []const u8) []const u8 {
-        _ = _self;
+    fn extractAuthorName(_: *QuiltImport, patch_content: []const u8) []const u8 {
         var lines = std.mem.tokenizeAny(u8, patch_content, "\n\r");
         while (lines.next()) |line| {
             if (std.mem.startsWith(u8, line, "From: ")) {
@@ -213,8 +219,7 @@ pub const QuiltImport = struct {
         return "Unknown Author";
     }
 
-    fn extractAuthorEmail(_self: *QuiltImport, patch_content: []const u8) []const u8 {
-        _ = _self;
+    fn extractAuthorEmail(_: *QuiltImport, patch_content: []const u8) ?[]const u8 {
         var lines = std.mem.tokenizeAny(u8, patch_content, "\n\r");
         while (lines.next()) |line| {
             if (std.mem.startsWith(u8, line, "From: ")) {
@@ -225,17 +230,30 @@ pub const QuiltImport = struct {
                 }
             }
         }
-        return "unknown@example.com";
+        if (std.c.getenv("GIT_AUTHOR_EMAIL")) |email| {
+            const s: [*:0]const u8 = @ptrCast(email);
+            if (std.mem.len(s) > 0) return std.mem.sliceTo(s, 0);
+        }
+        if (std.c.getenv("EMAIL")) |email| {
+            const s: [*:0]const u8 = @ptrCast(email);
+            if (std.mem.len(s) > 0) return std.mem.sliceTo(s, 0);
+        }
+        return null;
     }
 
-    fn buildCommitMessage(self: *QuiltImport, subject: []const u8, description: ?[]const u8, _index: usize) ![]u8 {
-        _ = _index;
+    fn buildCommitMessage(self: *QuiltImport, subject: []const u8, description: ?[]const u8, index: usize) ![]const u8 {
         var msg = try std.ArrayList(u8).initCapacity(self.allocator, 512);
         errdefer msg.deinit(self.allocator);
 
         if (self.options.subject_prefix) |prefix| {
             msg.appendSlice(self.allocator, prefix) catch {};
             msg.appendSlice(self.allocator, " ") catch {};
+        }
+
+        if (index > 0) {
+            var idx_buf: [20]u8 = undefined;
+            const idx_str = std.fmt.bufPrint(&idx_buf, "[{d}] ", .{index}) catch "";
+            msg.appendSlice(self.allocator, idx_str) catch {};
         }
 
         msg.appendSlice(self.allocator, subject) catch {};
@@ -250,106 +268,206 @@ pub const QuiltImport = struct {
     }
 
     fn applyPatch(self: *QuiltImport, git_dir: *const Io.Dir, patch_content: []const u8, commit_msg: []const u8, author_name: []const u8, author_email: []const u8) !void {
-        _ = git_dir;
-
-        var apply_child = std.process.spawn(self.io, .{
-            .argv = &.{ "git", "apply", "--check" },
-            .stdin = .pipe,
-            .stdout = .pipe,
-            .stderr = .pipe,
-        }) catch {
-            try self.output.errorMessage("Failed to spawn git apply", .{});
-            return;
+        _ = git_dir.openDir(self.io, "objects", .{}) catch {
+            try self.output.errorMessage("Not a valid git repository", .{});
+            return error.NotAGitRepo;
         };
 
-        if (apply_child.stdin) |stdin| {
-            stdin.writeStreamingAll(self.io, patch_content) catch {};
-            stdin.close(self.io);
+        const diff_start = std.mem.indexOf(u8, patch_content, "diff --git") orelse
+            std.mem.indexOf(u8, patch_content, "--- ") orelse return error.NoDiffContent;
+
+        const diff_content = patch_content[diff_start..];
+
+        var pf = patch_mod.PatchFormat.init(self.allocator);
+        defer pf.deinit();
+
+        var file_patches = try self.splitFileDiffs(diff_content);
+        defer {
+            for (file_patches.items) |fp| {
+                self.allocator.free(fp.old_path);
+                if (fp.new_path) |np| self.allocator.free(np);
+                self.allocator.free(fp.hunk_data);
+            }
+            file_patches.deinit(self.allocator);
         }
 
-        const term = apply_child.wait(self.io) catch {
-            try self.output.errorMessage("git apply --check failed", .{});
-            return;
-        };
-        if (term != .exited or term.exited != 0) {
-            try self.output.errorMessage("Patch does not apply cleanly", .{});
-            return;
-        }
-        if (apply_child.stdout) |stdout| stdout.close(self.io);
-        if (apply_child.stderr) |stderr| stderr.close(self.io);
+        for (file_patches.items) |fp| {
+            const target_path = fp.new_path orelse fp.old_path;
+            const cwd = Io.Dir.cwd();
 
-        var apply_final = std.process.spawn(self.io, .{
-            .argv = &.{ "git", "apply" },
-            .stdin = .pipe,
-            .stdout = .pipe,
-            .stderr = .pipe,
-        }) catch {
-            try self.output.errorMessage("Failed to spawn git apply for application", .{});
-            return;
-        };
+            var target_buf: []const u8 = "";
+            var target_owned = false;
+            {
+                const maybe_content = cwd.readFileAlloc(self.io, target_path, self.allocator, .limited(16 * 1024 * 1024)) catch null;
+                if (maybe_content) |content| {
+                    target_buf = content;
+                    target_owned = true;
+                }
+            }
+            defer if (target_owned) self.allocator.free(target_buf);
 
-        if (apply_final.stdin) |stdin| {
-            stdin.writeStreamingAll(self.io, patch_content) catch {};
-            stdin.close(self.io);
-        }
+            const target = target_buf;
 
-        const apply_term = apply_final.wait(self.io) catch {
-            try self.output.errorMessage("git apply failed", .{});
-            return;
-        };
-        if (apply_final.stdout) |stdout| stdout.close(self.io);
-        if (apply_final.stderr) |stderr| stderr.close(self.io);
+            const result = pf.apply(fp.hunk_data, target) catch return error.ApplyFailed;
+            defer self.allocator.free(result.content);
 
-        if (apply_term != .exited or apply_term.exited != 0) {
-            try self.output.errorMessage("git apply failed", .{});
-            return;
+            if (!result.success) {
+                try self.output.errorMessage("Patch does not apply cleanly to {s}", .{target_path});
+                return error.PatchApplyFailed;
+            }
+
+            cwd.writeFile(self.io, .{ .sub_path = target_path, .data = result.content }) catch return error.WriteFailed;
         }
 
-        var add_argv = std.ArrayList([]const u8).initCapacity(self.allocator, 4) catch return;
-        defer add_argv.deinit(self.allocator);
-        add_argv.appendSlice(self.allocator, &.{ "git", "add", "-u" }) catch {};
+        try self.createQuiltCommit(git_dir, commit_msg, author_name, author_email);
+    }
 
-        var add_child = std.process.spawn(self.io, .{
-            .argv = add_argv.items,
-            .stdin = .close,
-            .stdout = .pipe,
-            .stderr = .pipe,
-        }) catch {
-            try self.output.errorMessage("Failed to stage changes", .{});
-            return;
+    const FilePatch = struct { old_path: []const u8, new_path: ?[]const u8, hunk_data: []const u8 };
+
+    fn splitFileDiffs(self: *QuiltImport, diff: []const u8) !std.ArrayList(FilePatch) {
+        var result = try std.ArrayList(FilePatch).initCapacity(self.allocator, 4);
+        errdefer {
+            for (result.items) |fp| {
+                self.allocator.free(fp.old_path);
+                if (fp.new_path) |np| self.allocator.free(np);
+                self.allocator.free(fp.hunk_data);
+            }
+            result.deinit(self.allocator);
+        }
+
+        var lines = std.mem.splitScalar(u8, diff, '\n');
+        var current_old: ?[]const u8 = null;
+        var current_new: ?[]const u8 = null;
+        var hunk_buf = try std.ArrayList(u8).initCapacity(self.allocator, 4096);
+
+        while (lines.next()) |line| {
+            if (std.mem.startsWith(u8, line, "diff --git")) {
+                if (current_old) |old| {
+                    try result.append(self.allocator, .{
+                        .old_path = old,
+                        .new_path = current_new,
+                        .hunk_data = try hunk_buf.toOwnedSlice(self.allocator),
+                    });
+                    hunk_buf = try std.ArrayList(u8).initCapacity(self.allocator, 4096);
+                    current_old = null;
+                    current_new = null;
+                }
+                const rest = line["diff --git ".len..];
+                const space_idx = std.mem.lastIndexOfScalar(u8, rest, ' ') orelse continue;
+                const a_part = rest[0..space_idx];
+                const b_part = rest[space_idx + 1 ..];
+                current_old = try self.allocator.dupe(u8, a_part);
+                if (!std.mem.eql(u8, a_part, b_part)) {
+                    current_new = try self.allocator.dupe(u8, b_part);
+                } else {
+                    current_new = null;
+                }
+            } else if (current_old != null) {
+                try hunk_buf.appendSlice(self.allocator, line);
+                try hunk_buf.appendSlice(self.allocator, "\n");
+            }
+        }
+
+        if (current_old) |old| {
+            try result.append(self.allocator, .{
+                .old_path = old,
+                .new_path = current_new,
+                .hunk_data = try hunk_buf.toOwnedSlice(self.allocator),
+            });
+        } else {
+            hunk_buf.deinit(self.allocator);
+        }
+
+        return result;
+    }
+
+    fn computeTreeOid(self: *QuiltImport, git_dir: *const Io.Dir) ![]const u8 {
+        const index_data = git_dir.readFileAlloc(self.io, "index", self.allocator, .limited(16 * 1024 * 1024)) catch {
+            return try self.allocator.dupe(u8, "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+        };
+        defer self.allocator.free(index_data);
+
+        var index = Index.parse(index_data, self.allocator) catch {
+            return try self.allocator.dupe(u8, "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+        };
+        defer index.deinit();
+
+        if (index.entries.items.len == 0) {
+            return try self.allocator.dupe(u8, "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
+        }
+
+        const tree = tree_builder.buildTreeFromIndex(self.allocator, index) catch {
+            return try self.allocator.dupe(u8, "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
         };
 
-        _ = add_child.wait(self.io) catch {};
-        if (add_child.stdout) |stdout| stdout.close(self.io);
-        if (add_child.stderr) |stderr| stderr.close(self.io);
-
-        const env_author = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ author_name, author_email });
-        defer self.allocator.free(env_author);
-
-        var commit_argv = std.ArrayList([]const u8).initCapacity(self.allocator, 8) catch return;
-        defer commit_argv.deinit(self.allocator);
-        commit_argv.appendSlice(self.allocator, &.{ "git", "commit", "-m", commit_msg, "--author", env_author }) catch {};
-
-        var commit_child = std.process.spawn(self.io, .{
-            .argv = commit_argv.items,
-            .stdin = .close,
-            .stdout = .pipe,
-            .stderr = .pipe,
-        }) catch {
-            try self.output.errorMessage("Failed to create commit", .{});
-            return;
+        const serialized = tree.serialize(self.allocator) catch {
+            return try self.allocator.dupe(u8, "4b825dc642cb6eb9a060e54bf8d69288fbee4904");
         };
+        defer self.allocator.free(serialized);
 
-        const commit_term = commit_child.wait(self.io) catch {
-            try self.output.errorMessage("git commit failed", .{});
-            return;
-        };
-        if (commit_child.stdout) |stdout| stdout.close(self.io);
-        if (commit_child.stderr) |stderr| stderr.close(self.io);
+        const tree_oid_hex = oid_mod.oidFromContent(serialized).toHex();
+        return try self.allocator.dupe(u8, &tree_oid_hex);
+    }
 
-        if (commit_term != .exited or commit_term.exited != 0) {
-            try self.output.errorMessage("git commit failed", .{});
-            return;
+    fn createQuiltCommit(self: *QuiltImport, git_dir: *const Io.Dir, msg: []const u8, name: []const u8, email: []const u8) !void {
+        const now = Io.Timestamp.now(self.io, .real);
+        const ts: i64 = @intCast(@divTrunc(now.nanoseconds, 1000000000));
+
+        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch return error.ReadHeadFailed;
+        defer self.allocator.free(head_content);
+        const head_trimmed = std.mem.trim(u8, head_content, " \n\r");
+
+        var parent_hex: ?[]const u8 = null;
+        if (std.mem.startsWith(u8, head_trimmed, "ref: ")) {
+            const ref_path = head_trimmed[5..];
+            const ref_content = git_dir.readFileAlloc(self.io, ref_path, self.allocator, .limited(256)) catch return error.ReadRefFailed;
+            defer self.allocator.free(ref_content);
+            parent_hex = std.mem.trim(u8, ref_content, " \n\r");
+        } else {
+            parent_hex = head_trimmed;
+        }
+
+        const tree_oid = try self.computeTreeOid(git_dir);
+        const parents_block = if (parent_hex) |p|
+            try std.fmt.allocPrint(self.allocator, "parent {s}\n", .{p})
+        else
+            "";
+        defer if (parent_hex != null) self.allocator.free(parents_block);
+
+        const body = try std.fmt.allocPrint(self.allocator,
+            \\tree {s}
+            \\author {s} <{s}> {d} +0000
+            \\committer {s} <{s}> {d} +0000
+            \\{s}{s}
+        , .{ tree_oid, name, email, ts, name, email, ts, parents_block, msg });
+        defer self.allocator.free(body);
+
+        const header = try std.fmt.allocPrint(self.allocator, "commit {d}\x00", .{body.len});
+        defer self.allocator.free(header);
+        const combined = try std.mem.concat(self.allocator, u8, &.{ header, body });
+        defer self.allocator.free(combined);
+
+        const hash = @import("../crypto/sha1.zig").sha1(combined);
+        var oid_bytes: [20]u8 = undefined;
+        @memcpy(&oid_bytes, &hash);
+
+        const new_oid = OID{ .bytes = oid_bytes };
+        const hex = new_oid.toHex();
+        const dir_path = try std.fmt.allocPrint(self.allocator, "objects/{s}", .{hex[0..2]});
+        defer self.allocator.free(dir_path);
+        git_dir.createDirPath(self.io, dir_path) catch {};
+
+        const file_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
+        defer self.allocator.free(file_path);
+        const compressed = compress_mod.Zlib.compress(combined, self.allocator) catch return error.CompressFailed;
+        defer self.allocator.free(compressed);
+        git_dir.writeFile(self.io, .{ .sub_path = file_path, .data = compressed }) catch return error.WriteFailed;
+
+        if (std.mem.startsWith(u8, head_trimmed, "ref: ")) {
+            const ref_path = head_trimmed[5..];
+            const ref_val = try std.fmt.allocPrint(self.allocator, "{s}\n", .{&hex});
+            defer self.allocator.free(ref_val);
+            git_dir.writeFile(self.io, .{ .sub_path = ref_path, .data = ref_val }) catch return error.UpdateRefFailed;
         }
     }
 };

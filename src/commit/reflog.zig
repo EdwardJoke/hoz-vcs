@@ -36,7 +36,7 @@ test "CommitReflog init" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const reflog_manager: ReflogManager = undefined;
+    const reflog_manager: ReflogManager = std.mem.zeroes(ReflogManager);
     const reflog = CommitReflog.init(allocator, reflog_manager);
 
     try std.testing.expect(reflog.allocator == allocator);
@@ -47,7 +47,7 @@ test "CommitReflog init with reflog_manager" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const reflog_manager: ReflogManager = undefined;
+    const reflog_manager: ReflogManager = std.mem.zeroes(ReflogManager);
     const reflog = CommitReflog.init(allocator, reflog_manager);
 
     try std.testing.expect(reflog.reflog_manager.git_dir == reflog_manager.git_dir);
@@ -58,7 +58,7 @@ test "CommitReflog allocator access" {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const reflog_manager: ReflogManager = undefined;
+    const reflog_manager: ReflogManager = std.mem.zeroes(ReflogManager);
     const reflog = CommitReflog.init(allocator, reflog_manager);
 
     try std.testing.expectEqual(allocator, reflog.allocator);

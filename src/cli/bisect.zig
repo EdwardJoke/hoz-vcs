@@ -113,7 +113,9 @@ pub const Bisect = struct {
     }
 
     fn runBisectRun(self: *Bisect, args: []const []const u8) !void {
-        _ = args;
+        if (args.len > 0) {
+            try self.output.infoMessage("Running bisect command: {s}", .{args[0]});
+        }
         var bisect_run = BisectRun.init(self.allocator, self.io);
         const next = try bisect_run.getNextCommit();
         if (next.len > 0) {

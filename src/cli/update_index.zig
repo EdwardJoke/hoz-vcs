@@ -134,7 +134,7 @@ pub const UpdateIndex = struct {
         const hex = oid.toHex();
         const obj_dir = try std.fmt.allocPrint(self.allocator, "objects/{s}", .{hex[0..2]});
         defer self.allocator.free(obj_dir);
-        git_dir.createDirPath(self.io, obj_dir) catch {};
+        git_dir.createDirPath(self.io, obj_dir) catch return error.CreateObjectDirFailed;
 
         var blob_data = try std.ArrayList(u8).initCapacity(self.allocator, header.len + content.len);
         defer blob_data.deinit(self.allocator);
@@ -147,7 +147,7 @@ pub const UpdateIndex = struct {
 
         const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
         defer self.allocator.free(obj_path);
-        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch {};
+        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch return error.WriteObjectFailed;
 
         const stat = cwd.statFile(self.io, path, .{}) catch {
             const entry = IndexEntry{

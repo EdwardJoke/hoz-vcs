@@ -86,7 +86,7 @@ pub const Clone = struct {
     }
 
     fn setupRemote(self: *Clone, url: []const u8) !void {
-        var remote_setup = RemoteSetup.init(self.allocator);
+        var remote_setup = RemoteSetup.init(self.allocator, self.io);
         remote_setup.setupOrigin(url) catch |err| {
             try self.output.errorMessage("Failed to set up remote: {}", .{err});
             return;

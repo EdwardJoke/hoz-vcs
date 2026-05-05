@@ -142,7 +142,7 @@ pub const Fsck = struct {
             } else if (std.mem.eql(u8, arg, "--cache")) {
                 self.options.cache = true;
             } else if (!std.mem.startsWith(u8, arg, "-")) {
-                _ = self.options.lost_found;
+                self.options.lost_found = true;
             }
         }
     }
@@ -201,7 +201,16 @@ pub const Fsck = struct {
             try self.output.infoMessage("fsck: no dangling objects", .{});
         }
 
-        _ = fsck;
+        const error_count = fsck.getErrorCount();
+        const warning_count = fsck.getWarningCount();
+
+        if (error_count > 0) {
+            try self.output.errorMessage("fsck: {d} error(s), {d} warning(s) found", .{ error_count, warning_count });
+        } else if (warning_count > 0) {
+            try self.output.warningMessage("fsck: {d} warning(s) found", .{warning_count});
+        } else if (dangling_count == 0) {
+            try self.output.successMessage("fsck: no issues found", .{});
+        }
     }
 
     fn collectReachableOids(self: *Fsck, git_dir: *const Io.Dir, reachable: *std.array_hash_map.String(void)) !void {

@@ -165,6 +165,5 @@ test "Bundle init" {
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
     const bundle = Bundle.init(std.testing.allocator, io, &writer.interface, .{});
-    _ = bundle;
-    try std.testing.expect(true);
+    try std.testing.expect(bundle.allocator == std.testing.allocator);
 }

@@ -69,7 +69,8 @@ pub const CatFile = struct {
             .content => try self.printContent(obj.data),
             .size => try self.printSize(obj.data),
             .pretty => try self.printPretty(obj),
-            .batch, .batch_check => {},
+            .batch => try self.printBatch(obj),
+            .batch_check => try self.printBatchCheck(obj),
         }
     }
 
@@ -173,6 +174,26 @@ pub const CatFile = struct {
         };
 
         return decompressed;
+    }
+
+    fn printBatch(self: *CatFile, obj: object_mod.Object) !void {
+        const type_name = switch (obj.obj_type) {
+            .commit => "commit",
+            .tree => "tree",
+            .blob => "blob",
+            .tag => "tag",
+        };
+        try self.output.writer.print("{s} {d}\n{s}\n", .{ type_name, obj.data.len, obj.data });
+    }
+
+    fn printBatchCheck(self: *CatFile, obj: object_mod.Object) !void {
+        const type_name = switch (obj.obj_type) {
+            .commit => "commit",
+            .tree => "tree",
+            .blob => "blob",
+            .tag => "tag",
+        };
+        try self.output.writer.print("{s} {d}\n", .{ type_name, obj.data.len });
     }
 };
 

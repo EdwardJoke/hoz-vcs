@@ -80,9 +80,8 @@ pub const Rm = struct {
                 }
 
                 const result = try remover.remove(&[_][]const u8{path});
-                _ = result;
                 if (self.options.verbose or self.options.dry_run) {
-                    try self.output.infoMessage("--→ rm '{s}'", .{path});
+                    try self.output.infoMessage("--→ rm '{s}' (removed:{d} deleted:{d})", .{ path, result.files_removed, result.files_deleted });
                 }
             }
 

@@ -41,10 +41,10 @@ pub const ObjectFilter = struct {
             if (std.mem.startsWith(u8, part, "blob:")) {
                 const limit_str = part[5..];
                 if (std.mem.endsWith(u8, limit_str, "m")) {
-                    const num_str = limit_str[0..limit_str.len - 1];
+                    const num_str = limit_str[0 .. limit_str.len - 1];
                     filter.blob_limit = try std.fmt.parseInt(u64, num_str, 10) * 1024 * 1024;
                 } else if (std.mem.endsWith(u8, limit_str, "k")) {
-                    const num_str = limit_str[0..limit_str.len - 1];
+                    const num_str = limit_str[0 .. limit_str.len - 1];
                     filter.blob_limit = try std.fmt.parseInt(u64, num_str, 10) * 1024;
                 } else {
                     filter.blob_limit = try std.fmt.parseInt(u64, limit_str, 10);
@@ -61,8 +61,15 @@ pub const ObjectFilter = struct {
     }
 
     pub fn toFilterSpec(self: ObjectFilter) FilterSpec {
+        if (self.blob_type_filter != null) {
+            return .{
+                .blob_filter = .blob_type,
+                .tree_depth = self.tree_depth,
+                .allow_unavailable = false,
+            };
+        }
         return .{
-            .blob_filter = if (self.blob_limit != null) .blob_limit else .none,
+            .blob_filter = if (self.blob_limit != null) .{.blob_limit} else .none,
             .tree_depth = self.tree_depth,
             .allow_unavailable = false,
         };
@@ -70,12 +77,41 @@ pub const ObjectFilter = struct {
 };
 
 pub fn filterToString(filter: FilterSpec) []const u8 {
-    _ = filter;
-    return "blob:none";
+    switch (filter.blob_filter) {
+        .none => return "blob:none",
+        .blob_limit => |limit| {
+            if (limit < 1024) {
+                return "blob:none";
+            } else if (limit < 1024 * 1024) {
+                const kb = limit / 1024;
+                var buf: [64]u8 = undefined;
+                const val = std.fmt.bufPrint(&buf, "blob:{d}k", .{kb}) catch return "blob:none";
+                return val;
+            } else {
+                const mb = limit / (1024 * 1024);
+                var buf: [64]u8 = undefined;
+                const val = std.fmt.bufPrint(&buf, "blob:{d}m", .{mb}) catch return "blob:none";
+                return val;
+            }
+        },
+        .blob_type => return "blob",
+    }
 }
 
-pub fn isPartialClone(url: []const u8) bool {
-    _ = url;
+pub fn isPartialClone(git_dir: []const u8, io: Io) !bool {
+    const cwd = std.Io.Dir.cwd();
+    const shallow_path = try std.fs.path.join(std.heap.page_allocator, &.{ git_dir, "objects/info/shallow" });
+    defer std.heap.page_allocator.free(shallow_path);
+    if (cwd.access(io, shallow_path, .{})) |_| {
+        return true;
+    } else |_| {}
+
+    const partial_path = try std.fs.path.join(std.heap.page_allocator, &.{ git_dir, "info/partial-clone" });
+    defer std.heap.page_allocator.free(partial_path);
+    if (cwd.access(io, partial_path, .{})) |_| {
+        return true;
+    } else |_| {}
+
     return false;
 }
 

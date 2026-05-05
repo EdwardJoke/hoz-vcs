@@ -6,6 +6,7 @@ const OutputStyle = @import("output.zig").OutputStyle;
 const fetch_mod = @import("../remote/fetch.zig");
 const fast_forward_mod = @import("../merge/fast_forward.zig");
 const oid_mod = @import("../object/oid.zig");
+const compress_mod = @import("../compress/zlib.zig");
 
 pub const Pull = struct {
     allocator: std.mem.Allocator,
@@ -147,7 +148,7 @@ pub const Pull = struct {
     }
 
     fn runMerge(self: *Pull, remote: []const u8, upstream: []const u8, branch: []const u8, git_dir: []const u8) !void {
-        _ = remote;
+        try self.output.infoMessage("Merging from remote '{s}'", .{remote});
 
         const head_oid = try self.resolveRef(git_dir, "HEAD");
         const upstream_oid = try self.resolveRef(git_dir, upstream);
@@ -189,8 +190,9 @@ pub const Pull = struct {
             const commit_data = self.readCommit(current) catch break;
             defer self.allocator.free(commit_data);
 
-            const parent_oid = self.extractParent(commit_data) orelse break;
-            current = parent_oid;
+            const parents = self.extractParents(commit_data);
+            if (parents.len == 0) break;
+            current = parents[0];
         }
 
         return .{ .can_ff = false };
@@ -220,17 +222,40 @@ pub const Pull = struct {
         defer file.close(self.io);
 
         var reader = file.reader(self.io, &.{});
-        return reader.interface.allocRemaining(self.allocator, .limited(1024 * 1024));
+        const compressed = try reader.interface.allocRemaining(self.allocator, .limited(1024 * 1024));
+        errdefer self.allocator.free(compressed);
+
+        return compress_mod.Zlib.decompress(compressed, self.allocator);
     }
 
-    fn extractParent(_: *Pull, commit_data: []const u8) ?oid_mod.OID {
-        if (std.mem.indexOf(u8, commit_data, "\nparent ")) |idx| {
-            const start = idx + "\nparent ".len;
-            const end = if (std.mem.indexOf(u8, commit_data[start..], "\n")) |nl| start + nl else commit_data.len;
-            const hex = commit_data[start..end];
-            return oid_mod.OID.fromHex(hex) catch null;
+    fn extractParents(self: *Pull, commit_data: []const u8) []const oid_mod.OID {
+        var parents = std.ArrayList(oid_mod.OID).initCapacity(self.allocator, 2) catch return &.{};
+        defer parents.deinit(self.allocator);
+
+        var offset: usize = 0;
+        while (offset < commit_data.len) {
+            if (std.mem.indexOfScalar(u8, commit_data[offset..], '\n')) |nl_pos| {
+                const line_start = offset;
+                const line_end = offset + nl_pos;
+                const line = commit_data[line_start..line_end];
+
+                if (std.mem.startsWith(u8, line, "parent ")) {
+                    const hex = line["parent ".len..];
+                    if (hex.len >= 40) {
+                        const oid = oid_mod.OID.fromHex(hex[0..40]) catch continue;
+                        parents.append(self.allocator, oid) catch {};
+                    }
+                } else if (line.len == 0) {
+                    break;
+                }
+
+                offset = line_end + 1;
+            } else {
+                break;
+            }
         }
-        return null;
+
+        return parents.toOwnedSlice(self.allocator) catch &.{};
     }
 
     fn fastForwardMerge(self: *Pull, git_dir: []const u8, branch: []const u8, new_oid: oid_mod.OID) !void {
@@ -243,9 +268,11 @@ pub const Pull = struct {
         var writer = file.writer(self.io, &.{});
 
         // Format OID as hex string manually
+        const hex_chars = "0123456789abcdef";
         var oid_hex: [40]u8 = undefined;
         for (new_oid.bytes, 0..) |byte, i| {
-            _ = std.fmt.bufPrint(oid_hex[i * 2 .. i * 2 + 2], "{x:0>2}", .{byte}) catch unreachable;
+            oid_hex[i * 2] = hex_chars[byte >> 4];
+            oid_hex[i * 2 + 1] = hex_chars[byte & 0x0F];
         }
 
         const oid_str = try std.fmt.allocPrint(self.allocator, "{s}\n", .{oid_hex[0..40]});

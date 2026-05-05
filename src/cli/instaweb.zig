@@ -52,10 +52,10 @@ pub const Instaweb = struct {
         var i: usize = 0;
         while (i < args.len) : (i += 1) {
             const arg = args[i];
-            if (std.mem.eql(u8, arg, "-p") or std.mem.eql(u8, arg, "--port") and i + 1 < args.len) {
+            if ((std.mem.eql(u8, arg, "-p") or std.mem.eql(u8, arg, "--port")) and i + 1 < args.len) {
                 i += 1;
                 self.options.port = std.fmt.parseInt(u16, args[i], 10) catch 1234;
-            } else if (std.mem.eql(u8, arg, "-b") or std.mem.eql(u8, arg, "--browser") and i + 1 < args.len) {
+            } else if ((std.mem.eql(u8, arg, "-b") or std.mem.eql(u8, arg, "--browser")) and i + 1 < args.len) {
                 i += 1;
                 self.options.browser = args[i];
             } else if (std.mem.eql(u8, arg, "--restart")) {
@@ -164,7 +164,6 @@ pub const Instaweb = struct {
     }
 
     fn generateGitwebConfig(self: *Instaweb, git_dir: *const Io.Dir, port: []const u8, bind_addr: []const u8) !void {
-        _ = git_dir;
         const config_path = try std.fs.path.join(self.allocator, &.{ ".git", "gitweb.conf" });
         defer self.allocator.free(config_path);
 
@@ -182,7 +181,7 @@ pub const Instaweb = struct {
         try config_content.appendSlice(self.allocator, "$feature{'snapshot'}{'default'} = ['zip', 'tgz'];\n");
         try config_content.appendSlice(self.allocator, "$prevent_xss = true;\n");
 
-        Io.Dir.cwd().writeFile(self.io, .{ .sub_path = config_path, .data = config_content.items }) catch {
+        git_dir.writeFile(self.io, .{ .sub_path = "gitweb.conf", .data = config_content.items }) catch {
             try self.output.errorMessage("Failed to write gitweb configuration", .{});
             return;
         };
