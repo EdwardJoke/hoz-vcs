@@ -30,6 +30,9 @@ pub const IgnoreFilter = struct {
         if (self.ignore_case) {
             return self.caseInsensitiveEqual(old_line, new_line);
         }
+        if (self.ignore_space_change) {
+            return self.collapseSpaceEqual(old_line, new_line);
+        }
         return false;
     }
 
@@ -72,6 +75,62 @@ pub const IgnoreFilter = struct {
             }
         }
         return true;
+    }
+
+    fn collapseSpaceEqual(self: *const IgnoreFilter, a: []const u8, b: []const u8) bool {
+        _ = self;
+        const max_len = @max(a.len, b.len);
+        if (max_len <= 4096) {
+            var buf_a: [4096]u8 = undefined;
+            var buf_b: [4096]u8 = undefined;
+            const collapsed_a = collapseSpacesInto(a, &buf_a);
+            const collapsed_b = collapseSpacesInto(b, &buf_b);
+            return std.mem.eql(u8, collapsed_a, collapsed_b);
+        }
+        var heap_buf_a = std.ArrayList(u8).initCapacity(std.heap.page_allocator, a.len) catch return false;
+        defer heap_buf_a.deinit();
+        var heap_buf_b = std.ArrayList(u8).initCapacity(std.heap.page_allocator, b.len) catch return false;
+        defer heap_buf_b.deinit();
+        const collapsed_a = collapseSpacesIntoHeap(a, &heap_buf_a);
+        const collapsed_b = collapseSpacesIntoHeap(b, &heap_buf_b);
+        return std.mem.eql(u8, collapsed_a, collapsed_b);
+    }
+
+    fn collapseSpacesInto(str: []const u8, buf: []u8) []u8 {
+        var in_space = false;
+        var write_idx: usize = 0;
+        for (str) |c| {
+            if (write_idx >= buf.len) break;
+            if (c == ' ' or c == '\t') {
+                if (!in_space) {
+                    buf[write_idx] = ' ';
+                    write_idx += 1;
+                    in_space = true;
+                }
+            } else {
+                buf[write_idx] = c;
+                write_idx += 1;
+                in_space = false;
+            }
+        }
+        return buf[0..write_idx];
+    }
+
+    fn collapseSpacesIntoHeap(str: []const u8, list: *std.ArrayList(u8)) []u8 {
+        var in_space = false;
+        list.items.len = 0;
+        for (str) |c| {
+            if (c == ' ' or c == '\t') {
+                if (!in_space) {
+                    list.append(' ') catch break;
+                    in_space = true;
+                }
+            } else {
+                list.append(c) catch break;
+                in_space = false;
+            }
+        }
+        return list.items;
     }
 
     fn stripWhitespace(self: *const IgnoreFilter, str: []const u8) []const u8 {
@@ -145,12 +204,21 @@ pub const GitIgnore = struct {
     }
 
     pub fn shouldIgnore(self: *GitIgnore, path: []const u8) bool {
+        var ignored = false;
         for (self.patterns.items) |pattern| {
-            if (self.matchPattern(pattern, path)) {
-                return true;
+            const is_negation = std.mem.startsWith(u8, pattern, "!");
+            if (is_negation) {
+                const inner = pattern[1..];
+                if (self.matchPatternInner(inner, path)) {
+                    ignored = false;
+                }
+            } else {
+                if (self.matchPattern(pattern, path)) {
+                    ignored = true;
+                }
             }
         }
-        return false;
+        return ignored;
     }
 
     pub fn checkIgnore(self: *GitIgnore, path: []const u8) ?[]const u8 {
@@ -192,12 +260,11 @@ pub const GitIgnore = struct {
     }
 
     fn matchPattern(self: *GitIgnore, pattern: []const u8, path: []const u8) bool {
+        return self.matchPatternInner(pattern, path);
+    }
+
+    fn matchPatternInner(self: *GitIgnore, pattern: []const u8, path: []const u8) bool {
         _ = self;
-
-        if (std.mem.startsWith(u8, pattern, "!")) {
-            return false;
-        }
-
         if (std.mem.endsWith(u8, pattern, "/")) {
             const dir_pattern = pattern[0 .. pattern.len - 1];
             return std.mem.startsWith(u8, path, dir_pattern) or std.mem.eql(u8, path, dir_pattern);
@@ -229,7 +296,8 @@ pub const GitIgnore = struct {
             return std.mem.startsWith(u8, path, prefix) and std.mem.endsWith(u8, path, suffix);
         }
 
-        return std.mem.eql(u8, path, pattern) or std.mem.endsWith(u8, path, pattern) or std.mem.indexOf(u8, path, pattern) != null;
+        const basename = if (std.mem.lastIndexOf(u8, path, "/")) |idx| path[idx + 1 ..] else path;
+        return std.mem.eql(u8, path, pattern) or std.mem.eql(u8, basename, pattern);
     }
 };
 

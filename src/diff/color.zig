@@ -5,12 +5,6 @@
 
 const std = @import("std");
 
-pub const ColorCode = struct {
-    code: []const u8,
-    prefix: []const u8,
-    suffix: []const u8,
-};
-
 pub const DiffColor = enum {
     reset,
     bold,
@@ -24,14 +18,6 @@ pub const DiffColor = enum {
     dim,
     italic,
     underline,
-};
-
-pub const ColorMovedColor = struct {
-    plain: ?[]const u8,
-    default_color: ?[]const u8,
-    blocks: ?[]const u8,
-    zebra: ?[]const u8,
-    dimmed_zebra: ?[]const u8,
 };
 
 pub const ANSI = struct {

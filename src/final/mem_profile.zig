@@ -84,7 +84,7 @@ pub const MemoryProfile = struct {
         self.regions.deinit(self.allocator);
     }
 
-    pub fn recordAllocation(self: *MemoryProfile, address: usize, size: usize, type: AllocationType) !void {
+    pub fn recordAllocation(self: *MemoryProfile, address: usize, size: usize, alloc_type: AllocationType) !void {
         if (!self.enabled) return;
 
         const stack = try self.captureStackTrace();
@@ -93,7 +93,7 @@ pub const MemoryProfile = struct {
         const alloc = MemoryAllocation{
             .address = address,
             .size = size,
-            .type = type,
+            .type = alloc_type,
             .timestamp = std.time.timestamp(),
             .stack_trace = stack,
             .freed = false,
@@ -123,11 +123,18 @@ pub const MemoryProfile = struct {
     }
 
     fn captureStackTrace(self: *MemoryProfile) ![]usize {
-        var buffer: [64]usize = undefined;
         const depth = @min(self.config.stack_depth, 64);
+        var trace = try self.allocator.alloc(usize, depth);
+        @memset(trace, 0);
 
-        var trace: []usize = try self.allocator.alloc(usize, depth);
-        @memcpy(trace, buffer[0..depth]);
+        if (comptime !@hasDecl(std.debug, "captureStackTrace")) {
+            return trace;
+        }
+
+        var buf: [64]usize = undefined;
+        const actual = std.debug.captureStackTrace(buf[0..]);
+        const copy_len = @min(actual, depth);
+        @memcpy(trace[0..copy_len], buf[0..copy_len]);
 
         return trace;
     }

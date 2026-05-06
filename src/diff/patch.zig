@@ -30,19 +30,22 @@ pub const PatchFormat = struct {
         new_lines: []const []const u8,
         edits: []const myers.Edit,
     ) !void {
+        var display_old = old_path;
+        var display_new = new_path;
+
         if (self.strip_level > 0) {
-            old_path = self.stripPath(old_path);
-            new_path = self.stripPath(new_path);
+            display_old = self.stripPath(old_path);
+            display_new = self.stripPath(new_path);
         }
 
         if (self.include_headers) {
-            try writer.print("diff --git {s}{s} {s}{s}\n", .{ self.remove_prefix, old_path, self.add_prefix, new_path });
-            try writer.print("--- {s}{s}\n", .{ self.remove_prefix, old_path });
-            try writer.print("+++ {s}{s}\n", .{ self.add_prefix, new_path });
+            try writer.print("diff --git {s}{s} {s}{s}\n", .{ self.remove_prefix, display_old, self.add_prefix, display_new });
+            try writer.print("--- {s}{s}\n", .{ self.remove_prefix, display_old });
+            try writer.print("+++ {s}{s}\n", .{ self.add_prefix, display_new });
         }
 
         var unified_diff = unified.UnifiedDiff.init(self.allocator);
-        try unified_diff.formatUnified(writer, old_path, new_path, old_lines, new_lines, edits);
+        try unified_diff.formatUnified(writer, display_old, display_new, old_lines, new_lines, edits);
     }
 
     fn stripPath(self: *const PatchFormat, path: []const u8) []const u8 {
@@ -112,11 +115,11 @@ pub const PatchFormat = struct {
         _ = self;
         const width: usize = 60;
         const path_len = @min(path.len, 40);
-        _ = width - path_len - 10;
+        const padding = if (width > path_len + 10) width - path_len - 10 else 0;
 
         try writer.print(" {s}", .{path[0..path_len]});
-        var i: usize = path_len;
-        while (i < width - 10) : (i += 1) {
+        var i: usize = 0;
+        while (i < padding) : (i += 1) {
             try writer.print(" ", .{});
         }
 
@@ -164,7 +167,7 @@ pub const PatchFormat = struct {
         const target_lines = try self.splitLines(target_content);
         defer self.allocator.free(target_lines);
 
-        var result_lines = std.ArrayList([]const u8).initCapacity(self.allocator, 0) catch return error.OutOfMemory;
+        var result_lines = try std.ArrayList([]const u8).initCapacity(self.allocator, 0);
         defer result_lines.deinit(self.allocator);
 
         var hunks_applied: u32 = 0;
@@ -192,7 +195,7 @@ pub const PatchFormat = struct {
             try result_lines.append(self.allocator, target_lines[current_line]);
         }
 
-        var result_buf = std.ArrayList(u8).initCapacity(self.allocator, 0) catch return error.OutOfMemory;
+        var result_buf = try std.ArrayList(u8).initCapacity(self.allocator, 0);
         for (result_lines.items) |line| {
             try result_buf.appendSlice(self.allocator, line);
             try result_buf.append(self.allocator, '\n');
@@ -221,11 +224,11 @@ pub const PatchFormat = struct {
     };
 
     fn parseHunks(self: *PatchFormat, patch: []const u8) ![]const Hunk {
-        var hunks = std.ArrayList(Hunk).initCapacity(self.allocator, 0) catch return error.OutOfMemory;
+        var hunks = std.ArrayListUnmanaged(Hunk).empty;
         errdefer hunks.deinit(self.allocator);
 
         var lines = std.mem.splitScalar(u8, patch, '\n');
-        var current_lines = std.ArrayList(HunkLine).initCapacity(self.allocator, 0) catch return error.OutOfMemory;
+        var current_lines = try std.ArrayList(HunkLine).initCapacity(self.allocator, 0);
         defer current_lines.deinit(self.allocator);
 
         var current_header: ?Hunk = null;
@@ -337,18 +340,26 @@ pub const PatchFormat = struct {
         current: *usize,
         hunk: Hunk,
     ) !bool {
+        var context_idx: usize = 0;
+        const context_lines = try self.collectContextLines(hunk);
+        defer self.allocator.free(context_lines);
+
         for (hunk.lines) |hunk_line| {
             switch (hunk_line.kind) {
                 .context => {
-                    if (current.* < target.len) {
-                        try result.append(self.allocator, target[current.*]);
-                        current.* += 1;
+                    if (current.* >= target.len) return false;
+                    if (context_idx < context_lines.len and
+                        !std.mem.eql(u8, target[current.*], context_lines[context_idx]))
+                    {
+                        return false;
                     }
+                    try result.append(self.allocator, target[current.*]);
+                    current.* += 1;
+                    context_idx += 1;
                 },
                 .remove => {
-                    if (current.* < target.len) {
-                        current.* += 1;
-                    }
+                    if (current.* >= target.len) return false;
+                    current.* += 1;
                 },
                 .add => {
                     try result.append(self.allocator, hunk_line.content);
@@ -359,8 +370,22 @@ pub const PatchFormat = struct {
         return true;
     }
 
+    fn collectContextLines(self: *PatchFormat, hunk: Hunk) ![]const []const u8 {
+        var count: usize = 0;
+        for (hunk.lines) |line| {
+            if (line.kind == .context) count += 1;
+        }
+        var list = std.ArrayList([]const u8).initCapacity(self.allocator, count) catch return error.OutOfMemory;
+        for (hunk.lines) |line| {
+            if (line.kind == .context) {
+                try list.append(self.allocator, line.content);
+            }
+        }
+        return list.toOwnedSlice(self.allocator);
+    }
+
     fn splitLines(self: *PatchFormat, text: []const u8) ![]const []const u8 {
-        var lines = std.ArrayList([]const u8).initCapacity(self.allocator, 0) catch return error.OutOfMemory;
+        var lines = try std.ArrayList([]const u8).initCapacity(self.allocator, 0);
         errdefer lines.deinit(self.allocator);
 
         var start: usize = 0;

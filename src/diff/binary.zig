@@ -114,9 +114,11 @@ pub const BinaryDetection = struct {
 
     pub fn suggestPrefix(self: *BinaryDetection, old_path: []const u8, new_path: []const u8) []const u8 {
         _ = self;
-        _ = old_path;
-        _ = new_path;
-        return "Binary";
+        const old_prefix = getBinaryPrefix(old_path);
+        const new_prefix = getBinaryPrefix(new_path);
+        if (std.mem.eql(u8, old_prefix, "Binary") or std.mem.eql(u8, new_prefix, "Binary"))
+            return "Binary";
+        return "text";
     }
 
     pub fn detectBinary(self: *BinaryDetection, content: []const u8) BinaryResult {
@@ -124,7 +126,6 @@ pub const BinaryDetection = struct {
     }
 
     pub fn formatBinary(self: *BinaryDetection, path: []const u8, content: []const u8) ![]const u8 {
-        _ = content;
         const result = self.detect(content);
         if (result.is_binary) {
             return try std.fmt.allocPrint(self.allocator, "Binary files {s} and {s} differ\n", .{ path, path });
@@ -164,7 +165,7 @@ pub const KNOWN_BINARY_EXTENSIONS = [_][]const u8{
     ".zip",   ".tar", ".gz",   ".bz2",   ".xz",   ".rar", ".7z",
     ".mp3",   ".mp4", ".avi",  ".mov",   ".wmv",  ".flv", ".wav",
     ".exe",   ".dll", ".so",   ".dylib", ".o",    ".a",   ".lib",
-    ".class", ".pyc", ".o",    ".obj",   ".bin",
+    ".class", ".pyc", ".obj",  ".bin",
 };
 
 pub fn isKnownBinaryExtension(ext: []const u8) bool {

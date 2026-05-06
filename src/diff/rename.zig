@@ -96,11 +96,11 @@ pub const RenameDetection = struct {
             return 0.0;
         }
 
-        const similarity = try self.computeMyersSimilarity(old_content, new_content);
+        const similarity = try self.computeLineSimilarity(old_content, new_content);
         return similarity;
     }
 
-    fn computeMyersSimilarity(self: *RenameDetection, old_content: []const u8, new_content: []const u8) !f64 {
+    fn computeLineSimilarity(self: *RenameDetection, old_content: []const u8, new_content: []const u8) !f64 {
         const old_lines = try self.splitLines(old_content);
         defer self.allocator.free(old_lines);
         const new_lines = try self.splitLines(new_content);

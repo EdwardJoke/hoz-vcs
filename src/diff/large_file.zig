@@ -32,8 +32,7 @@ pub const ChunkBoundary = struct {
 pub const DiffChunk = struct {
     old_offset: usize,
     new_offset: usize,
-    old_content: []const u8,
-    new_content: []const u8,
+    content: []const u8,
     is_eof: bool,
 };
 
@@ -124,23 +123,56 @@ pub const LargeFileDiffProcessor = struct {
         const new_chunks = try self.createChunks(new_text);
         defer self.disposeChunks(new_chunks);
 
+        const max_chunks = @max(old_chunks.len, new_chunks.len);
         var all_edits = std.ArrayList(myers.Edit).init(self.allocator);
         defer all_edits.deinit();
+
+        var global_old_line: usize = 1;
+        var global_new_line: usize = 1;
+
+        var myers_diff = myers.MyersDiff.init(self.allocator);
+
+        for (0..max_chunks) |ci| {
+            const old_chunk = if (ci < old_chunks.len) &old_chunks[ci] else null;
+            const new_chunk = if (ci < new_chunks.len) &new_chunks[ci] else null;
+
+            const old_lines = if (old_chunk) |oc|
+                try self.splitIntoLines(oc.content)
+            else
+                &[_][]const u8{};
+            defer if (ci < old_chunks.len) self.allocator.free(old_lines);
+
+            const new_lines = if (new_chunk) |nc|
+                try self.splitIntoLines(nc.content)
+            else
+                &[_][]const u8{};
+            defer if (ci < new_chunks.len) self.allocator.free(new_lines);
+
+            if (old_lines.len == 0 and new_lines.len == 0) {
+                continue;
+            }
+
+            const chunk_edits = try myers_diff.diff(old_lines, new_lines);
+            defer self.allocator.free(chunk_edits);
+
+            for (chunk_edits) |*edit| {
+                if (edit.operation != .insert) edit.old_line +%= @as(u32, @intCast(global_old_line));
+                if (edit.operation != .delete) edit.new_line +%= @as(u32, @intCast(global_new_line));
+                try all_edits.append(edit.*);
+            }
+
+            global_old_line += old_lines.len;
+            global_new_line += new_lines.len;
+        }
+
+        if (all_edits.items.len == 0) {
+            return;
+        }
 
         const old_lines_all = try self.splitIntoLines(old_text);
         defer self.allocator.free(old_lines_all);
         const new_lines_all = try self.splitIntoLines(new_text);
         defer self.allocator.free(new_lines_all);
-
-        var myers_diff = myers.MyersDiff.init(self.allocator);
-        const edits = try myers_diff.diff(old_lines_all, new_lines_all);
-        defer self.allocator.free(edits);
-
-        try all_edits.appendSlice(edits);
-
-        if (all_edits.items.len == 0) {
-            return;
-        }
 
         const hunks = try self.groupIntoHunks(all_edits.items, old_lines_all, new_lines_all);
         errdefer {
@@ -222,8 +254,7 @@ pub const LargeFileDiffProcessor = struct {
             try chunks.append(.{
                 .old_offset = offset,
                 .new_offset = line_num,
-                .old_content = text[offset..chunk_end],
-                .new_content = "",
+                .content = text[offset..chunk_end],
                 .is_eof = is_eof,
             });
 
@@ -336,14 +367,14 @@ pub const LargeFileDiffProcessor = struct {
         }
 
         const old_start = if (edits[hunk_start].operation == .delete or edits[hunk_start].operation == .equal)
-            edits[hunk_start].old_line -% (if (edits[hunk_start].operation == .equal) 1 else 0)
+            if (edits[hunk_start].old_line > 0) edits[hunk_start].old_line - 1 else 1
         else
-            edits[hunk_start + 1].old_line;
+            if (hunk_start + 1 < edits.len) edits[hunk_start + 1].old_line else old_lines.len + 1;
 
         const new_start = if (edits[hunk_start].operation == .insert or edits[hunk_start].operation == .equal)
-            edits[hunk_start].new_line -% (if (edits[hunk_start].operation == .equal) 1 else 0)
+            if (edits[hunk_start].new_line > 0) edits[hunk_start].new_line - 1 else 1
         else
-            edits[hunk_start + 1].new_line;
+            if (hunk_start + 1 < edits.len) edits[hunk_start + 1].new_line else new_lines.len + 1;
 
         var lines = std.ArrayList(result.Line).init(self.allocator);
         errdefer lines.deinit();
@@ -459,7 +490,7 @@ test "LargeFileDiffProcessor createChunks" {
     defer processor.disposeChunks(chunks);
 
     try std.testing.expect(chunks.len > 0);
-    try std.testing.expectEqualStrings("hello", chunks[0].old_content);
+    try std.testing.expectEqualStrings("hello", chunks[0].content);
 }
 
 test "LargeFileDiffProcessor processLargeFile standard mode" {

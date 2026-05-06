@@ -142,13 +142,13 @@ pub fn formatWordDiff(
     var buf = std.ArrayList(u8).init(allocator);
     errdefer buf.deinit();
 
-    for (result.changes) |change| {
+    for (result.changes, 0..) |change, idx| {
         switch (change.change_type) {
             .equal => try buf.writer().print("{s}", .{change.text}),
             .insert => try buf.writer().print("+{s}", .{change.text}),
             .delete => try buf.writer().print("-{s}", .{change.text}),
         }
-        if (options.separator.len > 0) {
+        if (options.separator.len > 0 and idx < result.changes.len - 1) {
             try buf.appendSlice(options.separator);
         }
     }

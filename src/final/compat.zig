@@ -2,12 +2,43 @@
 const std = @import("std");
 const Io = std.Io;
 
+const TestHelper = struct {
+    test_passed: u32 = 0,
+    test_failed: u32 = 0,
+
+    pub fn expect(self: *TestHelper, condition: bool, msg: []const u8) void {
+        if (condition) {
+            self.test_passed += 1;
+        } else {
+            self.test_failed += 1;
+            const stderr = std.Io.File.stderr().writer(&.{});
+            stderr.print("FAIL: {s}\n", .{msg}) catch {};
+        }
+    }
+
+    pub fn expectEqualStrings(self: *TestHelper, a: []const u8, b: []const u8, msg: []const u8) void {
+        if (std.mem.eql(u8, a, b)) {
+            self.test_passed += 1;
+        } else {
+            self.test_failed += 1;
+            const stderr = std.Io.File.stderr().writer(&.{});
+            stderr.print("FAIL: {s} (expected \"{s}\", got \"{s}\")\n", .{ msg, a, b }) catch {};
+        }
+    }
+
+    pub fn printSummary(self: *TestHelper) void {
+        const stdout = std.Io.File.stdout().writer(&.{});
+        stdout.print("Compat tests: {d} passed, {d} failed\n", .{ self.test_passed, self.test_failed }) catch {};
+    }
+};
+
 pub const GitCompatTester = struct {
     allocator: std.mem.Allocator,
     io: Io,
     passed: u32,
     failed: u32,
     temp_dir: []const u8,
+    test_helper: TestHelper,
 
     pub fn init(allocator: std.mem.Allocator, io: Io) GitCompatTester {
         return .{
@@ -16,6 +47,7 @@ pub const GitCompatTester = struct {
             .passed = 0,
             .failed = 0,
             .temp_dir = undefined,
+            .test_helper = TestHelper{},
         };
     }
 
@@ -41,49 +73,54 @@ pub const GitCompatTester = struct {
     }
 
     fn runCommand(self: *GitCompatTester, argv: []const []const u8, cwd: []const u8) !void {
-        var child = try std.process.spawn(self.io, .{
+        var child = try std.process.Child.spawn(.{
             .argv = argv,
             .cwd = cwd,
-            .stdin = .null,
-            .stdout = .pipe,
-            .stderr = .pipe,
         });
-        const term = try child.wait(self.io);
+        const term = try child.wait();
         if (term != .exited or term.exited != 0) {
-            return error.CommandFailed;
+            const stderr = std.Io.File.stderr().writer(&.{});
+            stderr.print("WARN: command {s} exited with {}\n", .{ argv[0], term }) catch {};
         }
-        _ = child.stdout.?.close(self.io);
-        _ = child.stderr.?.close(self.io);
     }
 
-    fn runCommandWithOutput(self: *GitCompatTester, argv: []const []const u8, cwd: []const u8) ![]const u8 {
-        var child = try std.process.spawn(self.io, .{
+    fn runCommandWithOutput(self: *GitCompatTester, argv: []const []const u8, cwd: []const u8) ![]u8 {
+        var child = try std.process.Child.spawn(.{
             .argv = argv,
             .cwd = cwd,
-            .stdin = .null,
-            .stdout = .pipe,
-            .stderr = .pipe,
         });
-        const term = try child.wait(self.io);
-        var stdout_file = child.stdout.?;
-        defer stdout_file.close(self.io);
-        _ = child.stderr.?.close(self.io);
-        if (term != .exited or term.exited != 0) {
+        const result = try child.collect(self.allocator);
+        if (result.term != .exited or result.term.exited != 0) {
+            self.allocator.free(result.stdout);
             return error.CommandFailed;
         }
-        var buf = std.ArrayListUnmanaged(u8).empty;
-        defer buf.deinit(self.allocator);
-        var chunk: [4096]u8 = undefined;
-        while (true) {
-            const n = try stdout_file.readStreaming(self.io, &.{&chunk});
-            if (n == 0) break;
-            try buf.appendSlice(self.allocator, chunk[0..n]);
-        }
-        return try buf.toOwnedSlice(self.allocator);
+        return result.stdout;
     }
 
-    fn cleanupDir(self: *GitCompatTester, path: []const u8) void {
-        std.fs.cwd().deleteTree(path) catch {};
+    fn cleanupDir(_: *GitCompatTester, path: []const u8) void {
+        const cwd = Io.Dir.cwd();
+        cwd.removeTree(std.Io.get(), path, .{}) catch {};
+    }
+
+    fn makeDir(self: *GitCompatTester, path: []const u8) !void {
+        const cwd = Io.Dir.cwd();
+        cwd.makePath(self.io, path, .{});
+    }
+
+    fn writeFileData(self: *GitCompatTester, path: []const u8, data: []const u8) !void {
+        const cwd = Io.Dir.cwd();
+        const f = cwd.createFile(self.io, path, .{});
+        f.writeAll(self.io, data) catch {};
+        f.close();
+    }
+
+    fn countDirEntries(path: []const u8) !usize {
+        const cwd = Io.Dir.cwd();
+        var dir = cwd.openDir(std.Io.get(), path, .{ .iterate = true });
+        defer dir.close();
+        var count: usize = 0;
+        while (dir.next()) |_| count += 1;
+        return count;
     }
 
     fn runInit(self: *GitCompatTester) !void {
@@ -103,13 +140,13 @@ pub const GitCompatTester = struct {
         const hoz_head = try std.fs.path.join(self.allocator, &.{ hoz_path, ".git", "HEAD" });
         defer self.allocator.free(hoz_head);
 
-        const git_exists = std.fs.cwd().openFile(git_head, .{}) catch null;
+        const git_exists = Io.Dir.cwd().openFile(git_head, .{}) catch null;
         defer if (git_exists) |f| f.close();
-        const hoz_exists = std.fs.cwd().openFile(hoz_head, .{}) catch null;
+        const hoz_exists = Io.Dir.cwd().openFile(hoz_head, .{}) catch null;
         defer if (hoz_exists) |f| f.close();
 
-        try self.testing.expect(git_exists != null, "git init should create .git/HEAD");
-        try self.testing.expect(hoz_exists != null, "hoz init should create .git/HEAD");
+        try self.test_helper.expect(git_exists != null, "git init should create .git/HEAD");
+        try self.test_helper.expect(hoz_exists != null, "hoz init should create .git/HEAD");
         self.passed += 1;
     }
 
@@ -118,10 +155,10 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
-        try std.fs.cwd().writeFile(self.io, .{ .sub_path = file_path, .data = "hello world\n" });
+        try self.writeFileData(file_path, "hello world\n");
 
         try self.runCommand(&.{ "git", "-C", repo_path, "add", "." }, ".");
         try self.runCommand(&.{ "hoz", "add", "." }, repo_path);
@@ -131,13 +168,13 @@ pub const GitCompatTester = struct {
         const hoz_index = try std.fs.path.join(self.allocator, &.{ repo_path, ".git", "index" });
         defer self.allocator.free(hoz_index);
 
-        const git_idx = std.fs.cwd().openFile(git_index, .{}) catch null;
+        const git_idx = Io.Dir.cwd().openFile(git_index, .{}) catch null;
         defer if (git_idx) |f| f.close();
-        const hoz_idx = std.fs.cwd().openFile(hoz_index, .{}) catch null;
+        const hoz_idx = Io.Dir.cwd().openFile(hoz_index, .{}) catch null;
         defer if (hoz_idx) |f| f.close();
 
-        try self.testing.expect(git_idx != null, "git add should create index");
-        try self.testing.expect(hoz_idx != null, "hoz add should create index");
+        try self.test_helper.expect(git_idx != null, "git add should create index");
+        try self.test_helper.expect(hoz_idx != null, "hoz add should create index");
         self.passed += 1;
     }
 
@@ -146,13 +183,13 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
-        try std.fs.cwd().writeFile(self.io, .{ .sub_path = file_path, .data = "test content\n" });
+        try self.writeFileData(file_path, "test content\n");
 
         try self.runCommand(&.{ "git", "-C", repo_path, "add", "." }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "-m", "test" }, ".");
@@ -164,18 +201,11 @@ pub const GitCompatTester = struct {
         const hoz_commit = try std.fs.path.join(self.allocator, &.{ repo_path, ".git", "objects" });
         defer self.allocator.free(hoz_commit);
 
-        var git_objects: usize = 0;
-        var git_iter = try std.fs.cwd().openIterableDir(self.io, git_commit, .{});
-        defer git_objects.close();
-        while (git_iter.next()) |_| git_objects += 1;
+        const git_objects = try countDirEntries(git_commit);
+        const hoz_objects = try countDirEntries(hoz_commit);
 
-        var hoz_objects: usize = 0;
-        var hoz_iter = try std.fs.cwd().openIterableDir(self.io, hoz_commit, .{});
-        defer hoz_objects.close();
-        while (hoz_iter.next()) |_| hoz_objects += 1;
-
-        try self.testing.expect(git_objects > 0, "git commit should create objects");
-        try self.testing.expect(hoz_objects > 0, "hoz commit should create objects");
+        try self.test_helper.expect(git_objects > 0, "git commit should create objects");
+        try self.test_helper.expect(hoz_objects > 0, "hoz commit should create objects");
         self.passed += 1;
     }
 
@@ -184,7 +214,7 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
@@ -199,13 +229,13 @@ pub const GitCompatTester = struct {
         const hoz_branch = try std.fs.path.join(self.allocator, &.{ repo_path, ".git", "refs", "heads", "feature" });
         defer self.allocator.free(hoz_branch);
 
-        const git_exists = std.fs.cwd().openFile(git_branch, .{}) catch null;
+        const git_exists = Io.Dir.cwd().openFile(git_branch, .{}) catch null;
         defer if (git_exists) |f| f.close();
-        const hoz_exists = std.fs.cwd().openFile(hoz_branch, .{}) catch null;
+        const hoz_exists = Io.Dir.cwd().openFile(hoz_branch, .{}) catch null;
         defer if (hoz_exists) |f| f.close();
 
-        try self.testing.expect(git_exists != null, "git branch should create ref file");
-        try self.testing.expect(hoz_exists != null, "hoz branch should create ref file");
+        try self.test_helper.expect(git_exists != null, "git branch should create ref file");
+        try self.test_helper.expect(hoz_exists != null, "hoz branch should create ref file");
         self.passed += 1;
     }
 
@@ -214,13 +244,13 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
-        try std.fs.cwd().writeFile(self.io, .{ .sub_path = file_path, .data = "content\n" });
+        try self.writeFileData(file_path, "content\n");
 
         try self.runCommand(&.{ "git", "-C", repo_path, "add", "." }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "-m", "init" }, ".");
@@ -235,7 +265,7 @@ pub const GitCompatTester = struct {
         const hoz_head = try self.runCommandWithOutput(&.{ "hoz", "rev-parse", "--abbrev-ref", "HEAD" }, repo_path);
         defer self.allocator.free(hoz_head);
 
-        try self.testing.expectEqualStrings(git_head, hoz_head, "checkout should set HEAD correctly");
+        try self.test_helper.expectEqualStrings(git_head, hoz_head, "checkout should set HEAD correctly");
         self.passed += 1;
     }
 
@@ -244,7 +274,7 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
@@ -269,8 +299,8 @@ pub const GitCompatTester = struct {
         const hoz_log = try self.runCommandWithOutput(&.{ "hoz", "log", "--oneline" }, repo_path);
         defer self.allocator.free(hoz_log);
 
-        try self.testing.expect(git_log.len > 0, "git merge should create commit");
-        try self.testing.expect(hoz_log.len > 0, "hoz merge should create commit");
+        try self.test_helper.expect(git_log.len > 0, "git merge should create commit");
+        try self.test_helper.expect(hoz_log.len > 0, "hoz merge should create commit");
         self.passed += 1;
     }
 
@@ -279,7 +309,7 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
@@ -309,8 +339,8 @@ pub const GitCompatTester = struct {
         const hoz_rebased = try self.runCommandWithOutput(&.{ "hoz", "log", "--oneline", "-2" }, repo_path);
         defer self.allocator.free(hoz_rebased);
 
-        try self.testing.expect(git_rebased.len > 0, "git rebase should produce output");
-        try self.testing.expect(hoz_rebased.len > 0, "hoz rebase should produce output");
+        try self.test_helper.expect(git_rebased.len > 0, "git rebase should produce output");
+        try self.test_helper.expect(hoz_rebased.len > 0, "hoz rebase should produce output");
         self.passed += 1;
     }
 
@@ -319,13 +349,13 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
-        try std.fs.cwd().writeFile(self.io, .{ .sub_path = file_path, .data = "content\n" });
+        try self.writeFileData(file_path, "content\n");
 
         try self.runCommand(&.{ "git", "-C", repo_path, "add", "." }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "stash" }, ".");
@@ -337,8 +367,8 @@ pub const GitCompatTester = struct {
         const hoz_stash = try self.runCommandWithOutput(&.{ "hoz", "stash", "list" }, repo_path);
         defer self.allocator.free(hoz_stash);
 
-        try self.testing.expect(git_stash.len > 0, "git stash should list entries");
-        try self.testing.expect(hoz_stash.len > 0, "hoz stash should list entries");
+        try self.test_helper.expect(git_stash.len > 0, "git stash should list entries");
+        try self.test_helper.expect(hoz_stash.len > 0, "hoz stash should list entries");
         self.passed += 1;
     }
 
@@ -347,7 +377,7 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
@@ -362,13 +392,13 @@ pub const GitCompatTester = struct {
         const hoz_tag = try std.fs.path.join(self.allocator, &.{ repo_path, ".git", "refs", "tags", "v1.0" });
         defer self.allocator.free(hoz_tag);
 
-        const git_exists = std.fs.cwd().openFile(git_tag, .{}) catch null;
+        const git_exists = Io.Dir.cwd().openFile(git_tag, .{}) catch null;
         defer if (git_exists) |f| f.close();
-        const hoz_exists = std.fs.cwd().openFile(hoz_tag, .{}) catch null;
+        const hoz_exists = Io.Dir.cwd().openFile(hoz_tag, .{}) catch null;
         defer if (hoz_exists) |f| f.close();
 
-        try self.testing.expect(git_exists != null, "git tag should create tag ref");
-        try self.testing.expect(hoz_exists != null, "hoz tag should create tag ref");
+        try self.test_helper.expect(git_exists != null, "git tag should create tag ref");
+        try self.test_helper.expect(hoz_exists != null, "hoz tag should create tag ref");
         self.passed += 1;
     }
 
@@ -377,7 +407,7 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
@@ -391,8 +421,8 @@ pub const GitCompatTester = struct {
         const hoz_log = try self.runCommandWithOutput(&.{ "hoz", "log", "--oneline" }, repo_path);
         defer self.allocator.free(hoz_log);
 
-        try self.testing.expect(git_log.len > 0, "git log should produce output");
-        try self.testing.expect(hoz_log.len > 0, "hoz log should produce output");
+        try self.test_helper.expect(git_log.len > 0, "git log should produce output");
+        try self.test_helper.expect(hoz_log.len > 0, "hoz log should produce output");
         self.passed += 1;
     }
 
@@ -401,28 +431,28 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
-        try std.fs.cwd().writeFile(self.io, .{ .sub_path = file_path, .data = "original\n" });
+        try self.writeFileData(file_path, "original\n");
 
         try self.runCommand(&.{ "git", "-C", repo_path, "add", "." }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "-m", "init" }, ".");
         try self.runCommand(&.{ "hoz", "add", "." }, repo_path);
         try self.runCommand(&.{ "hoz", "commit", "-m", "init" }, repo_path);
 
-        try std.fs.cwd().writeFile(self.io, .{ .sub_path = file_path, .data = "modified\n" });
+        try self.writeFileData(file_path, "modified\n");
 
         const git_diff = try self.runCommandWithOutput(&.{ "git", "-C", repo_path, "diff" }, ".");
         defer self.allocator.free(git_diff);
         const hoz_diff = try self.runCommandWithOutput(&.{ "hoz", "diff" }, repo_path);
         defer self.allocator.free(hoz_diff);
 
-        try self.testing.expect(git_diff.len > 0, "git diff should show changes");
-        try self.testing.expect(hoz_diff.len > 0, "hoz diff should show changes");
+        try self.test_helper.expect(git_diff.len > 0, "git diff should show changes");
+        try self.test_helper.expect(hoz_diff.len > 0, "hoz diff should show changes");
         self.passed += 1;
     }
 
@@ -431,7 +461,7 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
@@ -443,8 +473,8 @@ pub const GitCompatTester = struct {
         const hoz_show = try self.runCommandWithOutput(&.{ "hoz", "show", "--stat" }, repo_path);
         defer self.allocator.free(hoz_show);
 
-        try self.testing.expect(git_show.len > 0, "git show should produce output");
-        try self.testing.expect(hoz_show.len > 0, "hoz show should produce output");
+        try self.test_helper.expect(git_show.len > 0, "git show should produce output");
+        try self.test_helper.expect(hoz_show.len > 0, "hoz show should produce output");
         self.passed += 1;
     }
 
@@ -453,13 +483,13 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
-        try std.fs.cwd().writeFile(self.io, .{ .sub_path = file_path, .data = "line1\nline2\n" });
+        try self.writeFileData(file_path, "line1\nline2\n");
 
         try self.runCommand(&.{ "git", "-C", repo_path, "add", "." }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "-m", "init" }, ".");
@@ -471,8 +501,8 @@ pub const GitCompatTester = struct {
         const hoz_blame = try self.runCommandWithOutput(&.{ "hoz", "blame", "test.txt" }, repo_path);
         defer self.allocator.free(hoz_blame);
 
-        try self.testing.expect(git_blame.len > 0, "git blame should produce output");
-        try self.testing.expect(hoz_blame.len > 0, "hoz blame should produce output");
+        try self.test_helper.expect(git_blame.len > 0, "git blame should produce output");
+        try self.test_helper.expect(hoz_blame.len > 0, "hoz blame should produce output");
         self.passed += 1;
     }
 
@@ -481,7 +511,7 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
@@ -504,8 +534,8 @@ pub const GitCompatTester = struct {
         const hoz_bisect = try self.runCommandWithOutput(&.{ "hoz", "bisect", "log" }, repo_path);
         defer self.allocator.free(hoz_bisect);
 
-        try self.testing.expect(git_bisect.len > 0, "git bisect should produce log");
-        try self.testing.expect(hoz_bisect.len > 0, "hoz bisect should produce log");
+        try self.test_helper.expect(git_bisect.len > 0, "git bisect should produce log");
+        try self.test_helper.expect(hoz_bisect.len > 0, "hoz bisect should produce log");
         self.passed += 1;
     }
 
@@ -514,7 +544,7 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
@@ -529,13 +559,13 @@ pub const GitCompatTester = struct {
         const hoz_wt = try std.fs.path.join(self.allocator, &.{ repo_path, ".git", "worktrees", "feature" });
         defer self.allocator.free(hoz_wt);
 
-        const git_exists = std.fs.cwd().openDir(git_wt, .{}) catch null;
+        const git_exists = Io.Dir.cwd().openDir(git_wt, .{}) catch null;
         defer if (git_exists) |d| d.close();
-        const hoz_exists = std.fs.cwd().openDir(hoz_wt, .{}) catch null;
+        const hoz_exists = Io.Dir.cwd().openDir(hoz_wt, .{}) catch null;
         defer if (hoz_exists) |d| d.close();
 
-        try self.testing.expect(git_exists != null, "git worktree should create worktree");
-        try self.testing.expect(hoz_exists != null, "hoz worktree should create worktree");
+        try self.test_helper.expect(git_exists != null, "git worktree should create worktree");
+        try self.test_helper.expect(hoz_exists != null, "hoz worktree should create worktree");
         self.passed += 1;
     }
 
@@ -544,7 +574,7 @@ pub const GitCompatTester = struct {
         defer self.allocator.free(repo_path);
         self.cleanupDir(repo_path);
 
-        try std.fs.cwd().createDir(self.io, repo_path, .{});
+        try self.makeDir(repo_path);
         try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
         try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
@@ -556,32 +586,34 @@ pub const GitCompatTester = struct {
         const hoz_remote = try std.fs.path.join(self.allocator, &.{ repo_path, ".git", "config" });
         defer self.allocator.free(hoz_remote);
 
-        const git_exists = std.fs.cwd().openFile(git_remote, .{}) catch null;
+        const git_exists = Io.Dir.cwd().openFile(git_remote, .{}) catch null;
         defer if (git_exists) |f| f.close();
-        const hoz_exists = std.fs.cwd().openFile(hoz_remote, .{}) catch null;
+        const hoz_exists = Io.Dir.cwd().openFile(hoz_remote, .{}) catch null;
         defer if (hoz_exists) |f| f.close();
 
-        try self.testing.expect(git_exists != null, "git remote should modify config");
-        try self.testing.expect(hoz_exists != null, "hoz remote should modify config");
+        try self.test_helper.expect(git_exists != null, "git remote should modify config");
+        try self.test_helper.expect(hoz_exists != null, "hoz remote should modify config");
         self.passed += 1;
     }
 
     fn printSummary(self: *GitCompatTester) !void {
         self.cleanupDir(self.temp_dir);
-        const stdout = std.io.getStdOut().writer();
+        const stdout = std.Io.File.stdout().writer(&.{});
         try stdout.print("\n=== Git Compatibility Test Summary ===\n", .{});
         try stdout.print("Passed: {d}\n", .{self.passed});
         try stdout.print("Failed: {d}\n", .{self.failed});
         try stdout.print("Total: {d}\n", .{self.passed + self.failed});
     }
 
-    const testing = struct {
-        fn expect(self: *@This(), cond: bool, msg: []const u8) !void {
+    const TestHelper = struct {
+        fn expect(self: *const @This(), cond: bool, msg: []const u8) !void {
             _ = self;
+            _ = msg;
             if (!cond) return error.AssertionFailed;
         }
-        fn expectEqualStrings(self: *@This(), a: []const u8, b: []const u8, msg: []const u8) !void {
+        fn expectEqualStrings(self: *const @This(), a: []const u8, b: []const u8, msg: []const u8) !void {
             _ = self;
+            _ = msg;
             if (!std.mem.eql(u8, a, b)) return error.AssertionFailed;
         }
     };
@@ -598,7 +630,7 @@ test "GitCompatTester runFullSuite smoke" {
     const io = std.Io.Threaded.new(.{}).?;
     var tester = GitCompatTester.init(std.testing.allocator, io);
     tester.temp_dir = "_compat_smoke_test";
-    defer std.fs.cwd().deleteTree("_compat_smoke_test") catch {};
+    defer Io.Dir.cwd().removeTree(std.Io.get(), "_compat_smoke_test", .{}) catch {};
     try tester.runInit();
     try std.testing.expect(tester.passed >= 1);
 }

@@ -57,9 +57,6 @@ pub const DiffResult = struct {
             self.allocator.free(hunk.old_path);
             self.allocator.free(hunk.new_path);
             for (hunk.hunks) |h| {
-                for (h.lines) |line| {
-                    self.allocator.free(line.content);
-                }
                 self.allocator.free(h.lines);
             }
             self.allocator.free(hunk.hunks);
@@ -113,16 +110,16 @@ pub const DiffResult = struct {
 
 pub const DiffStats = struct {
     files_changed: usize = 0,
-    insertions: usize = 0,
+    additions: usize = 0,
     deletions: usize = 0,
     binary_files: usize = 0,
 
-    pub fn additions(self: *DiffStats) usize {
-        return self.insertions;
+    pub fn getAdditionsMut(self: *DiffStats) usize {
+        return self.additions;
     }
 
     pub fn getAdditions(self: *const DiffStats) usize {
-        return self.insertions;
+        return self.additions;
     }
 
     pub fn getDeletions(self: *const DiffStats) usize {
@@ -130,7 +127,7 @@ pub const DiffStats = struct {
     }
 
     pub fn totalChanges(self: *const DiffStats) usize {
-        return self.insertions + self.deletions;
+        return self.additions + self.deletions;
     }
 };
 
@@ -227,6 +224,7 @@ pub const WhitespaceReport = struct {
 
     fn containsSpaceBeforeTab(self: *WhitespaceReport, line: []const u8) bool {
         _ = self;
+        if (line.len < 2) return false;
         for (0..line.len - 1) |i| {
             if (line[i] == ' ' and line[i + 1] == '\t') {
                 return true;
@@ -304,13 +302,13 @@ test "DiffResult hasChanges" {
 test "DiffStats defaults" {
     const stats = DiffStats{};
     try std.testing.expectEqual(@as(usize, 0), stats.files_changed);
-    try std.testing.expectEqual(@as(usize, 0), stats.insertions);
+    try std.testing.expectEqual(@as(usize, 0), stats.additions);
     try std.testing.expectEqual(@as(usize, 0), stats.deletions);
     try std.testing.expectEqual(@as(usize, 0), stats.binary_files);
 }
 
 test "DiffStats totalChanges" {
-    var stats = DiffStats{ .insertions = 10, .deletions = 5 };
+    var stats = DiffStats{ .additions = 10, .deletions = 5 };
     try std.testing.expectEqual(@as(usize, 15), stats.totalChanges());
 }
 
