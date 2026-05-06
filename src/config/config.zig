@@ -1,4 +1,4 @@
-//! Config Type - Configuration storage using TOML
+//! Config Type - Configuration storage using Git-config format
 const std = @import("std");
 
 pub const ConfigScope = enum {
@@ -24,9 +24,9 @@ pub const ConfigType = enum {
 
 pub const ConfigTypeParser = struct {
     pub fn parseBool(value: []const u8) !bool {
-        if (std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "yes") or std.mem.eql(u8, value, "on")) {
+        if (std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "yes") or std.mem.eql(u8, value, "on") or std.mem.eql(u8, value, "1")) {
             return true;
-        } else if (std.mem.eql(u8, value, "false") or std.mem.eql(u8, value, "no") or std.mem.eql(u8, value, "off")) {
+        } else if (std.mem.eql(u8, value, "false") or std.mem.eql(u8, value, "no") or std.mem.eql(u8, value, "off") or std.mem.eql(u8, value, "0")) {
             return false;
         }
         return error.InvalidBoolValue;
@@ -40,21 +40,26 @@ pub const ConfigTypeParser = struct {
         return std.fmt.parseInt(i64, value, 10);
     }
 
-    pub fn formatInt(value: i64) []const u8 {
-        return std.fmt.print("{d}", .{value});
+    pub fn formatInt(allocator: std.mem.Allocator, value: i64) ![]const u8 {
+        return std.fmt.allocPrint(allocator, "{d}", .{value});
     }
 
     pub fn parsePath(value: []const u8) ![]const u8 {
+        if (value.len == 0) return error.EmptyPath;
+        for (value) |byte| {
+            if (byte == 0) return error.InvalidPath;
+        }
         return value;
     }
 
     pub fn parseExpiryDate(value: []const u8) !i64 {
-        _ = value;
-        return 0;
+        const ts = std.fmt.parseInt(i64, value, 10) catch return error.InvalidExpiryDate;
+        if (ts < 0) return error.InvalidExpiryDate;
+        return ts;
     }
 
-    pub fn formatExpiryDate(timestamp: i64) []const u8 {
-        return std.fmt.print("{d}", .{timestamp});
+    pub fn formatExpiryDate(allocator: std.mem.Allocator, timestamp: i64) ![]const u8 {
+        return std.fmt.allocPrint(allocator, "{d}", .{timestamp});
     }
 };
 
@@ -70,6 +75,10 @@ pub const Config = struct {
     }
 
     pub fn deinit(self: *Config) void {
+        var it = self.entries.iterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.value_ptr.*);
+        }
         self.entries.deinit(self.allocator);
     }
 
@@ -78,12 +87,19 @@ pub const Config = struct {
     }
 
     pub fn set(self: *Config, key: []const u8, value: []const u8) !void {
-        try self.entries.put(self.allocator, key, value);
+        const owned = try self.allocator.dupe(u8, value);
+        errdefer self.allocator.free(owned);
+
+        const old_value_ptr = self.entries.get(key);
+        try self.entries.put(self.allocator, key, owned);
+        if (old_value_ptr) |v| {
+            self.allocator.free(v);
+        }
     }
 
     pub fn unset(self: *Config, key: []const u8) void {
-        if (self.entries.fetchRemove(key)) |kv| {
-            self.allocator.free(kv.value);
+        if (self.entries.orderedRemove(key)) |value| {
+            self.allocator.free(value);
         }
     }
 };

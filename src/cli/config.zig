@@ -103,7 +103,7 @@ pub const Config = struct {
 
         const key = args[0];
 
-        var getter = ConfigGetter.init(self.allocator);
+        var getter = ConfigGetter.init(self.allocator, self.io);
         const value = try getter.get(key);
 
         if (value) |v| {
@@ -122,7 +122,7 @@ pub const Config = struct {
         const key = args[0];
         const value = args[1];
 
-        var setter = ConfigSetter.init(self.allocator);
+        var setter = ConfigSetter.init(self.allocator, self.io);
 
         switch (self.scope) {
             .global => try setter.setGlobal(key, value),
@@ -140,7 +140,7 @@ pub const Config = struct {
         }
 
         const key = args[0];
-        var setter = ConfigSetter.init(self.allocator);
+        var setter = ConfigSetter.init(self.allocator, self.io);
         try setter.unset(key);
 
         try self.output.successMessage("Unset {s}", .{key});

@@ -1,4 +1,4 @@
-//! Config List - List all config entries
+//! Config List - List all config entries (Git-config)
 const std = @import("std");
 const Io = std.Io;
 
@@ -12,12 +12,12 @@ pub const ConfigLister = struct {
 
     pub fn listAll(self: *ConfigLister) ![]const []const u8 {
         var all = std.ArrayList([]const u8).empty;
-        defer {
+        errdefer {
             for (all.items) |e| self.allocator.free(e);
             all.deinit(self.allocator);
         }
 
-        const scopes = &[_][]const u8{ ".git/config", "home:.gitconfig", "/etc/gitconfig" };
+        const scopes = &[_][]const u8{ ".git/config", "home:.config/hoz/config", "/etc/hoz/config" };
         for (scopes) |scope_path| {
             const entries = try self.readConfigFile(scope_path);
             defer {
@@ -39,13 +39,13 @@ pub const ConfigLister = struct {
 
     pub fn listGlobal(self: *ConfigLister) ![]const []const u8 {
         const home = self.getHomeDir() orelse return &.{};
-        const path = try std.fmt.allocPrint(self.allocator, "{s}/.gitconfig", .{home});
+        const path = try std.fmt.allocPrint(self.allocator, "{s}/.config/hoz/config", .{home});
         defer self.allocator.free(path);
         return self.readConfigFilePath(path);
     }
 
     pub fn listSystem(self: *ConfigLister) ![]const []const u8 {
-        return self.readConfigFilePath("/etc/gitconfig");
+        return self.readConfigFilePath("/etc/hoz/config");
     }
 
     fn readConfigFile(self: *ConfigLister, path: []const u8) ![]const []const u8 {
@@ -71,36 +71,56 @@ pub const ConfigLister = struct {
             lines.deinit(self.allocator);
         }
 
-        var iter = std.mem.splitScalar(u8, data, "\n");
+        var current_section: []const u8 = "";
+        var iter = std.mem.splitScalar(u8, data, '\n');
         while (iter.next()) |raw| {
             const trimmed = std.mem.trim(u8, raw, " \t\r\n");
             if (trimmed.len == 0 or std.mem.startsWith(u8, trimmed, "#")) continue;
-            const line = try self.allocator.dupe(u8, trimmed);
-            try lines.append(self.allocator, line);
+
+            if (std.mem.startsWith(u8, trimmed, "[")) {
+                const end = std.mem.indexOf(u8, trimmed, "]") orelse continue;
+                current_section = trimmed[1..end];
+                const line = try self.allocator.dupe(u8, trimmed);
+                try lines.append(self.allocator, line);
+                continue;
+            }
+
+            if (std.mem.indexOf(u8, trimmed, "=")) |_| {
+                const line = if (current_section.len > 0)
+                    try std.fmt.allocPrint(self.allocator, "[{s}] {s}", .{ current_section, trimmed })
+                else
+                    try self.allocator.dupe(u8, trimmed);
+                try lines.append(self.allocator, line);
+            }
         }
 
         return lines.toOwnedSlice(self.allocator);
     }
 
     fn getHomeDir(self: *ConfigLister) ?[]const u8 {
-        const cwd = Io.Dir.cwd();
-        const home = std.os.getenv("HOME") orelse return null;
-        return home;
+        _ = self;
+        const home = std.c.getenv("HOME") orelse return null;
+        return std.mem.sliceTo(home, 0);
     }
 };
 
 test "ConfigLister init" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{ .stdin = .empty, .stdout = .buffered(&buf), .stderr = .buffered(&buf) });
+    var threaded = std.Io.Threaded.init(std.testing.allocator, .{});
+    defer threaded.deinit();
+    const io = std.Io.Threaded.io(&threaded);
     const lister = ConfigLister.init(std.testing.allocator, io);
-    try std.testing.expect(lister.allocator == std.testing.allocator);
+    _ = lister;
 }
 
 test "ConfigLister listLocal method exists" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{ .stdin = .empty, .stdout = .buffered(&buf), .stderr = .buffered(&buf) });
+    var threaded = std.Io.Threaded.init(std.testing.allocator, .{});
+    defer threaded.deinit();
+    const io = std.Io.Threaded.io(&threaded);
     var lister = ConfigLister.init(std.testing.allocator, io);
     const entries = try lister.listLocal();
-    _ = entries;
+    defer {
+        for (entries) |e| std.testing.allocator.free(e);
+        std.testing.allocator.free(entries);
+    }
     try std.testing.expect(true);
 }

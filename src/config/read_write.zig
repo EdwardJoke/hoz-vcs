@@ -1,4 +1,4 @@
-//! Config Read/Write - TOML file handling
+//! Config Read/Write - Git-config file handling
 const std = @import("std");
 const Io = std.Io;
 
@@ -19,17 +19,19 @@ pub const ConfigReader = struct {
         var start: usize = 0;
         for (content, 0..) |byte, i| {
             if (byte == '\n') {
-                const line = content[start..i];
+                const line = std.mem.trim(u8, content[start..i], "\r");
                 if (line.len > 0 and !std.mem.startsWith(u8, line, "#")) {
-                    try lines.append(self.allocator, line);
+                    const owned = try self.allocator.dupe(u8, line);
+                    try lines.append(self.allocator, owned);
                 }
                 start = i + 1;
             }
         }
         if (start < content.len) {
-            const line = content[start..];
+            const line = std.mem.trim(u8, content[start..], "\r");
             if (line.len > 0 and !std.mem.startsWith(u8, line, "#")) {
-                try lines.append(self.allocator, line);
+                const owned = try self.allocator.dupe(u8, line);
+                try lines.append(self.allocator, owned);
             }
         }
         return lines.toOwnedSlice(self.allocator);
@@ -90,16 +92,18 @@ pub const ConfigWriter = struct {
         return .{ .allocator = allocator };
     }
 
-    pub fn write(self: *ConfigWriter, path: []const u8, entries: []const struct { key: []const u8, value: []const u8 }) !void {
-        var buf = std.ArrayList(u8).init(self.allocator);
-        defer buf.deinit();
+    pub fn write(self: *ConfigWriter, io: Io, path: []const u8, entries: []const struct { key: []const u8, value: []const u8 }) !void {
+        var buf = try std.ArrayList(u8).initCapacity(self.allocator, 256);
+        defer buf.deinit(self.allocator);
 
         for (entries) |entry| {
-            try buf.writer().print("{s} = {s}\n", .{ entry.key, entry.value });
+            const line = try std.fmt.allocPrint(self.allocator, "{s} = {s}\n", .{ entry.key, entry.value });
+            defer self.allocator.free(line);
+            try buf.appendSlice(self.allocator, line);
         }
 
         const cwd = Io.Dir.cwd();
-        try cwd.writeFile(self.allocator, path, buf.items, .{});
+        try cwd.writeFile(io, .{ .sub_path = path, .data = buf.items });
     }
 
     pub fn formatEntry(self: *ConfigWriter, key: []const u8, value: []const u8) ![]const u8 {
@@ -109,10 +113,10 @@ pub const ConfigWriter = struct {
     pub fn getBool(self: *ConfigWriter, value: []const u8) ?bool {
         _ = self;
         const trimmed = std.mem.trim(u8, value, " \t");
-        if (std.mem.eql(u8, trimmed, "true") or std.mem.eql(u8, trimmed, "1") or std.mem.eql(u8, trimmed, "yes")) {
+        if (std.mem.eql(u8, trimmed, "true") or std.mem.eql(u8, trimmed, "1") or std.mem.eql(u8, trimmed, "yes") or std.mem.eql(u8, trimmed, "on")) {
             return true;
         }
-        if (std.mem.eql(u8, trimmed, "false") or std.mem.eql(u8, trimmed, "0") or std.mem.eql(u8, trimmed, "no")) {
+        if (std.mem.eql(u8, trimmed, "false") or std.mem.eql(u8, trimmed, "0") or std.mem.eql(u8, trimmed, "no") or std.mem.eql(u8, trimmed, "off")) {
             return false;
         }
         return null;
@@ -121,24 +125,26 @@ pub const ConfigWriter = struct {
 
 test "ConfigReader init" {
     const reader = ConfigReader.init(std.testing.allocator);
-    try std.testing.expect(reader.allocator == std.testing.allocator);
+    _ = reader;
 }
 
 test "ConfigReader read method exists" {
+    var threaded = std.Io.Threaded.init(std.testing.allocator, .{});
+    defer threaded.deinit();
+    const io = std.Io.Threaded.io(&threaded);
     var reader = ConfigReader.init(std.testing.allocator);
-    const io = std.Io.Threaded.new(.{}).?;
-    const entries = try reader.read(io, "/path/to/config");
-    _ = entries;
-    try std.testing.expect(true);
+    try std.testing.expectError(error.FileNotFound, reader.read(io, "/path/to/nonexistent/config"));
 }
 
 test "ConfigWriter init" {
     const writer = ConfigWriter.init(std.testing.allocator);
-    try std.testing.expect(writer.allocator == std.testing.allocator);
+    _ = writer;
 }
 
 test "ConfigWriter write method exists" {
     var writer = ConfigWriter.init(std.testing.allocator);
-    try writer.write("/path/to/config", &.{});
-    try std.testing.expect(true);
+    var threaded = std.Io.Threaded.init(std.testing.allocator, .{});
+    defer threaded.deinit();
+    const io = std.Io.Threaded.io(&threaded);
+    try std.testing.expectError(error.FileNotFound, writer.write(io, "/path/to/nonexistent/config", &.{}));
 }

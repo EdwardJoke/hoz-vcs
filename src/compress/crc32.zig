@@ -3,6 +3,7 @@ const std = @import("std");
 
 pub const Crc32Error = error{
     ChecksumMismatch,
+    TruncatedPackfile,
 };
 
 /// Standard CRC32 function using std.hash.Crc32
@@ -12,11 +13,22 @@ pub fn crc32(data: []const u8) u32 {
     return hasher.final();
 }
 
-/// CRC32 with initial value (for incremental calculation)
+/// CRC32 continuing from a previous checksum (for streaming/concatenation).
+/// `initial` is the running CRC state from prior data (not finalized).
 pub fn crc32WithInitial(initial: u32, data: []const u8) u32 {
-    var hasher = std.hash.Crc32.init();
-    hasher.update(data);
-    return hasher.final() ^ initial;
+    var state = initial;
+    for (data) |byte| {
+        state ^= byte;
+        var j: usize = 0;
+        while (j < 8) : (j += 1) {
+            if (state & 1 != 0) {
+                state = (state >> 1) ^ 0xEDB88320;
+            } else {
+                state >>= 1;
+            }
+        }
+    }
+    return state;
 }
 
 /// Verify CRC32 checksum matches expected value
@@ -27,13 +39,14 @@ pub fn verifyCrc32(data: []const u8, expected: u32) Crc32Error!void {
     }
 }
 
-/// Compute CRC32 of packfile data (excluding 20-byte trailing checksum)
-pub fn crc32Packfile(data: []const u8, checksum: [20]u8) Crc32Error![]const u8 {
+/// Compute CRC32 of packfile data (excluding 20-byte trailing checksum).
+/// Returns an owned copy of the verified data slice.
+pub fn crc32Packfile(data: []const u8, expected_crc: u32, allocator: std.mem.Allocator) Crc32Error![]u8 {
     if (data.len < 20) return error.TruncatedPackfile;
-    const obj_data = data[0..data.len - 20];
-    const stored_checksum = std.mem.readInt(u32, checksum[16..20], .big);
-    try verifyCrc32(obj_data, stored_checksum);
-    return obj_data;
+    const obj_data = data[0 .. data.len - 20];
+    try verifyCrc32(obj_data, expected_crc);
+    const copy = try allocator.dupe(u8, obj_data);
+    return copy;
 }
 
 /// Incremental CRC32 calculator for streaming
@@ -55,7 +68,8 @@ pub const Crc32Calculator = struct {
 
 test "crc32 basic" {
     const test1 = crc32("hello world");
-    _ = test1;
+    const expected: u32 = 0x2D7C6199;
+    try std.testing.expectEqual(expected, test1);
 
     const empty = crc32("");
     try std.testing.expectEqual(@as(u32, 0x00000000), empty);

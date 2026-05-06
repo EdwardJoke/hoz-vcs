@@ -17,11 +17,6 @@ pub fn sha1(data: []const u8) [SHA1_SIZE]u8 {
 /// SHA-1 hasher type for incremental hashing
 pub const Sha1 = std.crypto.hash.Sha1;
 
-/// Convenience function to compute SHA-1 and return as a slice
-pub fn sha1Slice(data: []const u8) []const u8 {
-    return &sha1(data);
-}
-
 test "sha1 basic" {
     // Test vector: "hello world" should produce known SHA-1
     const result = sha1("hello world");
