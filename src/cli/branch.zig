@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
+const TreeKind = @import("output.zig").TreeKind;
 const BranchLister = @import("../branch/list.zig").BranchLister;
 const BranchCreator = @import("../branch/create.zig").BranchCreator;
 const BranchDeleter = @import("../branch/delete.zig").BranchDeleter;
@@ -72,9 +73,13 @@ pub const Branch = struct {
         const branches = try lister.list();
         defer self.allocator.free(branches);
 
-        for (branches) |branch| {
-            const prefix = if (branch.is_current) "* " else "  ";
-            try self.output.infoMessage("{s}{s}", .{ prefix, branch.name });
+        try self.output.section("Branches");
+
+        for (branches, 0..) |branch, idx| {
+            const is_last = idx == branches.len - 1;
+            const kind: TreeKind = if (is_last) .last else .branch;
+            const current_marker = if (branch.is_current) "●" else " ";
+            try self.output.treeNode(kind, 0, "{s} {s}", .{ current_marker, branch.name });
         }
     }
 

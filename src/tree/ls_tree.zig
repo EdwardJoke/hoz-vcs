@@ -98,13 +98,25 @@ pub const LsTree = struct {
         });
     }
 
-    pub fn formatEntry(self: *LsTree, entry: LsTreeEntry, writer: *std.Io.Writer) !void {
+    pub fn formatEntry(self: *LsTree, entry: LsTreeEntry, writer: *std.Io.Writer, depth: usize) !void {
+        const is_dir = entry.mode == .directory;
+        const kind_sym = if (is_dir) "├──" else "├─ ";
+        var indent_buf: [128]u8 = undefined;
+        var indent_len: usize = 0;
+        for (0..depth) |_| {
+            @memcpy(indent_buf[indent_len..][0..2], "│ ");
+            indent_len += 2;
+        }
+
         if (self.options.name_only) {
-            try writer.print("{s}", .{entry.name});
+            try writer.writeAll(indent_buf[0..indent_len]);
+            try writer.print("{s}{s}", .{ kind_sym, entry.name });
             return;
         }
 
-        try writer.print("{s} {s} {s}\t{s}", .{
+        try writer.writeAll(indent_buf[0..indent_len]);
+        try writer.print("{s}{s} {s} {s}\t{s}", .{
+            kind_sym,
             tree_mod.modeToStr(entry.mode),
             entry.oid.formatShort(),
             if (self.options.stage) "0" else "",

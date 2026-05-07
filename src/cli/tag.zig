@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
+const TreeKind = @import("output.zig").TreeKind;
 const TagLister = @import("../tag/list.zig").TagLister;
 const LightweightTagCreator = @import("../tag/create_lightweight.zig").LightweightTagCreator;
 const AnnotatedTagCreator = @import("../tag/create_annotated.zig").AnnotatedTagCreator;
@@ -92,8 +93,9 @@ pub const Tag = struct {
         }
 
         try self.output.section("Tags");
-        for (tags) |tag| {
-            try self.output.writer.print("  {s}\n", .{tag});
+        for (tags, 0..) |tag, idx| {
+            const kind: TreeKind = if (idx == tags.len - 1) .last else .branch;
+            try self.output.treeNode(kind, 0, "🏷 {s}", .{tag});
         }
         try self.output.successMessage("{d} tag(s)", .{tags.len});
     }

@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
+const StatusIcon = @import("output.zig").StatusIcon;
 const OID = @import("../object/oid.zig").OID;
 const TreeDiff = @import("../tree/diff.zig").TreeDiff;
 const TreeChange = @import("../tree/diff.zig").TreeChange;
@@ -150,6 +151,17 @@ pub const Diff = struct {
 
         for (changes) |change| {
             const path = change.new_path orelse change.old_path orelse "(unknown)";
+            const icon: StatusIcon = switch (change.change_type) {
+                .added => .added,
+                .deleted => .deleted,
+                .modified => .modified,
+                .renamed => .renamed,
+                else => .modified,
+            };
+
+            try self.output.groupHeader("File: {s}", .{path});
+            try self.output.statusItem(icon, true, path);
+
             switch (change.change_type) {
                 .added => {
                     try self.output.writer.print("diff --git a/{s} b/{s}\n", .{ path, path });
@@ -171,6 +183,7 @@ pub const Diff = struct {
                     try self.output.writer.print("diff --git a/{s} b/{s}\n", .{ path, path });
                 },
             }
+            if (changes.len > 1) try self.output.sectionDivider();
         }
     }
 
@@ -206,6 +219,17 @@ pub const Diff = struct {
 
         for (changes) |change| {
             const path = change.new_path orelse change.old_path orelse "(unknown)";
+            const icon: StatusIcon = switch (change.change_type) {
+                .added => .added,
+                .deleted => .deleted,
+                .modified => .modified,
+                .renamed => .renamed,
+                else => .modified,
+            };
+
+            try self.output.groupHeader("File: {s}", .{path});
+            try self.output.statusItem(icon, false, path);
+
             switch (change.change_type) {
                 .added => {
                     try self.output.writer.print("diff --git a/{s} b/{s}\n", .{ path, path });
@@ -228,6 +252,7 @@ pub const Diff = struct {
                     try self.output.writer.print("diff --git a/{s} b/{s}\n", .{ path, path });
                 },
             }
+            if (changes.len > 1) try self.output.sectionDivider();
         }
     }
 };

@@ -7,6 +7,7 @@ const Identity = @import("../object/commit.zig").Identity;
 const compress_mod = @import("../compress/zlib.zig");
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
+const TreeKind = @import("output.zig").TreeKind;
 
 pub const Log = struct {
     allocator: std.mem.Allocator,
@@ -97,22 +98,23 @@ pub const Log = struct {
 
     fn printShort(self: *Log, commit: *const CommitObj) !void {
         const hex = commit.tree.toHex();
-        try self.output.item("commit", hex[0..7]);
+        try self.output.groupHeader("commit {s}", .{hex[0..7]});
         const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
         defer self.allocator.free(author_str);
-        try self.output.item("Author", author_str);
-        try self.output.item("Date", self.formatDate(commit.author.timestamp));
-        try self.output.writer.print("\n    {s}\n", .{commit.message});
+        try self.output.treeNode(.branch, 1, "Author: {s}", .{author_str});
+        try self.output.treeNode(.branch, 1, "Date:   {s}", .{self.formatDate(commit.author.timestamp)});
+        try self.output.sectionDivider();
+        try self.output.hint("  {s}", .{self.firstLine(commit.message)});
     }
 
     fn printMedium(self: *Log, commit: *const CommitObj) !void {
         const hex = commit.tree.toHex();
-        try self.output.item("commit", hex[0..7]);
+        try self.output.groupHeader("commit {s}", .{hex[0..7]});
         const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
         defer self.allocator.free(author_str);
-        try self.output.item("Author", author_str);
-        try self.output.item("Date", self.formatDate(commit.author.timestamp));
-        try self.output.writer.print("\n    {s}\n\n", .{commit.message});
+        try self.output.treeNode(.branch, 1, "Author: {s}", .{author_str});
+        try self.output.treeNode(.branch, 1, "Date:   {s}", .{self.formatDate(commit.author.timestamp)});
+        try self.output.sectionDivider();
 
         var lines = std.mem.splitScalar(u8, commit.message, '\n');
         var first = true;
@@ -121,18 +123,18 @@ pub const Log = struct {
                 first = false;
                 continue;
             }
-            try self.output.writer.print("    {s}\n", .{line});
+            try self.output.hint("  {s}", .{line});
         }
     }
 
     fn printFull(self: *Log, commit: *const CommitObj) !void {
         const tree_hex = commit.tree.toHex();
-        try self.output.item("commit", tree_hex[0..]);
-        try self.output.item("Tree", tree_hex[0..]);
+        try self.output.groupHeader("commit {s}", .{tree_hex[0..]});
+        try self.output.treeNode(.branch, 1, "Tree: {s}", .{tree_hex[0..]});
 
         for (commit.parents) |p| {
             const phex = p.toHex();
-            try self.output.item("Parent", phex[0..]);
+            try self.output.treeNode(.branch, 1, "Parent: {s}", .{phex[0..]});
         }
 
         const author_full = try std.fmt.allocPrint(self.allocator, "{s} <{s}> {d} {s}", .{
@@ -142,7 +144,7 @@ pub const Log = struct {
             &commit.author.timezoneToStr(),
         });
         defer self.allocator.free(author_full);
-        try self.output.item("Author", author_full);
+        try self.output.treeNode(.branch, 1, "Author: {s}", .{author_full});
 
         const committer_full = try std.fmt.allocPrint(self.allocator, "{s} <{s}> {d} {s}", .{
             commit.committer.name,
@@ -151,14 +153,15 @@ pub const Log = struct {
             &commit.committer.timezoneToStr(),
         });
         defer self.allocator.free(committer_full);
-        try self.output.item("Commit", committer_full);
-        try self.output.writer.print("\n    {s}\n", .{commit.message});
+        try self.output.treeNode(.branch, 1, "Commit: {s}", .{committer_full});
+        try self.output.sectionDivider();
+        try self.output.hint("  {s}", .{commit.message});
     }
 
     fn printOneline(self: *Log, commit: *const CommitObj) !void {
         const hex = commit.tree.toHex();
         const subject = self.firstLine(commit.message);
-        try self.output.writer.print("{s} {s}\n", .{ hex[0..7], subject });
+        try self.output.hint("→ {s} {s}", .{ hex[0..7], subject });
     }
 
     fn resolveHead(self: *Log, git_dir: *const Io.Dir) !OID {
