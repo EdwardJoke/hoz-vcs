@@ -121,15 +121,14 @@ pub const Tree = struct {
     }
 
     /// Parse tree from loose object data
-    pub fn parse(data: []const u8) !Tree {
+    pub fn parse(allocator: std.mem.Allocator, data: []const u8) !Tree {
         const obj = try object_mod.parse(data);
         if (obj.obj_type != .tree) {
             return error.NotATree;
         }
 
-        // Parse tree entries from the binary format
         var entries = std.ArrayList(TreeEntry).empty;
-        errdefer entries.deinit(std.testing.allocator);
+        errdefer entries.deinit(allocator);
 
         var pos: usize = 0;
         while (pos < obj.data.len) {
@@ -148,14 +147,14 @@ pub const Tree = struct {
             const mode = try modeFromStr(mode_str);
             const oid = oid_mod.OID.fromBytes(oid_bytes);
 
-            try entries.append(std.testing.allocator, TreeEntry{
+            try entries.append(allocator, TreeEntry{
                 .mode = mode,
                 .oid = oid,
                 .name = name,
             });
         }
 
-        return Tree{ .entries = try entries.toOwnedSlice(std.testing.allocator) };
+        return Tree{ .entries = try entries.toOwnedSlice(allocator) };
     }
 };
 
@@ -194,7 +193,7 @@ test "tree serialize and parse roundtrip" {
     const serialized = try tree.serialize(std.testing.allocator);
     defer std.testing.allocator.free(serialized);
 
-    const parsed = try Tree.parse(serialized);
+    const parsed = try Tree.parse(std.testing.allocator, serialized);
     try std.testing.expectEqual(3, parsed.entries.len);
     try std.testing.expectEqualSlices(u8, "foo.txt", parsed.entries[0].name);
     try std.testing.expectEqual(Mode.file, parsed.entries[0].mode);
@@ -211,7 +210,7 @@ test "tree symlink and gitlink modes" {
 
 test "tree parse rejects non-tree" {
     const blob_data = "blob 5\x00hello";
-    try std.testing.expectError(error.NotATree, Tree.parse(blob_data));
+    try std.testing.expectError(error.NotATree, Tree.parse(std.testing.allocator, blob_data));
 }
 
 test "tree empty entries" {

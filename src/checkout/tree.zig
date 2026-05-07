@@ -32,7 +32,7 @@ pub const TreeCheckout = struct {
         const tree_data = try self.odb.readObject(tree_oid);
         defer self.allocator.free(tree_data);
 
-        const tree = try Tree.parse(tree_data);
+        const tree = try Tree.parse(self.allocator, tree_data);
         try self.checkoutEntries(&tree, base_path, force);
     }
 
@@ -55,7 +55,7 @@ pub const TreeCheckout = struct {
                     Io.Dir.cwd().makePath(self.io, full_path) catch {};
                     const subtree_data = try self.odb.readObject(entry.oid);
                     defer self.allocator.free(subtree_data);
-                    const subtree = try Tree.parse(subtree_data);
+                    const subtree = try Tree.parse(self.allocator, subtree_data);
                     try self.checkoutEntries(&subtree, full_path, force);
                 },
                 .file, .executable => {

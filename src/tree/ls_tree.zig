@@ -58,7 +58,7 @@ pub const LsTree = struct {
             return error.NotATree;
         }
 
-        const tree = try tree_mod.Tree.parse(obj.data);
+        const tree = try tree_mod.Tree.parse(self.allocator, obj.data);
         try self.listTree(io, odb, tree, "");
     }
 
@@ -85,7 +85,7 @@ pub const LsTree = struct {
         const obj = try odb.read(io, oid);
         if (obj.objType() != .tree) return;
 
-        const tree = try tree_mod.Tree.parse(obj.data);
+        const tree = try tree_mod.Tree.parse(self.allocator, obj.data);
         try self.listTree(io, odb, tree, prefix);
     }
 
