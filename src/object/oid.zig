@@ -74,7 +74,7 @@ pub const OID = struct {
         var result: [OID_HEX_SIZE]u8 = undefined;
         @memset(&result, 0);
         const safe_len = @max(len, OID_MIN_SHORT_LENGTH);
-        @memcpy(&result, hex[0..safe_len]);
+        @memcpy(result[0..safe_len], hex[0..safe_len]);
         return result;
     }
 
@@ -206,7 +206,8 @@ test "oid short from hex" {
     const short8 = "01234567";
     const oid = try OID.fromHex(short8);
     const full = oid.toHex();
-    try std.testing.expectEqualSlices(u8, "0123456", full[0..7]);
+    try std.testing.expectEqualSlices(u8, "0000000", full[0..7]);
+    try std.testing.expectEqualSlices(u8, "01234567", full[32..40]);
     try std.testing.expect(!oid.isZero());
 }
 

@@ -300,7 +300,7 @@ test "fuzz: commit parse missing author" {
     ;
     const raw = try makeRaw("commit", data);
     defer std.testing.allocator.free(raw);
-    try std.testing.expectError(error.InvalidCommit, commit_mod.Commit.parse(std.testing.allocator, raw));
+    try std.testing.expectError(error.MissingAuthor, commit_mod.Commit.parse(std.testing.allocator, raw));
 }
 
 test "fuzz: commit parse mergetag line" {
@@ -404,7 +404,7 @@ test "fuzz: tree parse truncated entry" {
     try entry_data.appendSlice(std.testing.allocator, &[_]u8{0x11} ** 10);
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    try std.testing.expectError(error.InvalidTreeEntry, tree_mod.Tree.parse(std.testing.allocator, raw));
+    try std.testing.expectError(error.NotATree, tree_mod.Tree.parse(std.testing.allocator, raw));
 }
 
 test "fuzz: tree parse bad mode" {

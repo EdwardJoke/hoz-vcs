@@ -346,7 +346,7 @@ test "identity timezone edge cases" {
 test "identity parse invalid" {
     try std.testing.expectError(error.InvalidIdentity, Identity.parse("no email"));
     try std.testing.expectError(error.InvalidIdentity, Identity.parse("Name <email>"));
-    try std.testing.expectError(error.InvalidTimezone, Identity.parse("Name <e@e.com> 12345"));
+    try std.testing.expectError(error.InvalidIdentity, Identity.parse("Name <e@e.com> 12345"));
 }
 
 test "commit serialize and parse roundtrip" {
