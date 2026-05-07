@@ -89,7 +89,7 @@ pub const WriteBufferOptions = struct {
 
 pub const TreeCache = struct {
     allocator: std.mem.Allocator,
-    entries: std.StringArrayHashMap(TreeCacheEntry),
+    entries: std.StringArrayHashMapUnmanaged(TreeCacheEntry),
     enabled: bool,
 
     pub const TreeCacheEntry = struct {
@@ -101,13 +101,13 @@ pub const TreeCache = struct {
     pub fn init(allocator: std.mem.Allocator) TreeCache {
         return .{
             .allocator = allocator,
-            .entries = std.StringArrayHashMap(TreeCacheEntry).init(allocator),
+            .entries = .empty,
             .enabled = true,
         };
     }
 
     pub fn deinit(self: *TreeCache) void {
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 
     pub fn get(self: *TreeCache, path: []const u8) ?TreeCacheEntry {
@@ -115,12 +115,11 @@ pub const TreeCache = struct {
     }
 
     pub fn put(self: *TreeCache, path: []const u8, entry: TreeCacheEntry) !void {
-        try self.entries.put(path, entry);
+        try self.entries.put(self.allocator, path, entry);
     }
 
     pub fn invalidate(self: *TreeCache, path: []const u8) void {
-        _ = self;
-        _ = path;
+        _ = self.entries.remove(path);
     }
 
     pub fn clear(self: *TreeCache) void {
@@ -342,6 +341,12 @@ pub const Index = struct {
         var checksum: [20]u8 = undefined;
         @memcpy(&checksum, data[data.len - 20 .. data.len]);
 
+        // Verify checksum
+        const content_hash = sha1.sha1(data[0 .. data.len - 20]);
+        if (!std.mem.eql(u8, &checksum, &content_hash)) {
+            return error.IndexChecksumMismatch;
+        }
+
         return Index{
             .allocator = allocator,
             .entries = entries,
@@ -399,16 +404,13 @@ pub const Index = struct {
         const data = try self.serialize();
         defer self.allocator.free(data);
 
-        const dir = Io.Dir.cwd();
-        const file = try dir.createFile(io, path, .{});
-        defer file.close(io);
-
-        try file.writeAll(io, data);
+        const cwd = Io.Dir.cwd();
+        try cwd.writeFile(io, .{ .sub_path = path, .data = data });
     }
 
     /// Serialize index to bytes
     pub fn serialize(self: *Index) ![]u8 {
-        var list = std.ArrayList(u8).initCapacity(self.allocator, 8192);
+        var list = try std.ArrayList(u8).initCapacity(self.allocator, 8192);
         errdefer list.deinit(self.allocator);
 
         try list.appendSlice(self.allocator, &INDEX_SIGNATURE);
@@ -424,8 +426,8 @@ pub const Index = struct {
             try writeEntry(self.allocator, &list, entry, name);
         }
 
-        // Write extensions (placeholder - extensions not implemented for now)
-        // try self.writeExtensions(&list);
+        // Write extensions
+        try self.writeExtensions(&list);
 
         // Write checksum placeholder
         const checksum_offset = list.items.len;
@@ -436,37 +438,85 @@ pub const Index = struct {
         @memcpy(list.items[checksum_offset..], &hash_bytes);
 
         // Update entry count
-        std.mem.writeInt(u32, list.items[count_offset .. count_offset + 4], @intCast(self.entries.items.len), .big);
+        var count_buffer: [4]u8 = undefined;
+        std.mem.writeInt(u32, &count_buffer, @intCast(self.entries.items.len), .big);
+        @memcpy(list.items[count_offset .. count_offset + 4], &count_buffer);
 
         return list.toOwnedSlice(self.allocator);
     }
 
     /// Write a single entry to the list
     fn writeEntry(allocator: std.mem.Allocator, list: *std.ArrayList(u8), entry: IndexEntry, name: []const u8) !void {
-        const offset = list.items.len;
-        try list.appendSlice(allocator, &[1]u8{0} ** INDEX_ENTRY_FIXED_SIZE);
+        var buffer: [4]u8 = undefined;
+        std.mem.writeInt(u32, &buffer, entry.ctime_sec, .big);
+        try list.appendSlice(allocator, &buffer);
+        std.mem.writeInt(u32, &buffer, entry.ctime_nsec, .big);
+        try list.appendSlice(allocator, &buffer);
+        std.mem.writeInt(u32, &buffer, entry.mtime_sec, .big);
+        try list.appendSlice(allocator, &buffer);
+        std.mem.writeInt(u32, &buffer, entry.mtime_nsec, .big);
+        try list.appendSlice(allocator, &buffer);
+        std.mem.writeInt(u32, &buffer, entry.dev, .big);
+        try list.appendSlice(allocator, &buffer);
+        std.mem.writeInt(u32, &buffer, entry.ino, .big);
+        try list.appendSlice(allocator, &buffer);
+        std.mem.writeInt(u32, &buffer, entry.mode, .big);
+        try list.appendSlice(allocator, &buffer);
+        std.mem.writeInt(u32, &buffer, entry.uid, .big);
+        try list.appendSlice(allocator, &buffer);
+        std.mem.writeInt(u32, &buffer, entry.gid, .big);
+        try list.appendSlice(allocator, &buffer);
+        std.mem.writeInt(u32, &buffer, entry.file_size, .big);
+        try list.appendSlice(allocator, &buffer);
 
-        std.mem.writeInt(u32, list.items[offset .. offset + 4], entry.ctime_sec, .big);
-        std.mem.writeInt(u32, list.items[offset + 4 .. offset + 8], entry.ctime_nsec, .big);
-        std.mem.writeInt(u32, list.items[offset + 8 .. offset + 12], entry.mtime_sec, .big);
-        std.mem.writeInt(u32, list.items[offset + 12 .. offset + 16], entry.mtime_nsec, .big);
-        std.mem.writeInt(u32, list.items[offset + 16 .. offset + 20], entry.dev, .big);
-        std.mem.writeInt(u32, list.items[offset + 20 .. offset + 24], entry.ino, .big);
-        std.mem.writeInt(u32, list.items[offset + 24 .. offset + 28], entry.mode, .big);
-        std.mem.writeInt(u32, list.items[offset + 28 .. offset + 32], entry.uid, .big);
-        std.mem.writeInt(u32, list.items[offset + 32 .. offset + 36], entry.gid, .big);
-        std.mem.writeInt(u32, list.items[offset + 36 .. offset + 40], entry.file_size, .big);
-
-        @memcpy(list.items[offset + 40 .. offset + 60], &entry.oid);
-        std.mem.writeInt(u16, list.items[offset + 60 .. offset + 62], entry.flags, .big);
+        try list.appendSlice(allocator, &entry.oid.bytes);
+        var flags_buffer: [2]u8 = undefined;
+        std.mem.writeInt(u16, &flags_buffer, entry.flags, .big);
+        try list.appendSlice(allocator, &flags_buffer);
 
         const name_len = @as(u16, @intCast(name.len));
         const path_size = entryPathSize(name_len);
 
         try list.appendSlice(allocator, name);
         if (name.len < path_size) {
-            try list.appendSlice(allocator, &[1]u8{0} ** (path_size - name.len));
+            const pad_size = path_size - name.len;
+            const pad = try allocator.alloc(u8, pad_size);
+            defer allocator.free(pad);
+            @memset(pad, 0);
+            try list.appendSlice(allocator, pad);
         }
+    }
+
+    fn writeExtensionData(list: *std.ArrayList(u8), allocator: std.mem.Allocator, signature: [4]u8, data: []const u8) !void {
+        try list.appendSlice(allocator, &signature);
+        var size_bytes: [4]u8 = undefined;
+        std.mem.writeInt(u32, &size_bytes, @as(u32, @intCast(data.len)), .big);
+        try list.appendSlice(allocator, &size_bytes);
+        if (data.len > 0) {
+            try list.appendSlice(allocator, data);
+        }
+    }
+
+    fn writeExtensions(self: *Index, list: *std.ArrayList(u8)) !void {
+        const exts = &self.extensions;
+
+        if (exts.tree) |tree_data| {
+            try writeExtensionData(list, self.allocator, .{ 'T', 'R', 'E', 'E' }, tree_data);
+        }
+
+        if (exts.reuc) |reuc_data| {
+            try writeExtensionData(list, self.allocator, .{ 'R', 'E', 'U', 'C' }, reuc_data);
+        }
+
+        if (exts.fmix) |fmix_data| {
+            try writeExtensionData(list, self.allocator, .{ 'F', 'M', 'I', 'X' }, fmix_data);
+        }
+
+        for (exts.others.items) |other| {
+            try writeExtensionData(list, self.allocator, other.signature, other.data);
+        }
+
+        try list.append(self.allocator, 0);
     }
 
     /// Add or update an entry in the index

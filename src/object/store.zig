@@ -8,7 +8,7 @@ const oid_mod = @import("oid.zig");
 /// always maps to the same OID, eliminating storage of duplicate objects.
 pub const ObjectStore = struct {
     /// Maps OID to serialized object data (already contains header)
-    objects: std.HashMap([]const u8, []u8, OIDHashContext, std.hash.default_max_load_factor),
+    objects: std.HashMap([]const u8, []u8, OIDHashContext, 75),
 
     allocator: std.mem.Allocator,
 
@@ -35,7 +35,7 @@ pub const ObjectStore = struct {
     /// Initialize a new ObjectStore
     pub fn init(allocator: std.mem.Allocator) ObjectStore {
         return ObjectStore{
-            .objects = std.HashMap([]const u8, []u8, OIDHashContext, std.hash.default_max_load_factor).init(allocator),
+            .objects = std.HashMap([]const u8, []u8, OIDHashContext, 75).init(allocator),
             .allocator = allocator,
         };
     }
@@ -52,16 +52,19 @@ pub const ObjectStore = struct {
 
     /// Compute the OID for raw object content (with header)
     /// Returns the hex string OID
-    pub fn computeOid(data: []const u8) ![]u8 {
-        const hash = sha1_mod.Sha1.hash(data);
-        return oid_mod.OID.fromBytes(&hash).toHexAlloc(std.testing.allocator);
+    pub fn computeOid(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
+        var hash: [20]u8 = undefined;
+        sha1_mod.Sha1.hash(data, &hash, .{});
+        const oid = oid_mod.OID{ .bytes = hash };
+        const hex = oid.toHex();
+        return allocator.dupe(u8, &hex);
     }
 
     /// Store an object, returns existing OID if duplicate
     /// The data should be the full serialized object (with header)
     pub fn put(self: *ObjectStore, data: []const u8) ![]const u8 {
         // Compute OID from content
-        const oid = try self.computeOid(data);
+        const oid = try computeOid(self.allocator, data);
         errdefer self.allocator.free(oid);
 
         // Check if we already have this object
@@ -107,7 +110,7 @@ pub const ObjectStore = struct {
     }
 
     /// Iterate over all objects
-    pub fn iterator(self: *ObjectStore) std.HashMap([]const u8, []u8, OIDHashContext, std.hash.default_max_load_factor).Iterator {
+    pub fn iterator(self: *ObjectStore) std.HashMap([]const u8, []u8, OIDHashContext, 75).Iterator {
         return self.objects.iterator();
     }
 };

@@ -20,5 +20,3 @@ pub const writer = @import("writer.zig");
 pub const graph = @import("graph.zig");
 pub const topo = @import("topo.zig");
 pub const date_index = @import("date_index.zig");
-
-pub usingnamespace commit_object;

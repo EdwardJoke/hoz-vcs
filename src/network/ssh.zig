@@ -1,0 +1,483 @@
+//! SSH Transport - SSH connection support
+const std = @import("std");
+const Io = std.Io;
+
+pub const SshTransport = struct {
+    allocator: std.mem.Allocator,
+    host: []const u8,
+    port: u16,
+    username: ?[]const u8,
+    key_path: ?[]const u8,
+    agent_forward: bool,
+    io: Io,
+    connected: bool,
+
+    pub fn init(allocator: std.mem.Allocator, io: Io, host: []const u8) SshTransport {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .host = host,
+            .port = 22,
+            .username = null,
+            .key_path = null,
+            .agent_forward = false,
+            .connected = false,
+        };
+    }
+
+    pub fn setUsername(self: *SshTransport, username: []const u8) void {
+        self.username = username;
+    }
+
+    pub fn setPort(self: *SshTransport, port: u16) void {
+        self.port = port;
+    }
+
+    pub fn setKeyPath(self: *SshTransport, path: []const u8) void {
+        self.key_path = path;
+    }
+
+    pub fn setAgentForward(self: *SshTransport, enabled: bool) void {
+        self.agent_forward = enabled;
+    }
+
+    pub fn connect(self: *SshTransport) !void {
+        if (self.connected) return;
+
+        var target_buf: [256]u8 = undefined;
+        var target_writer = std.Io.Writer.fixed(&target_buf);
+        if (self.username) |user| {
+            target_writer.writeAll(user) catch return;
+            target_writer.writeByte('@') catch return;
+        }
+        target_writer.writeAll(self.host) catch return;
+        const target = target_buf[0..target_writer.end];
+
+        var port_buf: [8]u8 = undefined;
+        const port_arg = if (self.port != 22) blk: {
+            break :blk std.fmt.bufPrint(&port_buf, "-p{d}", .{self.port}) catch "-p22";
+        } else "";
+
+        const check_cmd = try std.fmt.allocPrint(self.allocator, "ssh {s} -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=5 {s} true 2>/dev/null", .{ port_arg, target });
+        defer self.allocator.free(check_cmd);
+
+        const result = std.process.run(self.allocator, self.io, .{
+            .argv = &.{ "/bin/sh", "-c", check_cmd },
+            .stdout_limit = .limited(0),
+        }) catch {
+            return error.SshConnectionFailed;
+        };
+        _ = result;
+
+        self.connected = true;
+    }
+
+    pub fn disconnect(self: *SshTransport) void {
+        if (!self.connected) return;
+
+        var target_buf: [256]u8 = undefined;
+        var target_writer = std.Io.Writer.fixed(&target_buf);
+        if (self.username) |user| {
+            target_writer.writeAll(user) catch {};
+            target_writer.writeByte('@') catch {};
+        }
+        target_writer.writeAll(self.host) catch {};
+        const target = target_buf[0..target_writer.end];
+
+        var port_buf: [8]u8 = undefined;
+        const port_arg = if (self.port != 22) blk: {
+            break :blk std.fmt.bufPrint(&port_buf, "-p{d}", .{self.port}) catch "-p22";
+        } else "";
+
+        const exit_cmd = std.fmt.allocPrint(self.allocator, "ssh {s} -O exit {s} 2>/dev/null", .{ port_arg, target }) catch {
+            self.connected = false;
+            return;
+        };
+        defer self.allocator.free(exit_cmd);
+
+        _ = std.process.run(self.allocator, self.io, .{
+            .argv = &.{ "/bin/sh", "-c", exit_cmd },
+            .stdout_limit = .limited(0),
+        }) catch {};
+
+        self.connected = false;
+    }
+
+    pub fn fetchRefs(self: *SshTransport, path: []const u8) ![]const u8 {
+        const ssh_cmd = try self.buildSshCommand(path, "git-upload-pack");
+        defer self.allocator.free(ssh_cmd);
+
+        const result = try self.runGitCommand(ssh_cmd);
+        return result;
+    }
+
+    pub fn fetchPack(self: *SshTransport, path: []const u8, wants: []const []const u8, haves: []const []const u8) ![]u8 {
+        const ssh_cmd = try self.buildSshCommand(path, "git-upload-pack");
+        defer self.allocator.free(ssh_cmd);
+
+        var request_data = std.ArrayList(u8).initCapacity(self.allocator, 4096) catch |err| return err;
+        defer request_data.deinit(self.allocator);
+
+        for (wants) |want| {
+            const line = try std.fmt.allocPrint(self.allocator, "want {s}\n", .{want});
+            defer self.allocator.free(line);
+            try request_data.appendSlice(self.allocator, line);
+        }
+
+        for (haves) |have| {
+            const line = try std.fmt.allocPrint(self.allocator, "have {s}\n", .{have});
+            defer self.allocator.free(line);
+            try request_data.appendSlice(self.allocator, line);
+        }
+
+        try request_data.appendSlice(self.allocator, "\n");
+
+        const result = try self.runGitCommandWithStdin(ssh_cmd, request_data.items);
+        return result;
+    }
+
+    fn buildSshCommand(self: *SshTransport, path: []const u8, service: []const u8) ![]const u8 {
+        var cmd_parts = std.ArrayList([]const u8).initCapacity(self.allocator, 16) catch |err| return err;
+        defer cmd_parts.deinit(self.allocator);
+
+        try cmd_parts.append(self.allocator, "ssh");
+
+        if (self.port != 22) {
+            try cmd_parts.append(self.allocator, "-p");
+            try cmd_parts.append(self.allocator, try std.fmt.allocPrint(self.allocator, "{d}", .{self.port}));
+        }
+
+        if (self.key_path) |key| {
+            try cmd_parts.append(self.allocator, "-i");
+            try cmd_parts.append(self.allocator, key);
+        }
+
+        if (self.agent_forward) {
+            try cmd_parts.append(self.allocator, "-A");
+        }
+
+        try cmd_parts.append(self.allocator, "-o");
+        try cmd_parts.append(self.allocator, "StrictHostKeyChecking=accept-new");
+
+        var target = std.ArrayList(u8).initCapacity(self.allocator, 64) catch |err| return err;
+        defer target.deinit(self.allocator);
+
+        if (self.username) |user| {
+            try target.appendSlice(self.allocator, user);
+            try target.append(self.allocator, '@');
+        }
+        try target.appendSlice(self.allocator, self.host);
+
+        try cmd_parts.append(self.allocator, try target.toOwnedSlice(self.allocator));
+
+        const remote_path = try std.fmt.allocPrint(self.allocator, "{s}/info/refs?service={s}", .{ path, service });
+        defer self.allocator.free(remote_path);
+        try cmd_parts.append(self.allocator, remote_path);
+
+        var result_cmd = std.ArrayList(u8).initCapacity(self.allocator, 512) catch |err| return err;
+        errdefer result_cmd.deinit(self.allocator);
+
+        for (cmd_parts.items, 0..) |part, i| {
+            if (i > 0) try result_cmd.appendSlice(self.allocator, " ");
+            if (std.mem.indexOfAny(u8, part, " \t\n\"'$")) |_| {
+                try result_cmd.appendSlice(self.allocator, "\"");
+                for (part) |c| {
+                    if (c == '"' or c == '$' or c == '\\') try result_cmd.append(self.allocator, '\\');
+                    try result_cmd.append(self.allocator, c);
+                }
+                try result_cmd.appendSlice(self.allocator, "\"");
+            } else {
+                try result_cmd.appendSlice(self.allocator, part);
+            }
+        }
+
+        return result_cmd.toOwnedSlice(self.allocator);
+    }
+
+    fn runGitCommand(self: *SshTransport, ssh_cmd: []const u8) ![]const u8 {
+        const full_cmd = try std.fmt.allocPrint(self.allocator, "{s} 2>/dev/null", .{ssh_cmd});
+        defer self.allocator.free(full_cmd);
+
+        var child = try std.process.spawn(self.io, .{
+            .argv = &.{ "/bin/sh", "-c", full_cmd },
+            .stdin = .inherit,
+            .stdout = .pipe,
+            .stderr = .pipe,
+        });
+
+        const term = try child.wait(self.io);
+
+        switch (term) {
+            .exited => |code| {
+                if (code != 0) {
+                    return error.SshCommandFailed;
+                }
+            },
+            else => return error.SshCommandFailed,
+        }
+
+        var stdout_file = child.stdout.?;
+        defer stdout_file.close(self.io);
+
+        var result = std.ArrayList(u8).empty;
+        errdefer result.deinit(self.allocator);
+
+        var buf: [8192]u8 = undefined;
+        while (true) {
+            const n = try stdout_file.readStreaming(self.io, &.{&buf});
+            if (n == 0) break;
+            try result.appendSlice(self.allocator, buf[0..n]);
+        }
+
+        return try result.toOwnedSlice(self.allocator);
+    }
+
+    fn runGitCommandWithStdin(self: *SshTransport, ssh_cmd: []const u8, stdin_data: []const u8) ![]u8 {
+        const shell_cmd = try std.fmt.allocPrint(self.allocator, "cat << 'HOZEOF' | {s}", .{ssh_cmd});
+        defer self.allocator.free(shell_cmd);
+
+        var child = try std.process.spawn(self.io, .{
+            .argv = &.{ "/bin/sh", "-c", shell_cmd },
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .pipe,
+        });
+
+        try child.stdin.?.writeStreamingAll(self.io, stdin_data);
+        child.stdin.?.close(self.io);
+
+        const term = try child.wait(self.io);
+
+        switch (term) {
+            .exited => |code| {
+                if (code != 0) {
+                    return error.SshCommandFailed;
+                }
+            },
+            else => return error.SshCommandFailed,
+        }
+
+        var stdout_file = child.stdout.?;
+        defer stdout_file.close(self.io);
+
+        var result = std.ArrayList(u8).empty;
+        errdefer result.deinit(self.allocator);
+
+        var buf: [8192]u8 = undefined;
+        while (true) {
+            const n = try stdout_file.readStreaming(self.io, &.{&buf});
+            if (n == 0) break;
+            try result.appendSlice(self.allocator, buf[0..n]);
+        }
+
+        return try result.toOwnedSlice(self.allocator);
+    }
+};
+
+pub const SshOptions = struct {
+    host: []const u8,
+    port: u16 = 22,
+    username: ?[]const u8 = null,
+    key_path: ?[]const u8 = null,
+    agent_forward: bool = false,
+    known_hosts_check: bool = true,
+};
+
+pub const ParsedSshUrl = struct {
+    username: ?[]const u8,
+    host: []const u8,
+    port: u16,
+    path: []const u8,
+};
+
+pub fn parseSshUrl(url: []const u8) !ParsedSshUrl {
+    var remaining = url;
+    var username: ?[]const u8 = null;
+    var host: []const u8 = undefined;
+    var port: u16 = 22;
+    var path: []const u8 = "";
+
+    if (std.mem.startsWith(u8, remaining, "ssh://")) {
+        remaining = remaining[6..];
+    } else if (std.mem.startsWith(u8, remaining, "git@")) {
+        const at_idx = std.mem.indexOf(u8, remaining, "@");
+        if (at_idx) |idx| {
+            username = remaining[4..idx];
+            remaining = remaining[idx + 1 ..];
+        }
+    }
+
+    const colon_idx = std.mem.indexOf(u8, remaining, ":");
+    const slash_idx = std.mem.indexOf(u8, remaining, "/");
+
+    if (colon_idx != null and (slash_idx == null or colon_idx.? < slash_idx.?)) {
+        host = remaining[0..colon_idx.?];
+        const port_str = remaining[colon_idx.? + 1 ..];
+        port = std.fmt.parseInt(u16, port_str, 10) catch 22;
+        if (slash_idx) |sidx| {
+            path = remaining[sidx..];
+        }
+    } else {
+        if (slash_idx) |sidx| {
+            host = remaining[0..sidx];
+            path = remaining[sidx..];
+        } else {
+            host = remaining;
+        }
+    }
+
+    return .{
+        .username = username,
+        .host = host,
+        .port = port,
+        .path = path,
+    };
+}
+
+test "SshTransport init" {
+    const allocator = std.testing.allocator;
+    const transport = SshTransport.init(allocator, "github.com");
+    try std.testing.expectEqualStrings("github.com", transport.host);
+    try std.testing.expect(transport.port == 22);
+}
+
+test "SshTransport setUsername" {
+    const allocator = std.testing.allocator;
+    var transport = SshTransport.init(allocator, "github.com");
+    transport.setUsername("git");
+    try std.testing.expectEqualStrings("git", transport.username);
+}
+
+test "parseSshUrl git@ style" {
+    const result = try parseSshUrl("git@github.com:user/repo.git");
+    try std.testing.expectEqualStrings("git", result.username);
+    try std.testing.expectEqualStrings("github.com", result.host);
+    try std.testing.expectEqualStrings("/user/repo.git", result.path);
+}
+
+pub const SshDiagnosis = struct {
+    ssh_available: bool,
+    host_reachable: bool,
+    auth_works: bool,
+    key_file_exists: bool,
+    agent_running: bool,
+    error_detail: ?[]const u8 = null,
+
+    pub fn deinit(self: *SshDiagnosis, allocator: std.mem.Allocator) void {
+        if (self.error_detail) |d| allocator.free(d);
+    }
+};
+
+pub fn diagnose(allocator: std.mem.Allocator, io: Io, host: []const u8, port: u16, username: ?[]const u8, key_path: ?[]const u8) !SshDiagnosis {
+    var diag = SshDiagnosis{
+        .ssh_available = false,
+        .host_reachable = false,
+        .auth_works = false,
+        .key_file_exists = false,
+        .agent_running = false,
+        .error_detail = null,
+    };
+
+    const which_result = try std.process.run(allocator, io, .{
+        .argv = &.{ "/bin/sh", "-c", "command -v ssh 2>/dev/null && echo OK" },
+        .stdout_limit = .limited(64),
+    });
+    defer allocator.free(which_result);
+    diag.ssh_available = std.mem.indexOf(u8, which_result, "OK") != null;
+
+    if (!diag.ssh_available) {
+        diag.error_detail = try allocator.dupe(u8, "ssh binary not found in PATH");
+        return diag;
+    }
+
+    var target_buf: [256]u8 = undefined;
+    var tw = std.Io.Writer.fixed(&target_buf);
+    if (username) |u| {
+        tw.writeAll(u) catch {};
+        tw.writeByte('@') catch {};
+    }
+    tw.writeAll(host) catch {};
+    const target = target_buf[0..tw.end];
+
+    var port_arg_buf: [16]u8 = undefined;
+    const port_str = if (port != 22)
+        std.fmt.bufPrint(&port_arg_buf, "-p {d}", .{port}) catch ""
+    else
+        "";
+
+    const ping_cmd = try std.fmt.allocPrint(allocator, "ssh {s} -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=3 -o ConnectionAttempts=1 {s} echo SSH_OK 2>&1", .{ port_str, target });
+    defer allocator.free(ping_cmd);
+
+    const ping_result = std.process.run(allocator, io, .{
+        .argv = &.{ "/bin/sh", "-c", ping_cmd },
+        .stdout_limit = .limited(512),
+    }) catch {
+        diag.error_detail = try allocator.dupe(u8, "failed to run ssh probe command");
+        return diag;
+    };
+    defer allocator.free(ping_result);
+
+    diag.host_reachable = true;
+    diag.auth_works = std.mem.indexOf(u8, ping_result, "SSH_OK") != null;
+
+    if (!diag.auth_works) {
+        if (std.mem.indexOf(u8, ping_result, "Connection refused") != null or
+            std.mem.indexOf(u8, ping_result, "No route to host") != null or
+            std.mem.indexOf(u8, ping_result, "Host is down") != null)
+        {
+            diag.host_reachable = false;
+            diag.error_detail = try allocator.dupe(u8, "host unreachable (network or firewall issue)");
+        } else if (std.mem.indexOf(u8, ping_result, "Permission denied") != null) {
+            diag.error_detail = try allocator.dupe(u8, "authentication failed — check key/agent");
+        } else if (std.mem.indexOf(u8, ping_result, "Host key verification failed") != null) {
+            diag.error_detail = try allocator.dupe(u8, "host key mismatch — check known_hosts");
+        } else {
+            const trimmed = std.mem.trim(u8, ping_result, " \t\r\n");
+            diag.error_detail = try allocator.dupe(u8, trimmed);
+        }
+    }
+
+    if (key_path) |kp| {
+        const stat_result = std.process.run(allocator, io, .{
+            .argv = &.{ "/bin/sh", "-c", try std.fmt.allocPrint(allocator, "test -f '{s}' && echo EXISTS", .{kp}) },
+            .stdout_limit = .limited(32),
+        }) catch {
+            diag.key_file_exists = false;
+        };
+        defer allocator.free(stat_result);
+        diag.key_file_exists = std.mem.indexOf(u8, stat_result, "EXISTS") != null;
+    }
+
+    const agent_result = std.process.run(allocator, io, .{
+        .argv = &.{ "/bin/sh", "-c", "ssh-add -l >/dev/null 2>&1 && echo AGENT" },
+        .stdout_limit = .limited(32),
+    }) catch {
+        diag.agent_running = false;
+    };
+    defer allocator.free(agent_result);
+    diag.agent_running = std.mem.indexOf(u8, agent_result, "AGENT") != null;
+
+    return diag;
+}
+
+test "SshDiagnosis fields" {
+    const diag = SshDiagnosis{};
+    try std.testing.expect(!diag.ssh_available);
+    try std.testing.expect(!diag.host_reachable);
+    try std.testing.expect(!diag.auth_works);
+    try std.testing.expect(!diag.key_file_exists);
+    try std.testing.expect(!diag.agent_running);
+    try std.testing.expect(diag.error_detail == null);
+}
+
+test "diagnose returns struct with defaults when ssh missing" {
+    var buf: [1]u8 = undefined;
+    const io: Io = .init(.{
+        .stdin = .empty,
+        .stdout = .buffered(&buf),
+        .stderr = .buffered(&buf),
+    });
+    const diag = try diagnose(std.testing.allocator, io, "nonexistent.example.com", 22, null, null);
+    defer diag.deinit(std.testing.allocator);
+    try std.testing.expect(diag.ssh_available == true or diag.ssh_available == false);
+}

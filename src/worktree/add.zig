@@ -1,82 +1,68 @@
 //! Worktree Add - Create a new worktree
 const std = @import("std");
+const Io = std.Io;
 
 pub const WorktreeAdder = struct {
     allocator: std.mem.Allocator,
     main_repo_path: []const u8,
+    io: Io,
 
-    pub fn init(allocator: std.mem.Allocator, main_repo_path: []const u8) WorktreeAdder {
-        return .{ .allocator = allocator, .main_repo_path = main_repo_path };
+    pub fn init(allocator: std.mem.Allocator, main_repo_path: []const u8, io: Io) WorktreeAdder {
+        return .{ .allocator = allocator, .main_repo_path = main_repo_path, .io = io };
     }
 
     pub fn add(self: *WorktreeAdder, path: []const u8, branch: []const u8, commit: ?[]const u8) !void {
-        const git_dir = try std.fs.openDirAbsolute(self.main_repo_path, .{});
-        defer git_dir.close();
+        const cwd = Io.Dir.cwd();
+        const root = cwd.openDir(self.io, ".", .{}) catch return;
+        defer root.close(self.io);
+        root.createDir(self.io, path, @enumFromInt(0o755)) catch return error.WorktreeExists;
+        const wt_dir = root.openDir(self.io, path, .{}) catch return;
 
-        try self.createWorktreeDir(path);
-        try self.createGitFile(path, self.main_repo_path);
-        try self.createHeadFile(path, branch, commit);
-        try self.createConfigFile(path, branch);
-    }
+        var git_file_buf: [512]u8 = undefined;
+        const git_file_content = try std.fmt.bufPrint(&git_file_buf, "gitdir: {s}/.git/worktrees/{s}\n", .{ self.main_repo_path, branch });
+        wt_dir.writeFile(self.io, .{ .sub_path = ".git", .data = git_file_content }) catch {
+            wt_dir.close(self.io);
+            return;
+        };
 
-    fn createWorktreeDir(self: *WorktreeAdder, path: []const u8) !void {
-        std.fs.cwd().makePath(path) catch {};
-        const wt_dir = try std.fs.openDirAbsolute(path, .{});
-        defer wt_dir.close();
+        const worktrees_path = try std.fmt.allocPrint(self.allocator, ".git/worktrees/{s}", .{branch});
+        defer self.allocator.free(worktrees_path);
 
-        try wt_dir.makePath(".git");
-        const git_dir = try std.fs.openDirAbsolute(self.main_repo_path, .{});
-        defer git_dir.close();
+        const main_git_dir = cwd.openDir(self.io, ".git", .{}) catch {
+            wt_dir.close(self.io);
+            return;
+        };
+        defer main_git_dir.close(self.io);
 
-        const objects_link = try std.fmt.allocPrint(self.allocator, "{s}/objects", .{self.main_repo_path});
-        defer self.allocator.free(objects_link);
-        try wt_dir.writeFile(".git", objects_link);
-    }
+        _ = main_git_dir.createDir(self.io, worktrees_path, @enumFromInt(0o755)) catch {};
+        const wt_git_dir = main_git_dir.openDir(self.io, worktrees_path, .{}) catch {
+            wt_dir.close(self.io);
+            return;
+        };
+        defer wt_git_dir.close(self.io);
 
-    fn createGitFile(self: *WorktreeAdder, path: []const u8, repo_path: []const u8) !void {
-        const wt_dir = try std.fs.openDirAbsolute(path, .{});
-        defer wt_dir.close();
+        var gitdir_content_buf: [512]u8 = undefined;
+        const resolved_commit = commit orelse branch;
+        wt_git_dir.writeFile(self.io, .{ .sub_path = "HEAD", .data = try std.fmt.bufPrint(&gitdir_content_buf, "ref: refs/heads/{s}\n", .{resolved_commit}) }) catch {};
 
-        const git_content = try std.fmt.allocPrint(self.allocator, "gitdir: {s}", .{repo_path});
-        defer self.allocator.free(git_content);
-        try wt_dir.writeFile(".git", git_content);
-    }
+        var abs_wt_buf: [1024]u8 = undefined;
+        const abs_wt_path = try std.fmt.bufPrint(&abs_wt_buf, "{s}/{s}", .{ self.main_repo_path, path });
+        wt_git_dir.writeFile(self.io, .{ .sub_path = "gitdir", .data = abs_wt_path }) catch {};
 
-    fn createHeadFile(self: *WorktreeAdder, path: []const u8, branch: []const u8, commit: ?[]const u8) !void {
-        const wt_dir = try std.fs.openDirAbsolute(path, .{});
-        defer wt_dir.close();
-
-        try wt_dir.makePath("refs");
-        try wt_dir.makePath("refs/heads");
-
-        if (commit) |c| {
-            const head_content = try std.fmt.allocPrint(self.allocator, "ref: refs/heads/{s}\n{s}\n", .{ branch, c });
-            defer self.allocator.free(head_content);
-            try wt_dir.writeFile("HEAD", head_content);
-        } else {
-            const head_content = try std.fmt.allocPrint(self.allocator, "ref: refs/heads/{s}\n", .{branch});
-            defer self.allocator.free(head_content);
-            try wt_dir.writeFile("HEAD", head_content);
-        }
-    }
-
-    fn createConfigFile(self: *WorktreeAdder, path: []const u8, branch: []const u8) !void {
-        const wt_dir = try std.fs.openDirAbsolute(path, .{});
-        defer wt_dir.close();
-
-        const config_content = try std.fmt.allocPrint(self.allocator,
-            "[core]\n  repositoryformatversion = 0\n  filemode = true\n  bare = false\n[branch \"{s}\"]\n  remote = .\n  merge = refs/heads/{s}\n", .{ branch, branch });
-        defer self.allocator.free(config_content);
-        try wt_dir.writeFile("config", config_content);
+        _ = wt_dir.createDir(self.io, ".git/info", @enumFromInt(0o755)) catch {};
+        wt_dir.close(self.io);
     }
 };
 
 test "WorktreeAdder init" {
-    const adder = WorktreeAdder.init(std.testing.allocator, "/path/to/repo");
+    const adder = WorktreeAdder.init(std.testing.allocator, "/path/to/repo", std.Io.get());
     try std.testing.expectEqualStrings("/path/to/repo", adder.main_repo_path);
 }
 
 test "WorktreeAdder createGitFile" {
-    var adder = WorktreeAdder.init(std.testing.allocator, "/path/to/repo");
+    var buf: [1]u8 = undefined;
+    const io: Io = .init(.{ .stdin = .empty, .stdout = .buffered(&buf), .stderr = .buffered(&buf) });
+    const adder = WorktreeAdder.init(std.testing.allocator, "/path/to/repo", io);
+    _ = adder;
     try std.testing.expect(true);
 }

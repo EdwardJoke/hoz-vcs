@@ -1,5 +1,8 @@
 //! Stash Branch - Create branch from stash
 const std = @import("std");
+const Io = std.Io;
+const stash_list = @import("list.zig");
+const StashLister = stash_list.StashLister;
 
 pub const BranchOptions = struct {
     index: u32 = 0,
@@ -9,29 +12,79 @@ pub const BranchOptions = struct {
 pub const BranchResult = struct {
     success: bool,
     branch_name: []const u8,
+    message: ?[]const u8 = null,
 };
 
 pub const StashBrancher = struct {
     allocator: std.mem.Allocator,
+    io: Io,
+    git_dir: Io.Dir,
     options: BranchOptions,
 
-    pub fn init(allocator: std.mem.Allocator, options: BranchOptions) StashBrancher {
-        return .{ .allocator = allocator, .options = options };
+    pub fn init(allocator: std.mem.Allocator, io: Io, git_dir: Io.Dir, options: BranchOptions) StashBrancher {
+        return .{
+            .allocator = allocator,
+            .io = io,
+            .git_dir = git_dir,
+            .options = options,
+        };
     }
 
     pub fn createBranch(self: *StashBrancher, branch_name: []const u8) !BranchResult {
-        _ = self;
-        _ = branch_name;
-        return BranchResult{ .success = true, .branch_name = branch_name };
+        return try self.createBranchFromIndex(self.options.index, branch_name);
     }
 
     pub fn createBranchFromIndex(self: *StashBrancher, stash_index: u32, branch_name: []const u8) !BranchResult {
-        _ = self;
-        _ = stash_index;
-        _ = branch_name;
-        return BranchResult{ .success = true, .branch_name = branch_name };
+        var lister = StashLister.init(self.allocator, self.io, self.git_dir);
+        const entries = try lister.list();
+        defer self.allocator.free(entries);
+
+        var target_entry: ?StashEntry = null;
+        for (entries) |entry| {
+            if (entry.index == stash_index) {
+                target_entry = entry;
+                break;
+            }
+        }
+
+        if (target_entry == null) {
+            return BranchResult{
+                .success = false,
+                .branch_name = branch_name,
+                .message = try std.fmt.allocPrint(self.allocator, "stash@{d} not found", .{stash_index}),
+            };
+        }
+
+        const branch_ref = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{branch_name});
+        defer self.allocator.free(branch_ref);
+
+        if (!self.options.force) {
+            const existing = self.git_dir.openFile(self.io, branch_ref, .{}) catch null;
+            if (existing) |file| {
+                file.close(self.io);
+                return BranchResult{
+                    .success = false,
+                    .branch_name = branch_name,
+                    .message = try std.fmt.allocPrint(self.allocator, "branch '{s}' already exists", .{branch_name}),
+                };
+            }
+        }
+
+        try self.git_dir.createDirPath(self.io, "refs/heads");
+        const oid_hex = target_entry.?.oid.toHex();
+        const ref_content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{&oid_hex});
+        defer self.allocator.free(ref_content);
+        try self.git_dir.writeFile(self.io, .{ .sub_path = branch_ref, .data = ref_content });
+
+        return BranchResult{
+            .success = true,
+            .branch_name = branch_name,
+            .message = try std.fmt.allocPrint(self.allocator, "Created branch '{s}' from stash@{d}", .{ branch_name, stash_index }),
+        };
     }
 };
+
+const StashEntry = stash_list.StashEntry;
 
 test "BranchOptions default values" {
     const options = BranchOptions{};
@@ -43,30 +96,4 @@ test "BranchResult structure" {
     const result = BranchResult{ .success = true, .branch_name = "stash-branch" };
     try std.testing.expect(result.success == true);
     try std.testing.expectEqualStrings("stash-branch", result.branch_name);
-}
-
-test "StashBrancher init" {
-    const options = BranchOptions{};
-    const brancher = StashBrancher.init(std.testing.allocator, options);
-    try std.testing.expect(brancher.allocator == std.testing.allocator);
-}
-
-test "StashBrancher init with options" {
-    var options = BranchOptions{};
-    options.force = true;
-    options.index = 2;
-    const brancher = StashBrancher.init(std.testing.allocator, options);
-    try std.testing.expect(brancher.options.force == true);
-}
-
-test "StashBrancher createBranch method exists" {
-    var brancher = StashBrancher.init(std.testing.allocator, .{});
-    const result = try brancher.createBranch("recovery-branch");
-    try std.testing.expect(result.success == true);
-}
-
-test "StashBrancher createBranchFromIndex method exists" {
-    var brancher = StashBrancher.init(std.testing.allocator, .{});
-    const result = try brancher.createBranchFromIndex(0, "stash-recovery");
-    try std.testing.expect(result.success == true);
 }

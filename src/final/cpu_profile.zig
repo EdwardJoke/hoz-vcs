@@ -19,6 +19,7 @@ pub const CPUProfileStats = struct {
     samples_in_kernel_mode: u64 = 0,
     total_cpu_time_ns: u64 = 0,
     profiling_time_ns: u64 = 0,
+    stack_trace_fallbacks: u64 = 0,
 };
 
 pub const StackFrame = struct {
@@ -49,8 +50,8 @@ pub const FunctionProfile = struct {
 pub const CPUProfile = struct {
     allocator: std.mem.Allocator,
     config: CPUProfileConfig,
-    samples: std.ArrayList(ProfileSample),
-    function_profiles: std.AutoArrayHashMap([]const u8, FunctionProfile),
+    samples: std.ArrayListUnmanaged(ProfileSample),
+    function_profiles: std.array_hash_map.Auto([]const u8, FunctionProfile),
     stats: CPUProfileStats,
     enabled: bool,
     start_time: i64,
@@ -59,8 +60,8 @@ pub const CPUProfile = struct {
         return .{
             .allocator = allocator,
             .config = config,
-            .samples = std.ArrayList(ProfileSample).init(allocator),
-            .function_profiles = std.AutoArrayHashMap([]const u8, FunctionProfile).init(allocator),
+            .samples = .empty,
+            .function_profiles = .empty,
             .stats = .{},
             .enabled = false,
             .start_time = 0,
@@ -71,14 +72,14 @@ pub const CPUProfile = struct {
         for (self.samples.items) |sample| {
             self.allocator.free(sample.stack_trace);
         }
-        self.samples.deinit();
+        self.samples.deinit(self.allocator);
 
         var iter = self.function_profiles.iterator();
         while (iter.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
             self.allocator.free(entry.value_ptr.samples);
         }
-        self.function_profiles.deinit();
+        self.function_profiles.deinit(self.allocator);
     }
 
     pub fn start(self: *CPUProfile) void {
@@ -101,7 +102,7 @@ pub const CPUProfile = struct {
             .is_kernel = is_kernel,
         };
 
-        try self.samples.append(sample);
+        try self.samples.append(self.allocator, sample);
         self.stats.total_samples += 1;
         self.stats.total_cpu_time_ns += cpu_time_ns;
 
@@ -118,17 +119,39 @@ pub const CPUProfile = struct {
         }
     }
 
+    fn captureStackTrace(self: *CPUProfile) ![]usize {
+        const depth = @min(self.config.max_stack_depth, 64);
+        var trace = try self.allocator.alloc(usize, depth);
+
+        if (comptime !@hasDecl(std.debug, "captureStackTrace")) {
+            @memset(trace, 0);
+            self.stats.stack_trace_fallbacks += 1;
+            return trace;
+        }
+
+        var buf: [64]usize = undefined;
+        const actual = std.debug.captureStackTrace(buf[0..]);
+        const copy_len = @min(actual, depth);
+        if (copy_len > 0) {
+            @memcpy(trace[0..copy_len], buf[0..copy_len]);
+        }
+        @memset(trace[copy_len..], 0);
+
+        return trace;
+    }
+
     fn recordFunctionHit(self: *CPUProfile, name: []const u8, cpu_time_ns: u64) !void {
         if (self.function_profiles.getEntry(name)) |entry| {
             entry.value_ptr.hit_count += 1;
             entry.value_ptr.total_cpu_time_ns += cpu_time_ns;
             entry.value_ptr.min_cpu_time_ns = @min(entry.value_ptr.min_cpu_time_ns, cpu_time_ns);
             entry.value_ptr.max_cpu_time_ns = @max(entry.value_ptr.max_cpu_time_ns, cpu_time_ns);
+            entry.value_ptr.avg_cpu_time_ns = entry.value_ptr.total_cpu_time_ns / entry.value_ptr.hit_count;
         } else {
             const name_copy = try self.allocator.dupe(u8, name);
             errdefer self.allocator.free(name_copy);
 
-            try self.function_profiles.put(name_copy, .{
+            try self.function_profiles.put(self.allocator, name_copy, .{
                 .name = name_copy,
                 .address = 0,
                 .hit_count = 1,
@@ -141,13 +164,13 @@ pub const CPUProfile = struct {
         }
     }
 
-    pub fn getTopFunctions(self: *CPUProfile, count: usize) ![]const FunctionProfile {
+    pub fn getTopFunctions(self: *CPUProfile, count: usize) ![]FunctionProfile {
         var sorted = std.ArrayList(FunctionProfile).init(self.allocator);
         defer sorted.deinit();
 
         var iter = self.function_profiles.iterator();
         while (iter.next()) |entry| {
-            try sorted.append(entry.value_ptr.*);
+            try sorted.append(self.allocator, entry.value_ptr.*);
         }
 
         std.mem.sort(FunctionProfile, sorted.items, {}, struct {
@@ -156,7 +179,10 @@ pub const CPUProfile = struct {
             }
         }.less);
 
-        return sorted.items[0..@min(count, sorted.items.len)];
+        const n = @min(count, sorted.items.len);
+        const result = try self.allocator.alloc(FunctionProfile, n);
+        @memcpy(result, sorted.items[0..n]);
+        return result;
     }
 
     pub fn getStats(self: *const CPUProfile) CPUProfileStats {
@@ -182,8 +208,8 @@ pub const CPUProfile = struct {
 
         try stdout.print("\n=== Top Functions by CPU Time ===\n", .{});
         const top = try self.getTopFunctions(10);
-        try stdout.print("{:<30} {:>12} {:>15}\n", .{"Function", "Hits", "Total Time(ns)"});
-        try stdout.print("{:<30} {:>12} {:>15}\n", .{"--------", "----", "------------"});
+        try stdout.print("{:<30} {:>12} {:>15}\n", .{ "Function", "Hits", "Total Time(ns)" });
+        try stdout.print("{:<30} {:>12} {:>15}\n", .{ "--------", "----", "------------" });
 
         for (top) |func| {
             try stdout.print("{:<30} {:>12} {:>15}\n", .{

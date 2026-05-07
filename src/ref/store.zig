@@ -1,6 +1,7 @@
 //! Reference store for reading and writing refs (loose + packed)
 const std = @import("std");
-const Oid = @import("../object/oid.zig").Oid;
+const Io = std.Io;
+const OID = @import("../object/oid.zig").OID;
 const Ref = @import("ref.zig").Ref;
 const RefError = @import("ref.zig").RefError;
 
@@ -9,8 +10,9 @@ const MAX_RESOLVE_DEPTH = 40;
 
 /// PackedRefsManager handles reading packed refs
 const PackedRefsManager = struct {
-    git_dir: std.fs.Dir,
+    git_dir: Io.Dir,
     allocator: std.mem.Allocator,
+    io: Io,
 
     /// Read all packed refs with proper locking
     /// Format: "<OID> <refname>\n" or "<OID> <refname>^\n" (peeled tag)
@@ -22,10 +24,10 @@ const PackedRefsManager = struct {
         const lock = try self.acquireLock(.shared);
         defer lock.release();
 
-        const packed_file = self.git_dir.openFile("packed-refs", .{}) catch {
+        const packed_file = self.git_dir.openFile(self.io, "packed-refs", .{}) catch {
             return refs.toOwnedSlice(); // No packed-refs file is fine
         };
-        defer packed_file.close();
+        defer packed_file.close(self.io);
 
         const content = packed_file.readToEndAlloc(self.allocator, std.math.maxInt(usize)) catch {
             return refs.toOwnedSlice();
@@ -47,7 +49,7 @@ const PackedRefsManager = struct {
 
             if (ref_name.len == 0) continue;
 
-            const oid = Oid.fromHex(oid_hex) catch continue;
+            const oid = OID.fromHex(oid_hex) catch continue;
             const ref = Ref.directRef(ref_name, oid);
             refs.append(self.allocator, ref) catch continue;
         }
@@ -66,10 +68,10 @@ const PackedRefsManager = struct {
         const final_path = "packed-refs";
 
         // Delete any existing temp file
-        self.git_dir.deleteFile(temp_path) catch {};
+        self.git_dir.deleteFile(self.io, temp_path) catch {};
 
-        var temp_file = try self.git_dir.createFile(temp_path, .{});
-        defer temp_file.close();
+        var temp_file = try self.git_dir.createFile(self.io, temp_path, .{});
+        defer temp_file.close(self.io);
 
         // Write header
         try temp_file.writeAll("# pack-refs with: peeled fully-peeled sorted\n");
@@ -81,13 +83,13 @@ const PackedRefsManager = struct {
         }
 
         // Sync to ensure data is written
-        try temp_file.sync();
+        try temp_file.sync(self.io);
 
         // Close file before renaming
-        temp_file.close();
+        temp_file.close(self.io);
 
         // Rename to final location atomically
-        self.git_dir.rename(temp_path, final_path) catch {
+        self.git_dir.rename(self.io, temp_path, final_path) catch {
             return error.IoError;
         };
     }
@@ -100,30 +102,30 @@ const PackedRefsManager = struct {
 
     /// RAII-style lock guard for packed-refs
     const Lock = struct {
-        git_dir: std.fs.Dir,
+        git_dir: Io.Dir,
         lock_path: []const u8,
 
         pub fn release(self: *Lock) void {
-            self.git_dir.deleteFile(self.lock_path) catch {};
+            self.git_dir.deleteFile(self.io, self.lock_path) catch {};
         }
     };
 
     /// Acquire a lock on packed-refs
     fn acquireLock(self: PackedRefsManager, lock_type: LockType) RefError!Lock {
         const lock_path = "packed-refs.lock";
-        const lock_file = self.git_dir.createFile(lock_path, .{
+        const lock_file = self.git_dir.createFile(self.io, lock_path, .{
             .exclusive = lock_type == .exclusive,
         }) catch {
             return error.IoError;
         };
-        defer lock_file.close();
+        defer lock_file.close(self.io);
 
         // Write lock metadata (PID for debugging)
         const pid = std.process.getCurrentPid();
         try lock_file.writer().print("lock {d}\n", .{pid});
 
         // Sync the lock file
-        lock_file.sync() catch {};
+        lock_file.sync(self.io) catch {};
 
         return Lock{
             .git_dir = self.git_dir,
@@ -133,8 +135,9 @@ const PackedRefsManager = struct {
 };
 
 pub const RefStore = struct {
-    git_dir: std.fs.Dir,
+    git_dir: Io.Dir,
     allocator: std.mem.Allocator,
+    io: Io,
     odb: ?*const anyopaque, // Optional ODB for resolving OIDs
 
     pub const Options = struct {
@@ -142,13 +145,13 @@ pub const RefStore = struct {
     };
 
     /// Create a new RefStore for a git directory
-    pub fn init(git_dir: std.fs.Dir, allocator: std.mem.Allocator) RefStore {
-        return .{ .git_dir = git_dir, .allocator = allocator, .odb = null };
+    pub fn init(git_dir: Io.Dir, allocator: std.mem.Allocator, io: Io) RefStore {
+        return .{ .git_dir = git_dir, .allocator = allocator, .io = io, .odb = null };
     }
 
     /// Create a RefStore with options
-    pub fn initWithOptions(git_dir: std.fs.Dir, allocator: std.mem.Allocator, options: Options) RefStore {
-        return .{ .git_dir = git_dir, .allocator = allocator, .odb = options.odb };
+    pub fn initWithOptions(git_dir: Io.Dir, allocator: std.mem.Allocator, options: Options, io: Io) RefStore {
+        return .{ .git_dir = git_dir, .allocator = allocator, .io = io, .odb = options.odb };
     }
 
     /// Read and resolve a ref (follows symbolic refs to OID)
@@ -165,17 +168,20 @@ pub const RefStore = struct {
 
         // Try loose ref first
         const loose_path = self.refPath(name);
-        var file = self.git_dir.openFile(loose_path, .{}) catch |err| {
+        var file = self.git_dir.openFile(self.io, loose_path, .{}) catch |err| {
             if (err == error.FileNotFound) {
                 return RefError.InvalidRefName;
             }
-            return err;
+            return error.IoError;
         };
-        defer file.close();
+        defer file.close(self.io);
 
         var buf: [256]u8 = undefined;
-        const bytes_read = try file.read(&buf);
-        const content = std.mem.trimRight(u8, buf[0..bytes_read], "\r\n");
+        var iovec: [1][]u8 = .{&buf};
+        const bytes_read = file.readStreaming(self.io, &iovec) catch {
+            return error.IoError;
+        };
+        const content = std.mem.trim(u8, buf[0..bytes_read], "\r\n");
 
         return try self.parseRef(name, content, depth);
     }
@@ -184,7 +190,7 @@ pub const RefStore = struct {
     /// Returns the resolved Ref with an OID for symbolic refs
     /// Uses visited set to detect cycles (e.g., A->B->C->A)
     pub fn resolve(self: RefStore, name: []const u8) RefError!Ref {
-        var visited = std.AutoHashMap([]const u8, void).init(self.allocator);
+        var visited = std.StringHashMap(void).init(self.allocator);
         defer visited.deinit();
 
         var ref = try self.readWithDepth(name, 0);
@@ -224,18 +230,29 @@ pub const RefStore = struct {
         }
 
         const path = self.refPath(ref.name);
-        try self.git_dir.makeDir(std.fs.path.dirname(path));
+        if (std.fs.path.dirname(path)) |dir| {
+            self.git_dir.createDirPath(self.io, dir) catch {};
+        }
 
-        var file = try self.git_dir.createFile(path, .{});
-        defer file.close();
+        var file = try self.git_dir.createFile(self.io, path, .{});
+        defer file.close(self.io);
 
-        try file.writer().print("{s}\n", .{ref.getTargetString()});
+        var writer = file.writer(self.io, &.{});
+        switch (ref.target) {
+            .direct => |oid| {
+                const hex = oid.toHex();
+                try writer.interface.print("{s}\n", .{&hex});
+            },
+            .symbolic => |target| {
+                try writer.interface.print("ref: {s}\n", .{target});
+            },
+        }
     }
 
     /// Delete a ref
     pub fn delete(self: RefStore, name: []const u8) RefError!void {
         const path = self.refPath(name);
-        try self.git_dir.deleteFile(path);
+        try self.git_dir.deleteFile(self.io, path);
     }
 
     /// List all refs matching a prefix
@@ -243,31 +260,52 @@ pub const RefStore = struct {
         var refs = std.ArrayList(Ref).empty;
         defer refs.deinit(self.allocator);
 
-        const refs_dir = try self.git_dir.openDir("refs", .{});
-        var walker = try refs_dir.walk(self.allocator);
+        const refs_dir = self.git_dir.openDir(self.io, "refs", .{}) catch |err| {
+            if (err == error.FileNotFound) {
+                return &.{}; // No refs directory is fine
+            }
+            return error.IoError;
+        };
+        defer refs_dir.close(self.io);
+
+        var walker = refs_dir.walk(self.allocator) catch {
+            return &.{};
+        };
         defer walker.deinit();
 
-        while (try walker.next()) |entry| {
+        while (walker.next(self.io) catch {
+            return &.{};
+        }) |entry| {
             if (entry.kind != .file) continue;
 
             const name = if (entry.path.len == 0)
-                try std.fmt.allocPrint(self.allocator, "refs/{s}", .{entry.name})
+                std.fmt.allocPrint(self.allocator, "refs/{s}", .{entry.basename}) catch {
+                    return &.{};
+                }
             else
-                try std.fmt.allocPrint(self.allocator, "refs/{s}/{s}", .{ entry.path, entry.name });
+                std.fmt.allocPrint(self.allocator, "refs/{s}/{s}", .{ entry.path, entry.basename }) catch {
+                    return &.{};
+                };
             errdefer self.allocator.free(name);
 
-            const full_name = if (prefix.len == 0)
-                name
-            else if (std.mem.startsWith(u8, name, prefix))
-                name[prefix.len..]
-            else
+            // Only include refs matching the prefix (if provided)
+            if (prefix.len > 0 and !std.mem.startsWith(u8, name, prefix)) {
+                self.allocator.free(name);
                 continue;
+            }
 
-            const ref = self.read(full_name) catch continue;
-            try refs.append(self.allocator, ref);
+            // Read using the full ref name to avoid dangling references
+            var ref = self.read(name) catch continue;
+            // Transfer ownership of the allocated name string to the Ref
+            ref.name = name;
+            refs.append(self.allocator, ref) catch {
+                return &.{};
+            };
         }
 
-        return refs.toOwnedSlice();
+        return refs.toOwnedSlice(self.allocator) catch {
+            return &.{};
+        };
     }
 
     /// Convert ref name to filesystem path
@@ -286,7 +324,7 @@ pub const RefStore = struct {
         }
 
         // Try to parse as OID
-        const oid = Oid.parse(content) catch {
+        const oid = OID.fromHex(content) catch {
             return RefError.InvalidHexOid;
         };
 
@@ -296,7 +334,8 @@ pub const RefStore = struct {
     /// Check if a ref exists
     pub fn exists(self: RefStore, name: []const u8) bool {
         const path = self.refPath(name);
-        return self.git_dir.exists(path);
+        _ = self.git_dir.statFile(self.io, path, .{}) catch return false;
+        return true;
     }
 };
 

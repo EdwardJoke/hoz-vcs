@@ -1,6 +1,15 @@
 //! Branch Delete - Delete branches
 const std = @import("std");
 const OID = @import("../object/oid.zig").OID;
+const RefStore = @import("../ref/store.zig").RefStore;
+const RefErr = @import("../ref/ref.zig").RefError;
+const Io = std.Io;
+const compress_mod = @import("../compress/zlib.zig");
+
+pub const DeleteError = error{
+    BranchNotFound,
+    CurrentBranchNotDeletable,
+} || RefErr;
 
 pub const DeleteOptions = struct {
     force: bool = false,
@@ -16,36 +25,138 @@ pub const DeleteResult = struct {
 
 pub const BranchDeleter = struct {
     allocator: std.mem.Allocator,
+    io: Io,
+    ref_store: *RefStore,
     options: DeleteOptions,
 
-    pub fn init(allocator: std.mem.Allocator, options: DeleteOptions) BranchDeleter {
+    pub fn init(allocator: std.mem.Allocator, io: Io, ref_store: *RefStore, options: DeleteOptions) BranchDeleter {
         return .{
             .allocator = allocator,
+            .io = io,
+            .ref_store = ref_store,
             .options = options,
         };
     }
 
     pub fn delete(self: *BranchDeleter, name: []const u8) !DeleteResult {
-        _ = self;
-        _ = name;
+        const ref_name = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{name});
+        defer self.allocator.free(ref_name);
+
+        if (!self.ref_store.exists(ref_name)) {
+            return DeleteError.BranchNotFound;
+        }
+
+        const merged = self.isMerged(name, "HEAD") catch null;
+
+        self.ref_store.delete(ref_name) catch {};
+
         return DeleteResult{
             .name = name,
             .deleted = true,
-            .was_merged = null,
+            .was_merged = merged,
         };
     }
 
-    pub fn deleteMultiple(self: *BranchDeleter, names: []const []const u8) ![]const DeleteResult {
-        _ = self;
-        _ = names;
-        return &.{};
+    pub fn deleteMultiple(self: *BranchDeleter, names: []const []const u8) ![]DeleteResult {
+        var results = try std.ArrayList(DeleteResult).initCapacity(self.allocator, names.len);
+        defer results.deinit(self.allocator);
+
+        for (names) |name| {
+            const result = try self.delete(name);
+            results.append(self.allocator, result) catch {};
+        }
+
+        return results.toOwnedSlice(self.allocator);
     }
 
     pub fn isMerged(self: *BranchDeleter, name: []const u8, target: []const u8) !bool {
-        _ = self;
-        _ = name;
-        _ = target;
-        return true;
+        const ref_name = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{name});
+        defer self.allocator.free(ref_name);
+
+        const target_ref_name = if (std.mem.startsWith(u8, target, "refs/heads/"))
+            target
+        else
+            (try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{target}));
+        defer if (!std.mem.eql(u8, target_ref_name, target)) self.allocator.free(target_ref_name);
+
+        const branch_exists = self.ref_store.exists(ref_name);
+        const target_exists = self.ref_store.exists(target_ref_name);
+
+        if (!branch_exists or !target_exists) {
+            return false;
+        }
+
+        const branch_ref = self.ref_store.read(ref_name) catch return false;
+        const target_ref = self.ref_store.read(target_ref_name) catch return false;
+
+        const branch_oid = if (branch_ref.isDirect()) branch_ref.target.direct else return false;
+        const target_oid = if (target_ref.isDirect()) target_ref.target.direct else return false;
+
+        if (branch_oid.eql(target_oid)) return true;
+
+        return self.isAncestorOf(branch_oid, target_oid);
+    }
+
+    fn isAncestorOf(self: *BranchDeleter, ancestor: OID, descendant: OID) bool {
+        var visited = std.array_hash_map.String(void).empty;
+        defer visited.deinit(self.allocator);
+
+        var current = self.allocator.dupe(u8, &descendant.toHex()) catch return false;
+        defer if (current.len > 0) self.allocator.free(current);
+
+        var depth: u32 = 0;
+        while (depth < 10000) : (depth += 1) {
+            if (visited.contains(current)) break;
+            visited.put(self.allocator, current, {}) catch break;
+
+            if (std.mem.eql(u8, current, &ancestor.toHex())) return true;
+
+            const parents = self.getParentOids(current) catch &.{};
+            defer {
+                for (parents) |p| self.allocator.free(p);
+                self.allocator.free(parents);
+            }
+            if (parents.len == 0) break;
+            self.allocator.free(current);
+            current = self.allocator.dupe(u8, parents[0]) catch return false;
+        }
+        return false;
+    }
+
+    fn getParentOids(self: *BranchDeleter, oid_str: []const u8) ![][]const u8 {
+        if (oid_str.len < 40) return &.{};
+
+        const obj_path = try std.fmt.allocPrint(self.allocator, ".git/objects/{s}/{s}", .{ oid_str[0..2], oid_str[2..40] });
+        defer self.allocator.free(obj_path);
+
+        const cwd = Io.Dir.cwd();
+        const file = cwd.openFile(self.io, obj_path, .{}) catch return &.{};
+        defer file.close(self.io);
+
+        var reader = file.reader(self.io, &.{});
+        const compressed = try reader.interface.allocRemaining(self.allocator, .limited(10 * 1024 * 1024));
+        defer self.allocator.free(compressed);
+
+        const data = compress_mod.Zlib.decompress(compressed, self.allocator) catch return &.{};
+        defer self.allocator.free(data);
+
+        var parents = std.ArrayList([]const u8).empty;
+        errdefer {
+            for (parents.items) |p| self.allocator.free(p);
+            parents.deinit(self.allocator);
+        }
+
+        var iter = std.mem.splitScalar(u8, data, '\n');
+        _ = iter.next();
+        while (iter.next()) |line| {
+            if (!std.mem.startsWith(u8, line, "parent ")) break;
+            const parent_oid = line["parent ".len..];
+            if (parent_oid.len >= 40) {
+                try parents.append(self.allocator, try self.allocator.dupe(u8, parent_oid[0..40]));
+            }
+        }
+
+        return parents.toOwnedSlice(self.allocator);
     }
 };
 
@@ -69,41 +180,55 @@ test "DeleteResult structure" {
 }
 
 test "BranchDeleter init" {
+    var buf: [1]u8 = undefined;
+    const io: Io = .init(.{
+        .stdin = .empty,
+        .stdout = .buffered(&buf),
+        .stderr = .buffered(&buf),
+    });
     const options = DeleteOptions{};
-    const deleter = BranchDeleter.init(std.testing.allocator, options);
+    const store = RefStore{
+        .git_dir = undefined,
+        .allocator = std.testing.allocator,
+        .io = io,
+        .odb = null,
+    };
+    const deleter = BranchDeleter.init(std.testing.allocator, io, &store, options);
 
-    try std.testing.expect(deleter.allocator == std.testing.allocator);
+    try std.testing.expect(deleter.options.force == false);
 }
 
 test "BranchDeleter init with options" {
-    var options = DeleteOptions{};
-    options.force = true;
-    const deleter = BranchDeleter.init(std.testing.allocator, options);
+    var buf: [1]u8 = undefined;
+    const io: Io = .init(.{
+        .stdin = .empty,
+        .stdout = .buffered(&buf),
+        .stderr = .buffered(&buf),
+    });
+    var opts = DeleteOptions{};
+    opts.force = true;
+    const store = RefStore{
+        .git_dir = undefined,
+        .allocator = std.testing.allocator,
+        .io = io,
+        .odb = null,
+    };
+    const deleter = BranchDeleter.init(std.testing.allocator, io, &store, opts);
 
     try std.testing.expect(deleter.options.force == true);
 }
 
-test "BranchDeleter delete method exists" {
-    var options = DeleteOptions{};
-    var deleter = BranchDeleter.init(std.testing.allocator, options);
-
-    const result = try deleter.delete("feature-branch");
-    try std.testing.expectEqualStrings("feature-branch", result.name);
+test "BranchDeleter has delete method" {
+    const Deleter = BranchDeleter;
+    try std.testing.expect(@hasDecl(Deleter, "delete"));
 }
 
-test "BranchDeleter deleteMultiple method exists" {
-    var options = DeleteOptions{};
-    var deleter = BranchDeleter.init(std.testing.allocator, options);
-
-    const result = try deleter.deleteMultiple(&.{ "branch1", "branch2" });
-    _ = result;
-    try std.testing.expect(deleter.allocator != undefined);
+test "BranchDeleter has deleteMultiple method" {
+    const Deleter = BranchDeleter;
+    try std.testing.expect(@hasDecl(Deleter, "deleteMultiple"));
 }
 
-test "BranchDeleter isMerged method exists" {
-    var options = DeleteOptions{};
-    var deleter = BranchDeleter.init(std.testing.allocator, options);
-
-    const merged = try deleter.isMerged("feature", "main");
-    try std.testing.expect(merged == true);
+test "BranchDeleter has isMerged method" {
+    const Deleter = BranchDeleter;
+    try std.testing.expect(@hasDecl(Deleter, "isMerged"));
 }

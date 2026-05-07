@@ -4,6 +4,13 @@ const std = @import("std");
 pub const MAX_PACKET_LINE_LENGTH: usize = 65520;
 pub const MIN_PACKET_LINE_LENGTH: usize = 4;
 pub const FLUSH_PACKET_LINE_LENGTH: usize = 0;
+pub const DELIM_PACKET_LINE_LENGTH: usize = 1;
+
+pub const SidebandChannel = enum(u8) {
+    data = 1,
+    progress = 2,
+    err = 3,
+};
 
 pub const PacketLine = struct {
     data: []const u8,
@@ -15,6 +22,7 @@ pub const PacketDecodeError = error{
     PacketLineTooShort,
     InvalidLengthPrefix,
     BufferOverflow,
+    MalformedPacket,
 };
 
 pub const PacketEncoder = struct {
@@ -24,7 +32,7 @@ pub const PacketEncoder = struct {
         return .{ .allocator = allocator };
     }
 
-    pub fn encode(self: *PacketEncoder, data: []const u8) ![]const u8 {
+    pub fn encode(self: *PacketEncoder, data: []const u8) ![]u8 {
         if (data.len > MAX_PACKET_LINE_LENGTH - MIN_PACKET_LINE_LENGTH) {
             return PacketDecodeError.PacketLineTooLong;
         }
@@ -32,60 +40,88 @@ pub const PacketEncoder = struct {
         var result = try self.allocator.alloc(u8, MIN_PACKET_LINE_LENGTH + data.len);
         errdefer self.allocator.free(result);
 
-        const len = MIN_PACKET_LINE_LENGTH + data.len;
-        const len_hex = std.fmt.hexInt(len);
-        @memcpy(result[0..4], &[_]u8{ '0', '0', '0', '0' });
-
-        const hex_chars = len_hex.len;
-        if (hex_chars <= 4) {
-            @memcpy(result[4 - hex_chars .. 4], len_hex);
-        }
-
+        const total_len: u16 = @as(u16, @intCast(MIN_PACKET_LINE_LENGTH + data.len));
+        const printed = try std.fmt.bufPrint(result[0..4], "{x:0>4}", .{total_len});
+        _ = printed;
         @memcpy(result[MIN_PACKET_LINE_LENGTH..], data);
         return result;
     }
 
-    pub fn encodeWithLength(self: *PacketEncoder, data: []const u8) ![]const u8 {
-        if (data.len > MAX_PACKET_LINE_LENGTH - MIN_PACKET_LINE_LENGTH) {
+    pub fn encodeFlush(self: *PacketEncoder) []const u8 {
+        _ = self;
+        return "0000";
+    }
+
+    pub fn encodeDelim(self: *PacketEncoder) ![]u8 {
+        return try self.encode(&[_]u8{0});
+    }
+
+    pub fn encodeSideband(self: *PacketEncoder, channel: SidebandChannel, data: []const u8) ![]u8 {
+        if (data.len > MAX_PACKET_LINE_LENGTH - MIN_PACKET_LINE_LENGTH - 1) {
             return PacketDecodeError.PacketLineTooLong;
         }
 
-        const total_len = MIN_PACKET_LINE_LENGTH + data.len;
-        var result = try self.allocator.alloc(u8, total_len);
+        var result = try self.allocator.alloc(u8, MIN_PACKET_LINE_LENGTH + 1 + data.len);
         errdefer self.allocator.free(result);
 
-        try formatLengthPrefix(result[0..4], total_len);
-        @memcpy(result[MIN_PACKET_LINE_LENGTH..], data);
+        const total_len = MIN_PACKET_LINE_LENGTH + 1 + data.len;
+        std.fmt.bufPrintSentinel(result[0..4], 0, "{x}", .{total_len});
+        result[MIN_PACKET_LINE_LENGTH] = @intFromEnum(channel);
+        @memcpy(result[MIN_PACKET_LINE_LENGTH + 1 ..], data);
         return result;
-    }
-
-    pub fn flush(self: *PacketEncoder) []const u8 {
-        _ = self;
-        return "";
-    }
-
-    fn formatLengthPrefix(buf: *[4]u8, length: usize) !void {
-        if (length > MAX_PACKET_LINE_LENGTH) {
-            return PacketDecodeError.PacketLineTooLong;
-        }
-
-        const hex_len = std.fmt.hexInt(length);
-        @memcpy(buf[0..4], &[_]u8{ '0', '0', '0', '0' });
-
-        const start = 4 - hex_len.len;
-        @memcpy(buf[start..4], hex_len);
     }
 };
 
 pub const PacketDecoder = struct {
     allocator: std.mem.Allocator,
+    buffer: []const u8,
+    offset: usize,
 
     pub fn init(allocator: std.mem.Allocator) PacketDecoder {
-        return .{ .allocator = allocator };
+        return .{
+            .allocator = allocator,
+            .buffer = &.{},
+            .offset = 0,
+        };
     }
 
-    pub fn decode(self: *PacketDecoder, data: []const u8) !PacketLine {
-        _ = self;
+    pub fn setBuffer(self: *PacketDecoder, data: []const u8) void {
+        self.buffer = data;
+        self.offset = 0;
+    }
+
+    pub fn next(self: *PacketDecoder) !?PacketLine {
+        if (self.offset >= self.buffer.len) {
+            return null;
+        }
+
+        const remaining = self.buffer[self.offset..];
+        if (remaining.len < MIN_PACKET_LINE_LENGTH) {
+            if (remaining.len == 0) return null;
+            return PacketDecodeError.PacketLineTooShort;
+        }
+
+        const len = try parseLengthPrefix(remaining[0..MIN_PACKET_LINE_LENGTH]);
+
+        if (len == FLUSH_PACKET_LINE_LENGTH) {
+            self.offset += MIN_PACKET_LINE_LENGTH;
+            return PacketLine{ .data = &.{}, .flush = true };
+        }
+
+        if (len > MAX_PACKET_LINE_LENGTH) {
+            return PacketDecodeError.PacketLineTooLong;
+        }
+
+        if (remaining.len < len) {
+            return PacketDecodeError.BufferOverflow;
+        }
+
+        self.offset += len;
+        const payload = remaining[MIN_PACKET_LINE_LENGTH..len];
+        return PacketLine{ .data = payload, .flush = false };
+    }
+
+    pub fn decode(_: *PacketDecoder, data: []const u8) !PacketLine {
         if (data.len == 0) {
             return PacketLine{ .data = &.{}, .flush = true };
         }
@@ -94,53 +130,40 @@ pub const PacketDecoder = struct {
             return PacketDecodeError.PacketLineTooShort;
         }
 
-        const len_bytes = data[0..4];
-        const parsed_len = try parseLengthPrefix(len_bytes);
+        const len = try parseLengthPrefix(data[0..MIN_PACKET_LINE_LENGTH]);
 
-        if (parsed_len == FLUSH_PACKET_LINE_LENGTH) {
+        if (len == FLUSH_PACKET_LINE_LENGTH) {
             return PacketLine{ .data = &.{}, .flush = true };
         }
 
-        if (parsed_len > MAX_PACKET_LINE_LENGTH) {
+        if (len > MAX_PACKET_LINE_LENGTH) {
             return PacketDecodeError.PacketLineTooLong;
         }
 
-        if (data.len < parsed_len) {
+        if (data.len < len) {
             return PacketDecodeError.BufferOverflow;
         }
 
-        const payload = data[MIN_PACKET_LINE_LENGTH..parsed_len];
+        const payload = data[MIN_PACKET_LINE_LENGTH..len];
         return PacketLine{ .data = payload, .flush = false };
     }
 
-    pub fn decodeMultiple(self: *PacketDecoder, data: []const u8) ![]const PacketLine {
-        var lines = std.ArrayList(PacketLine).init(self.allocator);
-        errdefer lines.deinit();
-
-        var offset: usize = 0;
-        while (offset < data.len) {
-            const remaining = data[offset..];
-            if (remaining.len == 0) break;
-
-            const line = try self.decode(remaining);
-            try lines.append(line);
-
-            if (line.flush) break;
-
-            const consumed = if (line.data.len > 0)
-                MIN_PACKET_LINE_LENGTH + line.data.len
-            else
-                MIN_PACKET_LINE_LENGTH;
-
-            if (consumed == 0 or offset + consumed > data.len) break;
-            offset += consumed;
+    pub fn decodeSideband(_: *PacketDecoder, line: PacketLine) !?struct { channel: SidebandChannel, data: []const u8 } {
+        if (line.data.len == 0 or line.flush) {
+            return null;
         }
 
-        return lines.toOwnedSlice();
+        const channel_val = line.data[0];
+        const channel: SidebandChannel = @enumFromInt(channel_val);
+        const payload = line.data[1..];
+
+        return .{
+            .channel = channel,
+            .data = payload,
+        };
     }
 
-    pub fn isFlush(self: *PacketDecoder, data: []const u8) bool {
-        _ = self;
+    pub fn isFlush(data: []const u8) bool {
         return data.len == 0;
     }
 
@@ -161,9 +184,9 @@ pub const PacketDecoder = struct {
 
     fn parseHexNibble(byte: u8) !u4 {
         return switch (byte) {
-            '0'...'9' => @as(u4, byte - '0'),
-            'a'...'f' => @as(u4, byte - 'a' + 10),
-            'A'...'F' => @as(u4, byte - 'A' + 10),
+            '0'...'9' => @as(u4, @intCast(byte - '0')),
+            'a'...'f' => @as(u4, @intCast(byte - 'a' + 10)),
+            'A'...'F' => @as(u4, @intCast(byte - 'A' + 10)),
             else => PacketDecodeError.InvalidLengthPrefix,
         };
     }
@@ -180,22 +203,30 @@ test "PacketEncoder init" {
     try std.testing.expect(encoder.allocator == std.testing.allocator);
 }
 
-test "PacketEncoder encode method exists" {
+test "PacketEncoder encode" {
     var encoder = PacketEncoder.init(std.testing.allocator);
-    const encoded = try encoder.encode("test data");
-    try std.testing.expectEqualStrings("test data", encoded);
+    const encoded = try encoder.encode("test");
+    try std.testing.expect(encoded.len == 8);
+    try std.testing.expect(std.mem.eql(u8, encoded[4..], "test"));
 }
 
-test "PacketEncoder encodeWithLength method exists" {
+test "PacketEncoder encode with 0032 prefix" {
     var encoder = PacketEncoder.init(std.testing.allocator);
-    const encoded = try encoder.encodeWithLength("test");
-    try std.testing.expectEqualStrings("test", encoded);
+    const encoded = try encoder.encode("test");
+    try std.testing.expect(std.mem.eql(u8, encoded[0..4], "0032"));
 }
 
-test "PacketEncoder flush method exists" {
+test "PacketEncoder encodeFlush" {
     var encoder = PacketEncoder.init(std.testing.allocator);
-    const flushed = encoder.flush();
+    const flushed = encoder.encodeFlush();
     try std.testing.expect(flushed.len == 0);
+}
+
+test "PacketEncoder encodeSideband" {
+    var encoder = PacketEncoder.init(std.testing.allocator);
+    const encoded = try encoder.encodeSideband(.data, "progress info");
+    try std.testing.expect(encoded[4] == 1);
+    try std.testing.expect(std.mem.eql(u8, encoded[5..], "progress info"));
 }
 
 test "PacketDecoder init" {
@@ -203,20 +234,44 @@ test "PacketDecoder init" {
     try std.testing.expect(decoder.allocator == std.testing.allocator);
 }
 
-test "PacketDecoder decode method exists" {
+test "PacketDecoder decode flush" {
     var decoder = PacketDecoder.init(std.testing.allocator);
-    const line = try decoder.decode("test");
+    const line = try decoder.decode("");
+    try std.testing.expect(line.flush == true);
+    try std.testing.expect(line.data.len == 0);
+}
+
+test "PacketDecoder decode packet" {
+    var decoder = PacketDecoder.init(std.testing.allocator);
+    const line = try decoder.decode("0032test");
+    try std.testing.expect(line.flush == false);
     try std.testing.expectEqualStrings("test", line.data);
 }
 
-test "PacketDecoder decodeMultiple method exists" {
+test "PacketDecoder decodeSideband" {
     var decoder = PacketDecoder.init(std.testing.allocator);
-    const lines = try decoder.decodeMultiple("test data");
-    try std.testing.expect(lines.len == 0);
+    const line = PacketLine{ .data = "\x01progress data", .flush = false };
+    const result = try decoder.decodeSideband(line);
+    try std.testing.expect(result.?.channel == .data);
+    try std.testing.expectEqualStrings("progress data", result.?.data);
 }
 
-test "PacketDecoder isFlush method exists" {
+test "PacketDecoder next" {
     var decoder = PacketDecoder.init(std.testing.allocator);
-    const is_flush = decoder.isFlush("");
-    try std.testing.expect(is_flush == true);
+    decoder.setBuffer("0032test0031hi!!");
+    const line1 = try decoder.next();
+    try std.testing.expect(line1.?.flush == false);
+    try std.testing.expectEqualStrings("test", line1.?.data);
+    const line2 = try decoder.next();
+    try std.testing.expect(line2.?.flush == false);
+    try std.testing.expectEqualStrings("hi!!", line2.?.data);
+}
+
+test "PacketDecoder next with flush" {
+    var decoder = PacketDecoder.init(std.testing.allocator);
+    decoder.setBuffer("0032test0000");
+    const line1 = try decoder.next();
+    try std.testing.expectEqualStrings("test", line1.?.data);
+    const line2 = try decoder.next();
+    try std.testing.expect(line2.?.flush == true);
 }

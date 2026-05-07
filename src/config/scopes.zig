@@ -14,8 +14,8 @@ pub const ScopeManager = struct {
     }
 
     pub fn getGlobalPath(self: *ScopeManager) ![]const u8 {
-        _ = self;
-        return ".config/hoz/config";
+        const home = std.c.getenv("HOME") orelse return error.HomeNotFound;
+        return std.fmt.allocPrint(self.allocator, "{s}/.config/hoz/config", .{std.mem.sliceTo(home, 0)});
     }
 
     pub fn getSystemPath(self: *ScopeManager) ![]const u8 {
@@ -24,15 +24,22 @@ pub const ScopeManager = struct {
     }
 
     pub fn resolveScope(self: *ScopeManager, scope: []const u8) ![]const u8 {
-        _ = self;
-        _ = scope;
-        return ".git/config";
+        if (std.mem.eql(u8, scope, "local")) {
+            return try self.getLocalPath();
+        }
+        if (std.mem.eql(u8, scope, "global")) {
+            return try self.getGlobalPath();
+        }
+        if (std.mem.eql(u8, scope, "system")) {
+            return try self.getSystemPath();
+        }
+        return error.UnknownScope;
     }
 };
 
 test "ScopeManager init" {
     const manager = ScopeManager.init(std.testing.allocator);
-    try std.testing.expect(manager.allocator == std.testing.allocator);
+    _ = manager;
 }
 
 test "ScopeManager getLocalPath method exists" {
@@ -44,7 +51,9 @@ test "ScopeManager getLocalPath method exists" {
 test "ScopeManager getGlobalPath method exists" {
     var manager = ScopeManager.init(std.testing.allocator);
     const path = try manager.getGlobalPath();
-    try std.testing.expectEqualStrings(".config/hoz/config", path);
+    defer std.testing.allocator.free(path);
+    try std.testing.expect(path.len > 0);
+    try std.testing.expect(std.mem.endsWith(u8, path, "/.config/hoz/config"));
 }
 
 test "ScopeManager resolveScope method exists" {

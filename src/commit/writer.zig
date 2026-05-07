@@ -52,23 +52,22 @@ pub const CommitWriter = struct {
 };
 
 test "CommitWriter init" {
-    const odb: ODB = undefined;
-    var writer = CommitWriter.init(std.testing.allocator, &odb);
-    defer _ = writer;
+    var odb: ODB = std.mem.zeroes(ODB);
+    const writer = CommitWriter.init(std.testing.allocator, &odb);
 
     try std.testing.expect(writer.allocator == std.testing.allocator);
 }
 
 test "CommitWriter init with null odb" {
-    var writer = CommitWriter.init(std.testing.allocator, undefined);
-    defer _ = writer;
+    var odb: ODB = std.mem.zeroes(ODB);
+    const writer = CommitWriter.init(std.testing.allocator, &odb);
 
     try std.testing.expect(writer.allocator == std.testing.allocator);
 }
 
 test "CommitWriter basic write" {
-    var writer = CommitWriter.init(std.testing.allocator, undefined);
-    defer _ = writer;
+    var odb: ODB = std.mem.zeroes(ODB);
+    const writer = CommitWriter.init(std.testing.allocator, &odb);
 
     try std.testing.expect(writer.allocator == std.testing.allocator);
 }

@@ -14,30 +14,77 @@ pub const HaveResult = struct {
 pub const WantHaveExchanger = struct {
     allocator: std.mem.Allocator,
     options: ExchangeOptions,
+    wants: std.ArrayList([]const u8),
+    haves: std.ArrayList([]const u8),
+    done_sent: bool,
 
     pub fn init(allocator: std.mem.Allocator, options: ExchangeOptions) WantHaveExchanger {
-        return .{ .allocator = allocator, .options = options };
+        return .{
+            .allocator = allocator,
+            .options = options,
+            .wants = std.ArrayList([]const u8).init(allocator),
+            .haves = std.ArrayList([]const u8).init(allocator),
+            .done_sent = false,
+        };
+    }
+
+    pub fn deinit(self: *WantHaveExchanger) void {
+        for (self.wants.items) |w| self.allocator.free(w);
+        self.wants.deinit(self.allocator);
+        for (self.haves.items) |h| self.allocator.free(h);
+        self.haves.deinit(self.allocator);
     }
 
     pub fn sendWant(self: *WantHaveExchanger, oid: []const u8) !void {
-        _ = self;
-        _ = oid;
+        const copy = try self.allocator.dupe(u8, oid);
+        try self.wants.append(self.allocator, copy);
     }
 
     pub fn sendHave(self: *WantHaveExchanger, oid: []const u8) !HaveResult {
-        _ = self;
-        _ = oid;
+        const copy = try self.allocator.dupe(u8, oid);
+        try self.haves.append(self.allocator, copy);
+
+        for (self.wants.items) |w| {
+            if (std.mem.eql(u8, w, oid)) {
+                return HaveResult{ .common = true, .acknowledged = true };
+            }
+        }
+
         return HaveResult{ .common = false, .acknowledged = false };
     }
 
     pub fn sendDone(self: *WantHaveExchanger) !void {
-        _ = self;
+        self.done_sent = true;
     }
 
     pub fn processAcks(self: *WantHaveExchanger, acks: []const []const u8) ![]const []const u8 {
-        _ = self;
-        _ = acks;
-        return &.{};
+        var common = std.ArrayList([]const u8).initCapacity(self.allocator, acks.len);
+        errdefer {
+            for (common.items) |c| self.allocator.free(c);
+            common.deinit(self.allocator);
+        }
+
+        for (acks) |ack| {
+            var is_common = false;
+            for (self.wants.items) |w| {
+                if (std.mem.eql(u8, w, ack)) {
+                    is_common = true;
+                    break;
+                }
+            }
+            if (is_common) {
+                try common.append(self.allocator, try self.allocator.dupe(u8, ack));
+            } else if (self.options.multi_ack_detailed) {
+                for (self.haves.items) |h| {
+                    if (std.mem.eql(u8, h, ack)) {
+                        try common.append(self.allocator, try self.allocator.dupe(u8, ack));
+                        break;
+                    }
+                }
+            }
+        }
+
+        return common.toOwnedSlice(self.allocator);
     }
 };
 

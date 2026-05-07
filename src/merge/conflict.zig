@@ -61,7 +61,7 @@ pub const ConflictDetector = struct {
     }
 
     pub fn detectRenameAddConflict(
-        self: *ConflictDetector,
+        _: *ConflictDetector,
         old_path: []const u8,
         new_path: []const u8,
         ancestor_oid: ?OID,
@@ -95,6 +95,69 @@ pub const ConflictDetector = struct {
             if (c.conflict_type != .none) return true;
         }
         return false;
+    }
+
+    pub fn getConflictMarkers(self: *ConflictDetector, content: []const u8) ![]struct { start: usize, end: usize } {
+        var markers = std.ArrayList(struct { start: usize, end: usize }).init(self.allocator);
+        errdefer markers.deinit();
+
+        var pos: usize = 0;
+        while (pos < content.len) {
+            const start_idx = std.mem.indexOf(u8, content[pos..], "<<<<<<<") orelse break;
+            pos += start_idx;
+
+            const end_idx = std.mem.indexOf(u8, content[pos..], ">>>>>>>") orelse break;
+            const line_end = std.mem.indexOfScalar(u8, content[pos + end_idx ..], '\n') orelse 0;
+            try markers.append(.{ .start = pos, .end = pos + end_idx + line_end + 1 });
+            pos += end_idx + line_end + 1;
+        }
+
+        return markers.toOwnedSlice();
+    }
+
+    pub fn resolveConflicts(self: *ConflictDetector, content: []const u8, strategy: enum { ours, theirs }) ![]const u8 {
+        var result = std.ArrayList(u8).initCapacity(self.allocator, content.len);
+        errdefer result.deinit();
+
+        var in_conflict = false;
+        var in_ours = false;
+        var lines = std.mem.splitScalar(u8, content, '\n');
+
+        while (lines.next()) |line| {
+            if (std.mem.startsWith(u8, line, "<<<<<<<")) {
+                in_conflict = true;
+                in_ours = true;
+                continue;
+            } else if (std.mem.startsWith(u8, line, "=======")) {
+                in_ours = false;
+                continue;
+            } else if (std.mem.startsWith(u8, line, ">>>>>>>")) {
+                in_conflict = false;
+                continue;
+            }
+
+            if (in_conflict) {
+                switch (strategy) {
+                    .ours => {
+                        if (in_ours) {
+                            try result.appendSlice(line);
+                            try result.append('\n');
+                        }
+                    },
+                    .theirs => {
+                        if (!in_ours) {
+                            try result.appendSlice(line);
+                            try result.append('\n');
+                        }
+                    },
+                }
+            } else {
+                try result.appendSlice(line);
+                try result.append('\n');
+            }
+        }
+
+        return result.toOwnedSlice();
     }
 
     pub fn detectRenameRenameConflict(

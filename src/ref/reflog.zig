@@ -1,12 +1,13 @@
 //! Reflog tracking for Hoz
 //! Records ref updates for history (commits, branch changes, etc.)
 const std = @import("std");
-const Oid = @import("../object/oid.zig").Oid;
+const Io = std.Io;
+const OID = @import("../object/oid.zig").OID;
 
 /// Reflog entry format: old_oid new_oid committer_name <email> timestamp timezone message
 pub const ReflogEntry = struct {
-    old_oid: Oid,
-    new_oid: Oid,
+    old_oid: OID,
+    new_oid: OID,
     committer: Identity,
     timestamp: i64,
     timezone: Timezone,
@@ -41,7 +42,7 @@ pub const ReflogEntry = struct {
             if (hours < 0 or hours > 14) return error.InvalidTimezone;
             if (mins != 0 and mins != 15 and mins != 30 and mins != 45) return error.InvalidTimezone;
 
-            var offset: i8 = hours * 4 + mins / 15;
+            var offset: i8 = hours * 4 + @divTrunc(mins, 15);
             if (sign == '-') offset = -offset;
 
             return Timezone{ .offset = offset };
@@ -61,16 +62,22 @@ pub const ReflogError = error{
     IoError,
     FileNotFound,
     ParseError,
+    OutOfMemory,
 };
 
 /// Reflog manager for reading/writing reflogs
 pub const ReflogManager = struct {
-    git_dir: std.fs.Dir,
+    git_dir: Io.Dir,
+    io: Io,
     allocator: std.mem.Allocator,
 
     /// Create a new ReflogManager
-    pub fn init(git_dir: std.fs.Dir, allocator: std.mem.Allocator) ReflogManager {
-        return .{ .git_dir = git_dir, .allocator = allocator };
+    pub fn init(git_dir: Io.Dir, allocator: std.mem.Allocator) ReflogManager {
+        return .{ .git_dir = git_dir, .io = undefined, .allocator = allocator };
+    }
+
+    pub fn initWithIo(git_dir: Io.Dir, io: Io, allocator: std.mem.Allocator) ReflogManager {
+        return .{ .git_dir = git_dir, .io = io, .allocator = allocator };
     }
 
     /// Get reflog path for a ref (e.g., refs/heads/main -> .git/logs/refs/heads/main)
@@ -89,30 +96,22 @@ pub const ReflogManager = struct {
     pub fn append(
         self: ReflogManager,
         ref_name: []const u8,
-        old_oid: Oid,
-        new_oid: Oid,
+        old_oid: OID,
+        new_oid: OID,
         identity: ReflogEntry.Identity,
         message: []const u8,
     ) ReflogError!void {
         const log_path = try self.getLogPath(ref_name);
         defer self.allocator.free(log_path);
 
-        // Create parent directories if needed
-        try self.git_dir.makePath(std.fs.path.dirname(log_path).?);
+        const existing = self.git_dir.readFileAlloc(self.io, log_path, self.allocator, .limited(1024 * 1024)) catch null;
+        defer if (existing) |buf| self.allocator.free(buf);
 
-        const log_file = try self.git_dir.openAppendFile(log_path, .{});
-        defer log_file.close();
-
-        // Format: old_oid new_oid committer_name <email> timestamp timezone\tmessage\n
-        var buf = std.ArrayList(u8).empty;
-        defer buf.deinit(self.allocator);
-
-        // Format timestamp and timezone
         const timestamp = std.time.timestamp();
-        const tz = ReflogEntry.Timezone{ .offset = 0 }; // UTC
+        const tz = ReflogEntry.Timezone{ .offset = 0 };
         const tz_str = tz.toArray();
 
-        try buf.print(self.allocator, "{s} {s} {s} <{s}> {d} {s}\t{s}\n", .{
+        const line = std.fmt.allocPrint(self.allocator, "{s} {s} {s} <{s}> {d} {s}\t{s}\n", .{
             old_oid.hexString(),
             new_oid.hexString(),
             identity.name,
@@ -120,9 +119,16 @@ pub const ReflogManager = struct {
             timestamp,
             &tz_str,
             message,
-        });
+        }) catch return error.IoError;
+        defer self.allocator.free(line);
 
-        try log_file.writeAll(buf.items);
+        if (existing) |buf| {
+            const merged = std.fmt.allocPrint(self.allocator, "{s}{s}", .{ buf, line }) catch return error.IoError;
+            defer self.allocator.free(merged);
+            self.git_dir.writeFile(self.io, .{ .sub_path = log_path, .data = merged }) catch return error.IoError;
+        } else {
+            self.git_dir.writeFile(self.io, .{ .sub_path = log_path, .data = line }) catch return error.IoError;
+        }
     }
 
     /// Read all entries from a reflog
@@ -130,31 +136,27 @@ pub const ReflogManager = struct {
         const log_path = try self.getLogPath(ref_name);
         defer self.allocator.free(log_path);
 
-        const log_file = self.git_dir.openFile(log_path, .{}) catch {
+        const content = self.git_dir.readFileAlloc(self.io, log_path, self.allocator, .limited(1024 * 1024)) catch {
             return &[0]ReflogEntry{};
         };
-        defer log_file.close();
-
-        const content = try log_file.readToEndAlloc(self.allocator, std.math.maxInt(usize));
         defer self.allocator.free(content);
 
         var entries = std.ArrayList(ReflogEntry).empty;
         defer entries.deinit(self.allocator);
-        var lines = std.mem.tokenize(u8, content, "\n");
+        var lines = std.mem.splitScalar(u8, content, '\n');
 
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            const entry = try self.parseEntry(line);
+            const entry = self.parseEntry(line) catch continue;
             entries.append(self.allocator, entry) catch continue;
         }
 
-        return entries.toOwnedSlice();
+        return entries.toOwnedSlice(self.allocator);
     }
 
     /// Parse a single reflog entry line
     fn parseEntry(_: ReflogManager, line: []const u8) ReflogError!ReflogEntry {
-        // Format: old_oid new_oid committer_name <email> timestamp timezone\tmessage
-        var parts = std.mem.tokenize(u8, line, " ");
+        var parts = std.mem.splitScalar(u8, line, ' ');
 
         const old_oid_hex = parts.next() orelse return error.ParseError;
         const new_oid_hex = parts.next() orelse return error.ParseError;
@@ -175,12 +177,12 @@ pub const ReflogManager = struct {
         const time_and_tz = after_email[0..tab_idx];
         const message = after_email[tab_idx + 1 ..];
 
-        var time_parts = std.mem.tokenize(u8, time_and_tz, " ");
+        var time_parts = std.mem.splitScalar(u8, time_and_tz, ' ');
         const timestamp_str = time_parts.next() orelse return error.ParseError;
         const timezone = time_parts.next() orelse return error.ParseError;
 
-        const old_oid = Oid.fromHex(old_oid_hex) catch return error.ParseError;
-        const new_oid = Oid.fromHex(new_oid_hex) catch return error.ParseError;
+        const old_oid = OID.fromHex(old_oid_hex) catch return error.ParseError;
+        const new_oid = OID.fromHex(new_oid_hex) catch return error.ParseError;
         const timestamp = std.fmt.parseInt(i64, timestamp_str, 10) catch return error.ParseError;
 
         const tz = ReflogEntry.Timezone.parse(timezone) catch return error.ParseError;
@@ -275,10 +277,59 @@ test "ReflogManager getLogPath simple name" {
 }
 
 test "ReflogManager init" {
-    try std.testing.expect(true);
+    const manager = ReflogManager.init(undefined, std.testing.allocator);
+    try std.testing.expect(manager.allocator == std.testing.allocator);
 }
 
-test "ReflogEntry format placeholder" {
-    // Placeholder - requires mock file system
-    try std.testing.expect(true);
+test "ReflogEntry Timezone formatZoned" {
+    const tz_pos = ReflogEntry.Timezone{ .offset = 0 };
+    const formatted = tz_pos.formatZoned();
+    try std.testing.expectEqualSlices(u8, "+0000", &formatted);
+
+    const tz_neg = ReflogEntry.Timezone{ .offset = -16 };
+    const neg_formatted = tz_neg.formatZoned();
+    try std.testing.expectEqualSlices(u8, "-0400", &neg_formatted);
+
+    const tz_half = ReflogEntry.Timezone{ .offset = 10 };
+    const half_formatted = tz_half.formatZoned();
+    try std.testing.expectEqualSlices(u8, "+0230", &half_formatted);
+}
+
+test "ReflogEntry Timezone parse" {
+    const tz = try ReflogEntry.Timezone.parse("+0000");
+    try std.testing.expectEqual(@as(i8, 0), tz.offset);
+
+    const tz_neg = try ReflogEntry.Timezone.parse("-0800");
+    try std.testing.expectEqual(@as(i8, -32), tz_neg.offset);
+
+    const tz_530 = try ReflogEntry.Timezone.parse("+0530");
+    try std.testing.expectEqual(@as(i8, 22), tz_530.offset);
+}
+
+test "ReflogEntry Timezone parse rejects invalid" {
+    try std.testing.expectError(error.InvalidTimezone, ReflogEntry.Timezone.parse("0000"));
+    try std.testing.expectError(error.InvalidTimezone, ReflogEntry.Timezone.parse("+00"));
+    try std.testing.expectError(error.InvalidTimezone, ReflogEntry.Timezone.parse("abcde"));
+}
+
+test "ReflogEntry Timezone toArray roundtrip" {
+    const original = ReflogEntry.Timezone{ .offset = 20 };
+    const arr = original.toArray();
+    try std.testing.expectEqual(@as(usize, 5), arr.len);
+    const parsed = try ReflogEntry.Timezone.parse(&arr);
+    try std.testing.expectEqual(original.offset, parsed.offset);
+}
+
+test "ReflogEntry struct fields" {
+    const entry = ReflogEntry{
+        .old_oid = OID.zero(),
+        .new_oid = OID.zero(),
+        .committer = .{ .name = "Test", .email = "test@example.com" },
+        .timestamp = 1700000000,
+        .timezone = .{ .offset = 0 },
+        .message = "commit: initial",
+    };
+    try std.testing.expect(entry.old_oid.isZero());
+    try std.testing.expectEqualSlices(u8, "Test", entry.committer.name);
+    try std.testing.expectEqualSlices(u8, "commit: initial", entry.message);
 }

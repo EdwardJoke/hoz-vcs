@@ -1,6 +1,12 @@
 //! Git Add - Add file contents to the index
 const std = @import("std");
 const Io = std.Io;
+const OID = @import("../object/oid.zig").OID;
+const oid_mod = @import("../object/oid.zig");
+const Index = @import("../index/index.zig").Index;
+const IndexEntry = @import("../index/index_entry.zig").IndexEntry;
+const compress_mod = @import("../compress/zlib.zig");
+const sha1_mod = @import("../crypto/sha1.zig");
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 
@@ -49,17 +55,159 @@ pub const Add = struct {
         }
 
         if (count > 0) {
-            try self.output.successMessage("Added {d} file(s)", .{count});
-        } else {
-            try self.output.infoMessage("No files to add", .{});
+            try self.output.successMessage("--→ Added {d} file(s)", .{count});
         }
     }
 
     fn addPath(self: *Add, path: []const u8) !void {
         if (self.dry_run) {
-            try self.output.infoMessage("Would add '{s}'", .{path});
+            try self.output.infoMessage("--→ Would add '{s}'", .{path});
             return;
         }
-        try self.output.successMessage("Added '{s}'", .{path});
+
+        const git_dir = Io.Dir.openDirAbsolute(self.io, ".git", .{}) catch {
+            try self.output.errorMessage("Not a hoz repository", .{});
+            return;
+        };
+        defer git_dir.close(self.io);
+
+        const content = Io.Dir.cwd().readFileAlloc(self.io, path, self.allocator, .limited(16 * 1024 * 1024)) catch {
+            try self.output.errorMessage("Cannot read '{s}'", .{path});
+            return;
+        };
+        defer self.allocator.free(content);
+
+        const blob_oid = self.hashBlob(content);
+        const written_oid = try self.writeBlob(&git_dir, content, blob_oid);
+        defer self.allocator.free(written_oid);
+
+        try self.updateIndex(&git_dir, path, blob_oid);
+
+        if (self.verbose) {
+            const hex = blob_oid.toHex();
+            try self.output.infoMessage("Added '{s}' ({s})", .{ path, hex[0..7] });
+        } else {
+            try self.output.successMessage("Added '{s}'", .{path});
+        }
+    }
+
+    fn hashBlob(self: *Add, content: []const u8) OID {
+        _ = self;
+
+        const header = std.fmt.allocPrint(std.heap.page_allocator, "blob {d}\x00", .{content.len}) catch {
+            return OID{ .bytes = .{0} ** 20 };
+        };
+
+        var hasher = sha1_mod.Sha1.init(.{});
+        hasher.update(header);
+        hasher.update(content);
+        var digest: [20]u8 = undefined;
+        hasher.final(&digest);
+
+        return OID{ .bytes = digest };
+    }
+
+    fn writeBlob(self: *Add, git_dir: *const Io.Dir, content: []const u8, oid: OID) ![]const u8 {
+        const hex = oid.toHex();
+        const obj_dir = try std.fmt.allocPrint(self.allocator, "objects/{s}", .{hex[0..2]});
+        defer self.allocator.free(obj_dir);
+        git_dir.createDirPath(self.io, obj_dir) catch return error.CreateObjectDirFailed;
+
+        const header = try std.fmt.allocPrint(self.allocator, "blob {d}\x00", .{content.len});
+
+        var data = try std.ArrayList(u8).initCapacity(self.allocator, header.len + content.len);
+        defer data.deinit(self.allocator);
+        try data.appendSlice(self.allocator, header);
+        try data.appendSlice(self.allocator, content);
+
+        const compressed = compress_mod.Zlib.compress(data.items, self.allocator) catch {
+            self.allocator.free(header);
+            return error.CompressFailed;
+        };
+        defer self.allocator.free(compressed);
+        self.allocator.free(header);
+
+        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
+        defer self.allocator.free(obj_path);
+
+        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch return error.WriteObjectFailed;
+
+        const oid_hex = try self.allocator.dupe(u8, &hex);
+        return oid_hex;
+    }
+
+    fn updateIndex(self: *Add, git_dir: *const Io.Dir, path: []const u8, oid: OID) !void {
+        const index_data = git_dir.readFileAlloc(self.io, "index", self.allocator, .limited(16 * 1024 * 1024)) catch null;
+        defer if (index_data) |d| self.allocator.free(d);
+
+        var index: ?Index = null;
+        if (index_data) |data| {
+            index = Index.parse(data, self.allocator) catch null;
+        }
+
+        const stat = Io.Dir.cwd().statFile(self.io, path, .{}) catch {
+            if (index) |*i| i.deinit();
+            return;
+        };
+
+        const now = Io.Timestamp.now(self.io, .real);
+        const ts: u32 = @intCast(@divTrunc(now.nanoseconds, 1000000000));
+        const file_size: u32 = @intCast(@min(stat.size, std.math.maxInt(u32)));
+
+        const new_entry = IndexEntry{
+            .ctime_sec = ts,
+            .ctime_nsec = 0,
+            .mtime_sec = ts,
+            .mtime_nsec = 0,
+            .dev = 0,
+            .ino = @intCast(stat.inode),
+            .mode = 0o100644,
+            .uid = 0,
+            .gid = 0,
+            .file_size = file_size,
+            .oid = oid,
+            .flags = @intCast(@min(path.len, 0xFFF)),
+        };
+
+        if (index) |*idx| {
+            defer idx.deinit();
+
+            var found = false;
+            for (idx.entries.items, 0..) |*entry, i| {
+                const name = idx.entry_names.items[i];
+                if (std.mem.eql(u8, name, path)) {
+                    entry.* = new_entry;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                const owned_name = try self.allocator.dupe(u8, path);
+                try idx.entries.append(self.allocator, new_entry);
+                try idx.entry_names.append(self.allocator, owned_name);
+            }
+
+            const serialized = idx.serialize() catch {
+                return;
+            };
+            defer self.allocator.free(serialized);
+
+            git_dir.writeFile(self.io, .{ .sub_path = "index", .data = serialized }) catch {};
+        } else {
+            var fresh_idx = Index.init(self.allocator);
+            const owned_name = try self.allocator.dupe(u8, path);
+            try fresh_idx.entries.append(self.allocator, new_entry);
+            try fresh_idx.entry_names.append(self.allocator, owned_name);
+
+            const serialized = fresh_idx.serialize() catch {
+                fresh_idx.deinit();
+                return;
+            };
+            defer self.allocator.free(serialized);
+            fresh_idx.deinit();
+
+            git_dir.writeFile(self.io, .{ .sub_path = "index", .data = serialized }) catch {};
+        }
     }
 };

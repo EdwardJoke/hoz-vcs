@@ -16,14 +16,15 @@ pub const Identity = struct {
 
     /// Format identity for commit serialization
     pub fn format(self: Identity, allocator: std.mem.Allocator) ![]u8 {
+        const tz = self.timezoneToStr();
         return try std.fmt.allocPrint(
             allocator,
-            "{} <{}> {} {}",
+            "{s} <{s}> {d} {s}",
             .{
                 self.name,
                 self.email,
                 self.timestamp,
-                self.timezoneToStr(),
+                &tz,
             },
         );
     }
@@ -31,7 +32,10 @@ pub const Identity = struct {
     pub fn timezoneToStr(self: Identity) [5]u8 {
         const tz_mins = self.timezone;
         const sign: u8 = if (tz_mins >= 0) '+' else '-';
-        const abs_mins: u32 = if (tz_mins < 0) -@as(i32, @intCast(tz_mins)) else tz_mins;
+        const abs_mins: u32 = if (tz_mins < 0)
+            @as(u32, @intCast(-tz_mins))
+        else
+            @as(u32, @intCast(tz_mins));
         const hours = abs_mins / 60;
         const mins = abs_mins % 60;
         return .{
@@ -45,23 +49,33 @@ pub const Identity = struct {
 
     /// Parse identity from string (e.g., "John Doe <john@example.com> 1234567890 +0000")
     pub fn parse(str: []const u8) !Identity {
-        // Find name (everything before '<')
         const email_start = std.mem.indexOf(u8, str, "<") orelse return error.InvalidIdentity;
-        const name = str[0..email_start];
+        var name = str[0..email_start];
+        while (name.len > 0 and (name[name.len - 1] == ' ' or name[name.len - 1] == '\t')) {
+            name = name[0 .. name.len - 1];
+        }
 
-        // Find email (between '<' and '>')
         const email_end = std.mem.indexOf(u8, str, ">") orelse return error.InvalidIdentity;
         const email = str[email_start + 1 .. email_end];
 
-        // Find timestamp and timezone
         const rest = str[email_end + 1 ..];
-        var iter = std.mem.split(u8, rest, " ");
+        var iter = std.mem.splitScalar(u8, rest, ' ');
 
-        const timestamp_str = iter.next() orelse return error.InvalidIdentity;
-        const timestamp = try std.fmt.parseInt(i64, timestamp_str, 10);
+        var timestamp_str = iter.next();
+        while (timestamp_str) |ts| {
+            if (ts.len > 0) break;
+            timestamp_str = iter.next();
+        }
+        const ts = timestamp_str orelse return error.InvalidIdentity;
+        const timestamp = try std.fmt.parseInt(i64, ts, 10);
 
-        const tz_str = iter.next() orelse return error.InvalidIdentity;
-        const tz_parsed = try parseTimezone(tz_str);
+        var tz_str = iter.next();
+        while (tz_str) |tz| {
+            if (tz.len > 0) break;
+            tz_str = iter.next();
+        }
+        const tz_final = tz_str orelse return error.InvalidIdentity;
+        const tz_parsed = try parseTimezone(tz_final);
 
         return Identity{
             .name = name,
@@ -137,53 +151,54 @@ pub const Commit = struct {
     ///
     /// <message>
     pub fn serialize(self: Commit, allocator: std.mem.Allocator) ![]u8 {
-        var buffer = std.ArrayList(u8).init(allocator);
+        var buffer = std.ArrayList(u8).empty;
+        defer buffer.deinit(allocator);
 
         // Write tree
-        try buffer.appendSlice("tree ");
-        try buffer.appendSlice(&self.tree.toHex());
-        try buffer.append('\n');
+        try buffer.appendSlice(allocator, "tree ");
+        try buffer.appendSlice(allocator, &self.tree.toHex());
+        try buffer.append(allocator, '\n');
 
         // Write parents
         for (self.parents) |parent| {
-            try buffer.appendSlice("parent ");
-            try buffer.appendSlice(&parent.toHex());
-            try buffer.append('\n');
+            try buffer.appendSlice(allocator, "parent ");
+            try buffer.appendSlice(allocator, &parent.toHex());
+            try buffer.append(allocator, '\n');
         }
 
         // Write author
-        try buffer.appendSlice("author ");
+        try buffer.appendSlice(allocator, "author ");
         const author_str = try self.author.format(allocator);
         defer allocator.free(author_str);
-        try buffer.appendSlice(author_str);
-        try buffer.append('\n');
+        try buffer.appendSlice(allocator, author_str);
+        try buffer.append(allocator, '\n');
 
         // Write committer
-        try buffer.appendSlice("committer ");
+        try buffer.appendSlice(allocator, "committer ");
         const committer_str = try self.committer.format(allocator);
         defer allocator.free(committer_str);
-        try buffer.appendSlice(committer_str);
-        try buffer.append('\n');
+        try buffer.appendSlice(allocator, committer_str);
+        try buffer.append(allocator, '\n');
 
         // GPG signature if present
         if (self.gpg_signature) |sig| {
-            try buffer.appendSlice("gpgsig ");
-            try buffer.appendSlice(sig);
-            try buffer.append('\n');
+            try buffer.appendSlice(allocator, "gpgsig ");
+            try buffer.appendSlice(allocator, sig);
+            try buffer.append(allocator, '\n');
         }
 
         // Blank line before message
-        try buffer.append('\n');
+        try buffer.append(allocator, '\n');
 
         // Write message
-        try buffer.appendSlice(self.message);
+        try buffer.appendSlice(allocator, self.message);
 
         // Wrap with header
         const content = buffer.items;
-        const size_str = try std.fmt.allocPrint(allocator, "{}", .{content.len});
+        const size_str = try std.fmt.allocPrint(allocator, "{d}", .{content.len});
         defer allocator.free(size_str);
 
-        const header = try std.fmt.allocPrint(allocator, "commit {}\x00", .{size_str});
+        const header = try std.fmt.allocPrint(allocator, "commit {s}\x00", .{size_str});
         defer allocator.free(header);
 
         var result = try allocator.alloc(u8, header.len + content.len);
@@ -194,21 +209,21 @@ pub const Commit = struct {
     }
 
     /// Parse commit from loose object data
-    pub fn parse(data: []const u8) !Commit {
+    pub fn parse(allocator: std.mem.Allocator, data: []const u8) !Commit {
         const obj = try object_mod.parse(data);
         if (obj.obj_type != .commit) {
             return error.NotACommit;
         }
 
         var tree_opt: ?oid_mod.OID = null;
-        var parents = std.ArrayList(oid_mod.OID).init(std.testing.allocator);
-        errdefer parents.deinit();
+        var parents = std.ArrayList(oid_mod.OID).empty;
+        errdefer parents.deinit(allocator);
         var author_opt: ?Identity = null;
         var committer_opt: ?Identity = null;
         var gpg_sig_opt: ?[]const u8 = null;
         var message_start: ?usize = null;
 
-        var lines = std.mem.split(u8, obj.data, "\n");
+        var lines = std.mem.splitScalar(u8, obj.data, '\n');
         while (lines.next()) |line| {
             if (message_start == null and line.len == 0) {
                 // Blank line marks start of message
@@ -221,7 +236,7 @@ pub const Commit = struct {
                 tree_opt = try oid_mod.OID.fromHex(hex);
             } else if (std.mem.startsWith(u8, line, "parent ")) {
                 const hex = line[7..];
-                try parents.append(try oid_mod.OID.fromHex(hex));
+                try parents.append(allocator, try oid_mod.OID.fromHex(hex));
             } else if (std.mem.startsWith(u8, line, "author ")) {
                 const identity_str = line[7..];
                 author_opt = try Identity.parse(identity_str);
@@ -241,14 +256,14 @@ pub const Commit = struct {
         var message: []const u8 = "";
         if (message_start) |start| {
             // Re-split to get remaining content
-            var msg_iter = std.mem.split(u8, obj.data, "\n");
+            var msg_iter = std.mem.splitScalar(u8, obj.data, '\n');
             var count: usize = 0;
             while (msg_iter.next()) |l| {
                 if (count >= start) {
                     if (message.len == 0) {
                         message = l;
                     } else {
-                        message = try std.mem.concat(std.testing.allocator, u8, &[2][]u8{ message, "\n", l });
+                        message = try std.mem.concat(allocator, u8, &[2][]const u8{ message, l });
                     }
                 }
                 count += 1;
@@ -257,7 +272,7 @@ pub const Commit = struct {
 
         return Commit{
             .tree = tree,
-            .parents = try parents.toOwnedSlice(),
+            .parents = try parents.toOwnedSlice(allocator),
             .author = author,
             .committer = committer,
             .message = message,
@@ -331,15 +346,15 @@ test "identity timezone edge cases" {
 test "identity parse invalid" {
     try std.testing.expectError(error.InvalidIdentity, Identity.parse("no email"));
     try std.testing.expectError(error.InvalidIdentity, Identity.parse("Name <email>"));
-    try std.testing.expectError(error.InvalidTimezone, Identity.parse("Name <e@e.com> 12345"));
+    try std.testing.expectError(error.InvalidIdentity, Identity.parse("Name <e@e.com> 12345"));
 }
 
 test "commit serialize and parse roundtrip" {
     const tree_hex = "0000000000000000000000000000000000000000";
-    const tree_oid = oid_mod.OID.fromHex(tree_hex);
+    const tree_oid = try oid_mod.OID.fromHex(tree_hex);
 
     const parent_hex = "1111111111111111111111111111111111111111";
-    const parents = &[_]oid_mod.OID{oid_mod.OID.fromHex(parent_hex)};
+    const parents = &[_]oid_mod.OID{try oid_mod.OID.fromHex(parent_hex)};
 
     const author = Identity{
         .name = "Alice",
@@ -353,7 +368,7 @@ test "commit serialize and parse roundtrip" {
     const serialized = try commit.serialize(std.testing.allocator);
     defer std.testing.allocator.free(serialized);
 
-    const parsed = try Commit.parse(serialized);
+    const parsed = try Commit.parse(std.testing.allocator, serialized);
     try std.testing.expectEqual(tree_oid, parsed.tree);
     try std.testing.expectEqual(1, parsed.parents.len);
     try std.testing.expectEqualSlices(u8, "Alice", parsed.author.name);
@@ -363,15 +378,15 @@ test "commit serialize and parse roundtrip" {
 
 test "commit multi-parent" {
     const tree_oid = oid_mod.OID.zero();
-    const parent1 = oid_mod.OID.fromHex("1111111111111111111111111111111111111111");
-    const parent2 = oid_mod.OID.fromHex("2222222222222222222222222222222222222222");
+    const parent1 = try oid_mod.OID.fromHex("1111111111111111111111111111111111111111");
+    const parent2 = try oid_mod.OID.fromHex("2222222222222222222222222222222222222222");
     const parents = &[_]oid_mod.OID{ parent1, parent2 };
 
     const author = Identity.zero();
     const commit = Commit.create(tree_oid, parents, author, author, "Merge branch");
 
     try std.testing.expectEqual(2, commit.parents.len);
-    try std.testing.expectEqual(object_mod.Type.commit, commit.objectType());
+    try std.testing.expectEqual(object_mod.Type.commit, Commit.objectType());
 }
 
 test "commit initial (no parents)" {
@@ -386,5 +401,5 @@ test "commit initial (no parents)" {
 
 test "commit parse rejects non-commit" {
     const blob_data = "blob 5\x00hello";
-    try std.testing.expectError(error.NotACommit, Commit.parse(blob_data));
+    try std.testing.expectError(error.NotACommit, Commit.parse(std.testing.allocator, blob_data));
 }

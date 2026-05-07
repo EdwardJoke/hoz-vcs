@@ -4,16 +4,18 @@
 //! re-exporting functionality from submodules.
 const std = @import("std");
 
-pub usingnamespace @import("service.zig");
-pub usingnamespace @import("packet.zig");
-pub usingnamespace @import("negotiate.zig");
-pub usingnamespace @import("exchange.zig");
-pub usingnamespace @import("pack_gen.zig");
-pub usingnamespace @import("pack_recv.zig");
-pub usingnamespace @import("connectivity.zig");
-pub usingnamespace @import("shallow.zig");
-pub usingnamespace @import("prune.zig");
-pub usingnamespace @import("protocol.zig");
+pub const service = @import("service.zig");
+pub const packet = @import("packet.zig");
+pub const negotiate = @import("negotiate.zig");
+pub const exchange = @import("exchange.zig");
+pub const pack_gen = @import("pack_gen.zig");
+pub const pack_recv = @import("pack_recv.zig");
+pub const connectivity = @import("connectivity.zig");
+pub const shallow = @import("shallow.zig");
+pub const prune = @import("prune.zig");
+pub const protocol = @import("protocol.zig");
+pub const transport = @import("transport.zig");
+pub const refs = @import("refs.zig");
 
 test "network module loads" {
     try std.testing.expect(true);

@@ -3,8 +3,8 @@ const std = @import("std");
 
 pub const MultiPackIndex = struct {
     allocator: std.mem.Allocator,
-    objects: std.StringArrayHashMap(PackOffset),
-    packs: std.ArrayList(PackInfo),
+    objects: std.StringArrayHashMapUnmanaged(PackOffset),
+    packs: std.ArrayListUnmanaged(PackInfo),
 
     pub const PackOffset = struct {
         pack_index: u32,
@@ -19,26 +19,26 @@ pub const MultiPackIndex = struct {
     pub fn init(allocator: std.mem.Allocator) MultiPackIndex {
         return .{
             .allocator = allocator,
-            .objects = std.StringArrayHashMap(PackOffset).init(allocator),
-            .packs = std.ArrayList(PackInfo).init(allocator),
+            .objects = .empty,
+            .packs = .empty,
         };
     }
 
     pub fn deinit(self: *MultiPackIndex) void {
-        self.objects.deinit();
+        self.objects.deinit(self.allocator);
         for (self.packs.items) |p| {
             self.allocator.free(p.hash);
         }
-        self.packs.deinit();
+        self.packs.deinit(self.allocator);
     }
 
     pub fn addPack(self: *MultiPackIndex, hash: []const u8, object_count: u32) !void {
         const hash_copy = try self.allocator.dupe(u8, hash);
-        try self.packs.append(.{ .hash = hash_copy, .object_count = object_count });
+        try self.packs.append(self.allocator, .{ .hash = hash_copy, .object_count = object_count });
     }
 
     pub fn addObject(self: *MultiPackIndex, object_hash: []const u8, pack_index: u32, offset: u64) !void {
-        try self.objects.put(object_hash, .{ .pack_index = pack_index, .offset = offset });
+        try self.objects.put(self.allocator, object_hash, .{ .pack_index = pack_index, .offset = offset });
     }
 
     pub fn findObject(self: *MultiPackIndex, object_hash: []const u8) ?PackOffset {

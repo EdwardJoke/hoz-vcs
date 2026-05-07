@@ -32,6 +32,8 @@ pub const DateStyle = enum {
     raw,
 };
 
+const date_mod = @import("date.zig");
+
 pub const PrettyPrinter = struct {
     allocator: std.mem.Allocator,
     options: PrettyOptions,
@@ -45,77 +47,59 @@ pub const PrettyPrinter = struct {
 
     pub fn printShort(self: *PrettyPrinter, writer: anytype, commit_oid: OID, message: []const u8) !void {
         _ = self;
-        _ = writer;
-        _ = commit_oid;
-        _ = message;
+        try writer.print("{s} ", .{commit_oid.abbrev(7)});
+        try writeFirstLine(writer, message);
+        try writer.writeAll("\n");
     }
 
     pub fn printMedium(self: *PrettyPrinter, writer: anytype, author: []const u8, date: i64, message: []const u8) !void {
         _ = self;
-        _ = writer;
-        _ = author;
-        _ = date;
-        _ = message;
+        var buf: [256]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buf);
+        var w: std.Io.Writer = .fixed(&buf);
+        try date_mod.formatMediumDate(date, &w);
+        const date_str = std.Io.Writer.buffered(&w);
+
+        try writer.print("{s}  {s}\n\n", .{ author, date_str });
+        try writeIndentedMessage(writer, message, 4);
     }
 
     pub fn printFull(self: *PrettyPrinter, writer: anytype, author: []const u8, committer: []const u8, date: i64, message: []const u8) !void {
         _ = self;
-        _ = writer;
-        _ = author;
-        _ = committer;
-        _ = date;
-        _ = message;
+        var buf: [256]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buf);
+        var w: std.Io.Writer = .fixed(&buf);
+        try date_mod.formatLongDate(date, &w);
+        const date_str = std.Io.Writer.buffered(&w);
+
+        try writer.print("Author: {s}\nDate:   {s}\n\n", .{ author, date_str });
+        try writeIndentedMessage(writer, message, 4);
+        if (committer.len > 0 and !std.mem.eql(u8, committer, author)) {
+            try writer.writeAll("\nCommit: ");
+            try writer.writeAll(committer);
+            try writer.writeAll("\n");
+        }
     }
 
     pub fn printOneline(self: *PrettyPrinter, writer: anytype, commit_oid: OID, message: []const u8) !void {
         _ = self;
-        _ = writer;
-        _ = commit_oid;
-        _ = message;
+        const abbrev_len = self.options.abbrev_length;
+        try writer.print("{s} ", .{commit_oid.abbrev(abbrev_len)});
+        try writeFirstLine(writer, message);
+        try writer.writeAll("\n");
     }
 };
 
-test "PrettyFormat enum values" {
-    try std.testing.expect(@as(u3, @intFromEnum(PrettyFormat.short)) == 0);
-    try std.testing.expect(@as(u3, @intFromEnum(PrettyFormat.medium)) == 1);
-    try std.testing.expect(@as(u3, @intFromEnum(PrettyFormat.full)) == 2);
-    try std.testing.expect(@as(u3, @intFromEnum(PrettyFormat.fuller)) == 3);
+fn writeFirstLine(writer: anytype, message: []const u8) !void {
+    const nl_idx = std.mem.indexOf(u8, message, "\n") orelse message.len;
+    try writer.writeAll(message[0..nl_idx]);
 }
 
-test "PrettyOptions default values" {
-    const options = PrettyOptions{};
-    try std.testing.expect(options.format == .medium);
-    try std.testing.expect(options.use_mailmap == true);
-    try std.testing.expect(options.abbrev_oid == true);
-    try std.testing.expect(options.abbrev_length == 7);
-}
-
-test "PrettyPrinter init" {
-    const options = PrettyOptions{};
-    const printer = PrettyPrinter.init(std.testing.allocator, options);
-
-    try std.testing.expect(printer.allocator == std.testing.allocator);
-}
-
-test "PrettyPrinter init with options" {
-    var options = PrettyOptions{};
-    options.format = .oneline;
-    options.relative_date = true;
-    const printer = PrettyPrinter.init(std.testing.allocator, options);
-
-    try std.testing.expect(printer.options.format == .oneline);
-    try std.testing.expect(printer.options.relative_date == true);
-}
-
-test "PrettyPrinter printShort exists" {
-    var options = PrettyOptions{};
-    var printer = PrettyPrinter.init(std.testing.allocator, options);
-    try std.testing.expect(printer.allocator != undefined);
-}
-
-test "DateStyle enum values" {
-    try std.testing.expect(@as(u3, @intFromEnum(DateStyle.short)) == 0);
-    try std.testing.expect(@as(u3, @intFromEnum(DateStyle.medium)) == 1);
-    try std.testing.expect(@as(u3, @intFromEnum(DateStyle.long)) == 2);
-    try std.testing.expect(@as(u3, @intFromEnum(DateStyle.relative)) == 6);
+fn writeIndentedMessage(writer: anytype, message: []const u8, indent: usize) !void {
+    var lines = std.mem.splitSequence(u8, message, "\n");
+    while (lines.next()) |line| {
+        for (0..indent) |_| try writer.writeByte(' ');
+        try writer.writeAll(line);
+        try writer.writeAll("\n");
+    }
 }

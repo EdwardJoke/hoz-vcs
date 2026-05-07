@@ -28,12 +28,13 @@ pub const DiffCacheEntry = struct {
     options_hash: [16]u8,
     access_time: u64,
     size_bytes: usize,
+    path: []const u8,
 };
 
 pub const DiffCache = struct {
     allocator: std.mem.Allocator,
     config: DiffCacheConfig,
-    entries: std.StringArrayHashMap(DiffCacheEntry),
+    entries: std.StringArrayHashMapUnmanaged(DiffCacheEntry),
     total_memory: usize = 0,
     hits: u64 = 0,
     misses: u64 = 0,
@@ -44,7 +45,7 @@ pub const DiffCache = struct {
         return .{
             .allocator = allocator,
             .config = config,
-            .entries = std.StringArrayHashMap(DiffCacheEntry).init(allocator),
+            .entries = .empty,
             .total_memory = 0,
             .hits = 0,
             .misses = 0,
@@ -58,7 +59,7 @@ pub const DiffCache = struct {
         while (iter.next()) |entry| {
             self.allocator.free(entry.value_ptr.result_data);
         }
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 
     pub fn computeCacheKey(
@@ -84,7 +85,12 @@ pub const DiffCache = struct {
         @memcpy(key[0..20], &old_hash);
         @memcpy(key[20..40], &new_hash);
         @memcpy(key[40..60], &options_hash);
-        @memcpy(key[60..64], &options_hash[0..4]);
+        var hasher4 = crypto.hash.Sha1.init(.{});
+        hasher4.update(old_content);
+        hasher4.update(new_content);
+        hasher4.update(options);
+        const combined_hash = hasher4.final();
+        @memcpy(key[60..64], combined_hash[0..4]);
         return key;
     }
 
@@ -101,13 +107,15 @@ pub const DiffCache = struct {
         return null;
     }
 
-    pub fn put(self: *DiffCache, key: []const u8, data: []const u8) !void {
+    pub fn put(self: *DiffCache, key: []const u8, data: []const u8, path: []const u8) !void {
         if (!self.config.enabled) return;
 
         if (self.entries.getEntry(key)) |entry| {
             self.allocator.free(entry.value_ptr.result_data);
+            if (entry.value_ptr.path.len > 0) self.allocator.free(entry.value_ptr.path);
             self.total_memory -= entry.value_ptr.size_bytes;
             entry.value_ptr.result_data = try self.allocator.dupe(u8, data);
+            entry.value_ptr.path = try self.allocator.dupe(u8, path);
             entry.value_ptr.size_bytes = data.len;
             entry.value_ptr.access_time = self.access_counter;
             self.access_counter += 1;
@@ -118,7 +126,8 @@ pub const DiffCache = struct {
         const entry_size = @sizeOf(DiffCacheEntry) + key.len + data.len;
 
         while (self.entries.count() >= self.config.max_entries or
-            self.total_memory + data.len > self.config.max_memory_bytes) {
+            self.total_memory + data.len > self.config.max_memory_bytes)
+        {
             try self.evictOldest();
         }
 
@@ -128,13 +137,17 @@ pub const DiffCache = struct {
         const data_copy = try self.allocator.dupe(u8, data);
         errdefer self.allocator.free(data_copy);
 
-        try self.entries.put(key_copy, .{
+        const path_copy = try self.allocator.dupe(u8, path);
+        errdefer self.allocator.free(path_copy);
+
+        try self.entries.put(self.allocator, key_copy, .{
             .result_data = data_copy,
-            .old_content_hash = undefined,
-            .new_content_hash = undefined,
-            .options_hash = undefined,
+            .old_content_hash = oldContentHash(key_copy),
+            .new_content_hash = newContentHash(key_copy),
+            .options_hash = optionsHashFromKey(key_copy),
             .access_time = self.access_counter,
             .size_bytes = data.len,
+            .path = path_copy,
         });
 
         self.access_counter += 1;
@@ -157,6 +170,7 @@ pub const DiffCache = struct {
             if (self.entries.get(oldest_key)) |entry| {
                 self.total_memory -= entry.size_bytes;
                 self.allocator.free(entry.result_data);
+                if (entry.path.len > 0) self.allocator.free(entry.path);
             }
             self.entries.remove(oldest_key);
             self.evictions += 1;
@@ -164,14 +178,45 @@ pub const DiffCache = struct {
     }
 
     pub fn invalidate(self: *DiffCache, path: []const u8) void {
-        _ = path;
-        self.clear();
+        var to_remove = std.ArrayList([]const u8).init(self.allocator);
+        defer to_remove.deinit();
+
+        var iter = self.entries.iterator();
+        while (iter.next()) |entry| {
+            if (std.mem.eql(u8, entry.value_ptr.path, path)) {
+                self.allocator.free(entry.value_ptr.result_data);
+                if (entry.value_ptr.path.len > 0) self.allocator.free(entry.value_ptr.path);
+                _ = to_remove.append(entry.key_ptr.*) catch {};
+            }
+        }
+        for (to_remove.items) |key| {
+            _ = self.entries.remove(key);
+        }
+    }
+
+    fn oldContentHash(key: []const u8) [20]u8 {
+        var result: [20]u8 = undefined;
+        @memcpy(&result, key[0..20]);
+        return result;
+    }
+
+    fn newContentHash(key: []const u8) [20]u8 {
+        var result: [20]u8 = undefined;
+        @memcpy(&result, key[20..40]);
+        return result;
+    }
+
+    fn optionsHashFromKey(key: []const u8) [16]u8 {
+        var result: [16]u8 = undefined;
+        @memcpy(&result, key[40..56]);
+        return result;
     }
 
     pub fn clear(self: *DiffCache) void {
         var iter = self.entries.iterator();
         while (iter.next()) |entry| {
             self.allocator.free(entry.value_ptr.result_data);
+            if (entry.value_ptr.path.len > 0) self.allocator.free(entry.value_ptr.path);
         }
         self.entries.clearRetainingCapacity();
         self.total_memory = 0;

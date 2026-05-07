@@ -1,30 +1,72 @@
 //! Worktree List - List all worktrees
 const std = @import("std");
+const Io = std.Io;
 
 pub const WorktreeLister = struct {
     allocator: std.mem.Allocator,
-    repo_path: []const u8,
+    io: Io,
 
-    pub fn init(allocator: std.mem.Allocator, repo_path: []const u8) WorktreeLister {
-        return .{ .allocator = allocator, .repo_path = repo_path };
+    pub fn init(allocator: std.mem.Allocator, io: Io) WorktreeLister {
+        return .{ .allocator = allocator, .io = io };
     }
 
     pub fn list(self: *WorktreeLister) ![]WorktreeInfo {
-        var worktrees = std.ArrayList(WorktreeInfo).init(self.allocator);
-        const git_dir = try std.fs.openDirAbsolute(self.repo_path, .{});
-        defer git_dir.close();
+        const cwd = Io.Dir.cwd();
+        const wt_dir = cwd.openDir(self.io, ".git/worktrees", .{}) catch return &.{};
+        defer wt_dir.close(self.io);
 
-        const worktrees_dir = git_dir.openDir("worktrees", .{} catch |_| return worktrees.items);
-        defer worktrees_dir.close();
-
-        var iter = worktrees_dir.iterate();
-        while (iter.next() catch null) |entry| {
-            if (entry.kind == .directory) {
-                const wt_info = try self.getWorktreeInfo(entry.name);
-                try worktrees.append(wt_info);
+        var infos = std.ArrayList(WorktreeInfo).empty;
+        errdefer {
+            for (infos.items) |*info| {
+                self.allocator.free(info.path);
+                self.allocator.free(info.branch);
+                self.allocator.free(info.head);
             }
+            infos.deinit(self.allocator);
         }
-        return worktrees.items;
+
+        var walker = wt_dir.walk(self.allocator) catch return &.{};
+        defer walker.deinit();
+
+        while (true) {
+            const entry = walker.next(self.io) catch break;
+            const e = entry orelse break;
+            if (e.kind != .directory or e.basename.len == 0) continue;
+
+            const gitdir_path = try std.fmt.allocPrint(self.allocator, ".git/worktrees/{s}/gitdir", .{e.basename});
+            defer self.allocator.free(gitdir_path);
+
+            const wt_git_dir = cwd.openDir(self.io, gitdir_path, .{}) catch continue;
+
+            const head_content = wt_git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch {
+                wt_git_dir.close(self.io);
+                continue;
+            };
+            wt_git_dir.close(self.io);
+            defer self.allocator.free(head_content);
+
+            const head_trimmed = std.mem.trim(u8, head_content, " \t\r\n");
+
+            var branch: []const u8 = "(detached)";
+            if (std.mem.startsWith(u8, head_trimmed, "ref: ")) {
+                branch = head_trimmed[5..];
+            }
+
+            const path = try self.allocator.dupe(u8, e.basename);
+            const branch_owned = try self.allocator.dupe(u8, branch);
+            const head_owned = try self.allocator.dupe(u8, head_trimmed);
+
+            const locked = isWorktreeLocked(self.io, self.allocator, e.basename);
+
+            try infos.append(self.allocator, .{
+                .path = path,
+                .branch = branch_owned,
+                .head = head_owned,
+                .locked = locked,
+            });
+        }
+
+        return infos.toOwnedSlice(self.allocator);
     }
 
     pub const WorktreeInfo = struct {
@@ -33,35 +75,24 @@ pub const WorktreeLister = struct {
         head: []const u8,
         locked: bool,
     };
-
-    fn getWorktreeInfo(self: *WorktreeLister, name: []const u8) !WorktreeInfo {
-        const git_dir = try std.fs.openDirAbsolute(self.repo_path, .{});
-        defer git_dir.close();
-
-        const wt_dir = try git_dir.openDir("worktrees", .{});
-        defer wt_dir.close();
-
-        const wt_path_dir = try wt_dir.openDir(name, .{});
-        defer wt_path_dir.close();
-
-        var info = WorktreeInfo{
-            .path = try std.fmt.allocPrint(self.allocator, "{s}/worktrees/{s}", .{ self.repo_path, name }),
-            .branch = try wt_path_dir.readFileAlloc(self.allocator, "head", 1024) catch "",
-            .head = "",
-            .locked = wt_path_dir.access("locked", .{}) == null,
-        };
-        return info;
-    }
 };
 
-test "WorktreeLister init" {
-    const lister = WorktreeLister.init(std.testing.allocator, "/path/to/repo");
-    try std.testing.expectEqualStrings("/path/to/repo", lister.repo_path);
+fn isWorktreeLocked(io: Io, allocator: std.mem.Allocator, name: []const u8) bool {
+    const lock_path = std.fmt.allocPrint(allocator, ".git/worktrees/{s}/locked", .{name}) catch return false;
+    defer allocator.free(lock_path);
+    const cwd = Io.Dir.cwd();
+    const ld = cwd.openDir(io, lock_path, .{}) catch return false;
+    ld.close(io);
+    return true;
 }
 
-test "WorktreeLister list method exists" {
-    var lister = WorktreeLister.init(std.testing.allocator, "/path/to/repo");
-    const wts = try lister.list();
-    _ = wts;
-    try std.testing.expect(true);
+test "WorktreeLister init" {
+    var buf: [1]u8 = undefined;
+    const io: Io = .init(.{
+        .stdin = .empty,
+        .stdout = .buffered(&buf),
+        .stderr = .buffered(&buf),
+    });
+    const lister = WorktreeLister.init(std.testing.allocator, io);
+    try std.testing.expect(lister.allocator == std.testing.allocator);
 }

@@ -51,9 +51,9 @@ pub const MemoryRegion = struct {
 pub const MemoryProfile = struct {
     allocator: std.mem.Allocator,
     config: MemoryProfileConfig,
-    allocations: std.AutoArrayHashMap(usize, MemoryAllocation),
-    stack_traces: std.AutoArrayHashMap([]const usize, void),
-    regions: std.ArrayList(MemoryRegion),
+    allocations: std.array_hash_map.Auto(usize, MemoryAllocation),
+    stack_traces: std.array_hash_map.Auto([]const usize, void),
+    regions: std.ArrayListUnmanaged(MemoryRegion),
     stats: MemoryProfileStats,
     enabled: bool,
 
@@ -61,9 +61,9 @@ pub const MemoryProfile = struct {
         return .{
             .allocator = allocator,
             .config = config,
-            .allocations = std.AutoArrayHashMap(usize, MemoryAllocation).init(allocator),
-            .stack_traces = std.AutoArrayHashMap([]const usize, void).init(allocator),
-            .regions = std.ArrayList(MemoryRegion).init(allocator),
+            .allocations = .empty,
+            .stack_traces = .empty,
+            .regions = .empty,
             .stats = .{},
             .enabled = true,
         };
@@ -74,17 +74,17 @@ pub const MemoryProfile = struct {
         while (iter.next()) |entry| {
             self.allocator.free(entry.value_ptr.stack_trace);
         }
-        self.allocations.deinit();
+        self.allocations.deinit(self.allocator);
 
         var stack_iter = self.stack_traces.iterator();
         while (stack_iter.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
         }
-        self.stack_traces.deinit();
-        self.regions.deinit();
+        self.stack_traces.deinit(self.allocator);
+        self.regions.deinit(self.allocator);
     }
 
-    pub fn recordAllocation(self: *MemoryProfile, address: usize, size: usize, type: AllocationType) !void {
+    pub fn recordAllocation(self: *MemoryProfile, address: usize, size: usize, alloc_type: AllocationType) !void {
         if (!self.enabled) return;
 
         const stack = try self.captureStackTrace();
@@ -93,14 +93,14 @@ pub const MemoryProfile = struct {
         const alloc = MemoryAllocation{
             .address = address,
             .size = size,
-            .type = type,
+            .type = alloc_type,
             .timestamp = std.time.timestamp(),
             .stack_trace = stack,
             .freed = false,
             .freed_timestamp = null,
         };
 
-        try self.allocations.put(address, alloc);
+        try self.allocations.put(self.allocator, address, alloc);
 
         self.stats.total_allocations += 1;
         self.stats.current_allocations += 1;
@@ -123,11 +123,18 @@ pub const MemoryProfile = struct {
     }
 
     fn captureStackTrace(self: *MemoryProfile) ![]usize {
-        var buffer: [64]usize = undefined;
         const depth = @min(self.config.stack_depth, 64);
+        var trace = try self.allocator.alloc(usize, depth);
+        @memset(trace, 0);
 
-        var trace: []usize = try self.allocator.alloc(usize, depth);
-        @memcpy(trace, buffer[0..depth]);
+        if (comptime !@hasDecl(std.debug, "captureStackTrace")) {
+            return trace;
+        }
+
+        var buf: [64]usize = undefined;
+        const actual = std.debug.captureStackTrace(buf[0..]);
+        const copy_len = @min(actual, depth);
+        @memcpy(trace[0..copy_len], buf[0..copy_len]);
 
         return trace;
     }
@@ -201,7 +208,7 @@ pub const MemoryProfile = struct {
     }
 
     pub fn addRegion(self: *MemoryProfile, start: usize, end: usize, label: []const u8) !void {
-        try self.regions.append(.{
+        try self.regions.append(self.allocator, .{
             .start = start,
             .end = end,
             .size = end - start,

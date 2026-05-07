@@ -87,6 +87,14 @@ pub const UnifiedDiff = struct {
         old_lines: []const []const u8,
         new_lines: []const []const u8,
     ) !UnifiedHunk {
+        if (edits.len == 0) return .{
+            .old_start = 1,
+            .old_count = 0,
+            .new_start = 1,
+            .new_count = 0,
+            .lines = &.{},
+        };
+
         const ctx = self.config.context_lines;
 
         var hunk_start = start_idx.*;
@@ -119,14 +127,14 @@ pub const UnifiedDiff = struct {
         }
 
         const old_start = if (edits[hunk_start].operation == .delete or edits[hunk_start].operation == .equal)
-            edits[hunk_start].old_line - (if (edits[hunk_start].operation == .equal) 1 else 0)
+            if (edits[hunk_start].old_line > 0) edits[hunk_start].old_line - 1 else 1
         else if (hunk_start + 1 < edits.len)
             edits[hunk_start + 1].old_line
         else
             old_lines.len + 1;
 
         const new_start = if (edits[hunk_start].operation == .insert or edits[hunk_start].operation == .equal)
-            edits[hunk_start].new_line - (if (edits[hunk_start].operation == .equal) 1 else 0)
+            if (edits[hunk_start].new_line > 0) edits[hunk_start].new_line - 1 else 1
         else if (hunk_start + 1 < edits.len)
             edits[hunk_start + 1].new_line
         else
@@ -140,10 +148,10 @@ pub const UnifiedDiff = struct {
 
         for (hunk_start..hunk_end) |idx| {
             const edit = edits[idx];
-            const line = switch (edit.operation) {
-                .equal => old_lines[edit.old_line - 1],
-                .delete => old_lines[edit.old_line - 1],
-                .insert => new_lines[edit.new_line - 1],
+            const line: []const u8 = switch (edit.operation) {
+                .equal => if (edit.old_line > 0 and edit.old_line <= old_lines.len) old_lines[edit.old_line - 1] else "",
+                .delete => if (edit.old_line > 0 and edit.old_line <= old_lines.len) old_lines[edit.old_line - 1] else "",
+                .insert => if (edit.new_line > 0 and edit.new_line <= new_lines.len) new_lines[edit.new_line - 1] else "",
             };
             const prefix: []const u8 = switch (edit.operation) {
                 .equal => " ",
@@ -172,27 +180,49 @@ pub const UnifiedDiff = struct {
         old_lines: []const []const u8,
         new_lines: []const []const u8,
     ) !void {
-        _ = self;
         _ = old_lines;
         _ = new_lines;
-        try writer.print("@@ -{d},{d} +{d},{d} @@\n", .{
-            hunk.old_start,
-            hunk.old_count,
-            hunk.new_start,
-            hunk.new_count,
-        });
+
+        const cyan = "\x1b[36m";
+        const green = "\x1b[32m";
+        const red = "\x1b[31m";
+        const reset = "\x1b[0m";
+
+        if (self.config.color) {
+            try writer.print("{s}{s}@@ -{d},{d} +{d},{d} @@{s}\n", .{
+                cyan, "\x1b[1m", hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count, reset,
+            });
+        } else {
+            try writer.print("@@ -{d},{d} +{d},{d} @@\n", .{
+                hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count,
+            });
+        }
 
         for (hunk.lines) |line| {
-            try writer.print("{s}\n", .{line});
+            if (line.len == 0) {
+                try writer.writeAll("\n");
+                continue;
+            }
+            if (self.config.color) {
+                if (std.mem.startsWith(u8, line, "+")) {
+                    try writer.print("{s}{s}{s}\n", .{ green, line, reset });
+                } else if (std.mem.startsWith(u8, line, "-")) {
+                    try writer.print("{s}{s}{s}\n", .{ red, line, reset });
+                } else {
+                    try writer.print("{s}\n", .{line});
+                }
+            } else {
+                try writer.print("{s}\n", .{line});
+            }
         }
     }
 };
 
 test "UnifiedDiff init" {
     const gpa = std.heap.DebugAllocator(.{}).init;
-    defer _ = gpa.deinit();
+    defer gpa.deinit();
 
-    var diff = UnifiedDiff.init(gpa.allocator());
+    const diff = UnifiedDiff.init(gpa.allocator());
     try std.testing.expect(diff.allocator == gpa.allocator());
     try std.testing.expectEqual(@as(usize, 3), diff.config.context_lines);
 }

@@ -58,9 +58,10 @@ pub const MergeCommitBuilder = struct {
 
     pub fn createFastForward(self: *MergeCommitBuilder, from: OID, to: OID) !OID {
         _ = self;
-        _ = from;
-        _ = to;
-        return undefined;
+        if (from.eql(to)) {
+            return to;
+        }
+        return to;
     }
 };
 

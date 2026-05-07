@@ -1,4 +1,4 @@
-//! Config Type - Configuration storage using TOML
+//! Config Type - Configuration storage using Git-config format
 const std = @import("std");
 
 pub const ConfigScope = enum {
@@ -24,9 +24,9 @@ pub const ConfigType = enum {
 
 pub const ConfigTypeParser = struct {
     pub fn parseBool(value: []const u8) !bool {
-        if (std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "yes") or std.mem.eql(u8, value, "on")) {
+        if (std.mem.eql(u8, value, "true") or std.mem.eql(u8, value, "yes") or std.mem.eql(u8, value, "on") or std.mem.eql(u8, value, "1")) {
             return true;
-        } else if (std.mem.eql(u8, value, "false") or std.mem.eql(u8, value, "no") or std.mem.eql(u8, value, "off")) {
+        } else if (std.mem.eql(u8, value, "false") or std.mem.eql(u8, value, "no") or std.mem.eql(u8, value, "off") or std.mem.eql(u8, value, "0")) {
             return false;
         }
         return error.InvalidBoolValue;
@@ -40,37 +40,46 @@ pub const ConfigTypeParser = struct {
         return std.fmt.parseInt(i64, value, 10);
     }
 
-    pub fn formatInt(value: i64) []const u8 {
-        return std.fmt.print("{d}", .{value});
+    pub fn formatInt(allocator: std.mem.Allocator, value: i64) ![]const u8 {
+        return std.fmt.allocPrint(allocator, "{d}", .{value});
     }
 
     pub fn parsePath(value: []const u8) ![]const u8 {
+        if (value.len == 0) return error.EmptyPath;
+        for (value) |byte| {
+            if (byte == 0) return error.InvalidPath;
+        }
         return value;
     }
 
     pub fn parseExpiryDate(value: []const u8) !i64 {
-        _ = value;
-        return 0;
+        const ts = std.fmt.parseInt(i64, value, 10) catch return error.InvalidExpiryDate;
+        if (ts < 0) return error.InvalidExpiryDate;
+        return ts;
     }
 
-    pub fn formatExpiryDate(timestamp: i64) []const u8 {
-        return std.fmt.print("{d}", .{timestamp});
+    pub fn formatExpiryDate(allocator: std.mem.Allocator, timestamp: i64) ![]const u8 {
+        return std.fmt.allocPrint(allocator, "{d}", .{timestamp});
     }
 };
 
 pub const Config = struct {
     allocator: std.mem.Allocator,
-    entries: std.StringArrayHashMap([]const u8),
+    entries: std.StringArrayHashMapUnmanaged([]const u8),
 
     pub fn init(allocator: std.mem.Allocator) Config {
         return .{
             .allocator = allocator,
-            .entries = std.StringArrayHashMap([]const u8).init(allocator),
+            .entries = .empty,
         };
     }
 
     pub fn deinit(self: *Config) void {
-        self.entries.deinit();
+        var it = self.entries.iterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.entries.deinit(self.allocator);
     }
 
     pub fn get(self: *Config, key: []const u8) ?[]const u8 {
@@ -78,12 +87,20 @@ pub const Config = struct {
     }
 
     pub fn set(self: *Config, key: []const u8, value: []const u8) !void {
-        try self.entries.put(key, value);
+        const owned = try self.allocator.dupe(u8, value);
+        errdefer self.allocator.free(owned);
+
+        const old_value_ptr = self.entries.get(key);
+        try self.entries.put(self.allocator, key, owned);
+        if (old_value_ptr) |v| {
+            self.allocator.free(v);
+        }
     }
 
     pub fn unset(self: *Config, key: []const u8) void {
-        _ = self;
-        _ = key;
+        if (self.entries.orderedRemove(key)) |value| {
+            self.allocator.free(value);
+        }
     }
 };
 
@@ -112,4 +129,15 @@ test "Config set and get" {
     defer config.deinit();
     try config.set("user.name", "Test User");
     try std.testing.expectEqualStrings("Test User", config.get("user.name").?);
+}
+
+test "Config unset removes entry" {
+    const allocator = std.testing.allocator;
+    var config = Config.init(allocator);
+    defer config.deinit();
+    try config.set("user.name", "Test User");
+    try std.testing.expect(config.get("user.name") != null);
+
+    config.unset("user.name");
+    try std.testing.expect(config.get("user.name") == null);
 }

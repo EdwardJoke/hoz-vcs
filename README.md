@@ -1,7 +1,19 @@
+
+<div align="center">
+
+![Brand Logo](/assets/Hoz.png)
+
 # Hoz - Git-Compatible Version Control System
 
-A full-featured Git implementation in Zig 0.16.0, built for type safety and performance. 
+![GitHub Stars](https://shieldcn.dev/github/stars/edwardjoke/hoz-vcs.svg?variant=branded) ![GitHub Forks](https://shieldcn.dev/github/forks/edwardjoke/hoz-vcs.svg?variant=branded) ![GitHub Release](https://shieldcn.dev/github/release/edwardjoke/hoz-vcs.svg?variant=branded)<br/>
+![GitHub Last Commit](https://shieldcn.dev/github/last-commit/edwardjoke/hoz-vcs.svg?variant=outline) ![GitHub Open Issues](https://shieldcn.dev/github/open-issues/edwardjoke/hoz-vcs.svg?variant=outline)<br/>
+![Runs on Linux](https://shieldcn.dev/badge/Runs%20on-Linux-FCC624.svg?logo=linux&logoColor=000) ![Runs on MacOS](https://shieldcn.dev/badge/Runs%20on-MacOS-000000.svg?mode=light&logo=apple&logoColor=fff) ![Cross Platform](https://shieldcn.dev/badge/cross-platform-brightgreen.svg?variant=outline&logo=ri%3AGoDeviceDesktop)
+
+*A full-featured Git implementation in Zig 0.16.0,* <br/>
+*built for type safety and performance.* <br/>
 Hoz is the next generation of Git-compatible version control with a clean, modern codebase.
+
+</div>
 
 ## Why Hoz?
 
@@ -11,6 +23,9 @@ Hoz is the next generation of Git-compatible version control with a clean, moder
 - **Portable** - Runs anywhere Zig 0.16.0 is available
 
 ## Quick Start
+
+> [!WARNING]  
+> This project is in active development and now just a toy, please do not use it in production.
 
 Initialize a new repository:
 
@@ -55,6 +70,15 @@ hoz merge <branch>            # Merge branches
 hoz log           # View commit history
 hoz show <ref>    # Show commit details
 hoz blame <file>  # Show file annotations
+hoz describe      # Describe commit using tags
+hoz verify-tag    # Verify annotated tag signature
+hoz name-rev      # Translate SHA to symbolic name
+```
+
+### File Operations
+```bash
+hoz add <file>     # Stage files for commit
+hoz rm <file>      # Remove from working tree and index
 ```
 
 ### Remote Collaboration
@@ -75,9 +99,8 @@ Hoz is in active development. Core Git functionality is implemented including:
 
 ## Contributing
 
-Contributions welcome. Please ensure `zig build test` passes before submitting changes.
+Contributions welcome. Please ensure `just asset` passes before submitting changes.
 
 ## License
 
 Apache License 2.0
--

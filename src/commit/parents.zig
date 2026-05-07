@@ -18,11 +18,37 @@ pub const ParentResolver = struct {
         self: *ParentResolver,
         head_oid: ?OID,
     ) ![]const OID {
-        if (head_oid) |oid| {
-            const parents = try self.allocator.alloc(OID, 1);
-            parents[0] = oid;
-            return parents;
+        if (head_oid == null) {
+            return &.{};
         }
+
+        const oid = head_oid.?;
+
+        if (self.odb) |odb| {
+            if (odb.getObject(oid)) |obj| {
+                defer obj.deinit();
+                if (obj.data.len > 0) {
+                    var parent_list = std.ArrayList(OID).init(self.allocator);
+                    errdefer parent_list.deinit(self.allocator);
+
+                    var header_iter = std.mem.splitScalar(u8, obj.data, '\n');
+                    while (header_iter.next()) |line| {
+                        if (std.mem.startsWith(u8, line, "parent ")) {
+                            const parent_hex = line[7..47];
+                            if (OID.fromHex(parent_hex)) |parent_oid| {
+                                try parent_list.append(self.allocator, parent_oid);
+                            }
+                        } else if (line.len == 0) break;
+                        if (std.mem.startsWith(u8, line, "tree ")) break;
+                    }
+
+                    if (parent_list.items.len > 0) {
+                        return parent_list.toOwnedSlice(self.allocator);
+                    }
+                }
+            }
+        }
+
         return &.{};
     }
 
@@ -32,7 +58,7 @@ pub const ParentResolver = struct {
         oid2: OID,
     ) !?OID {
         if (self.odb == null) {
-            return null;
+            return error.NoObjectDatabase;
         }
 
         var ancestors1 = std.AutoArrayHashMap(OID, void).init(self.allocator);
@@ -55,19 +81,14 @@ pub const ParentResolver = struct {
             if (self.odb) |odb| {
                 if (odb.getObject(current)) |obj| {
                     if (obj.data.len > 0) {
-                        const tree_end = std.mem.indexOfScalar(u8, obj.data, '\n') orelse obj.data.len;
-                        const tree_line = obj.data[0..tree_end];
-                        if (std.mem.startsWith(u8, tree_line, "tree ")) {
-                            const parent_line = obj.data[tree_end + 1 ..];
-                            var parent_iter = std.mem.splitScalar(u8, parent_line, '\n');
-                            while (parent_iter.next()) |line| {
-                                if (std.mem.startsWith(u8, line, "parent ")) {
-                                    const parent_hex = line[7..47];
-                                    if (OID.fromHex(parent_hex)) |parent_oid| {
-                                        try queue.append(parent_oid);
-                                    }
+                        var header_iter = std.mem.splitScalar(u8, obj.data, '\n');
+                        while (header_iter.next()) |line| {
+                            if (std.mem.startsWith(u8, line, "parent ")) {
+                                const parent_hex = line[7..47];
+                                if (OID.fromHex(parent_hex)) |parent_oid| {
+                                    try queue.append(parent_oid);
                                 }
-                            }
+                            } else if (line.len == 0) break;
                         }
                     }
                 }
@@ -86,16 +107,14 @@ pub const ParentResolver = struct {
             if (self.odb) |odb| {
                 if (odb.getObject(current)) |obj| {
                     if (obj.data.len > 0) {
-                        const tree_end = std.mem.indexOfScalar(u8, obj.data, '\n') orelse obj.data.len;
-                        const parent_line = obj.data[tree_end + 1 ..];
-                        var parent_iter = std.mem.splitScalar(u8, parent_line, '\n');
-                        while (parent_iter.next()) |line| {
+                        var header_iter2 = std.mem.splitScalar(u8, obj.data, '\n');
+                        while (header_iter2.next()) |line| {
                             if (std.mem.startsWith(u8, line, "parent ")) {
                                 const parent_hex = line[7..47];
                                 if (OID.fromHex(parent_hex)) |parent_oid| {
                                     try queue.append(parent_oid);
                                 }
-                            }
+                            } else if (line.len == 0) break;
                         }
                     }
                 }
@@ -120,14 +139,13 @@ test "ParentResolver init with odb" {
     try std.testing.expect(resolver.allocator == std.testing.allocator);
 }
 
-test "ParentResolver resolveParents with head" {
+test "ParentResolver resolveParents with head but no odb returns empty" {
     var resolver = ParentResolver.init(std.testing.allocator, null);
     const head_oid = try OID.fromHex("abc123def456789012345678901234567890abcd");
     const parents = try resolver.resolveParents(head_oid);
     defer resolver.allocator.free(parents);
 
-    try std.testing.expect(parents.len == 1);
-    try std.testing.expectEqual(head_oid, parents[0]);
+    try std.testing.expect(parents.len == 0);
 }
 
 test "ParentResolver resolveParents without head" {

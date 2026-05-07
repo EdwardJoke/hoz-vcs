@@ -193,3 +193,39 @@ test "ParallelCompressStats init" {
     try std.testing.expectEqual(@as(u64, 0), stats.chunks_processed);
     try std.testing.expectEqual(@as(u64, 0), stats.bytes_input);
 }
+
+test "ParallelCompressor compress small data" {
+    var compressor = ParallelCompressor.init(std.testing.allocator, .{
+        .thread_count = 2,
+        .chunk_size = 256,
+        .compression_level = .fastest,
+    });
+    defer compressor.deinit();
+
+    const data = "Hello, World! This is a test of the parallel compression system. " ** 100;
+    const chunks = compressor.compress(data) catch |err| {
+        if (err == error.OutOfMemory) return;
+        return err;
+    };
+    defer {
+        for (chunks) |c| std.testing.allocator.free(c.compressed_data);
+        std.testing.allocator.free(chunks);
+    }
+
+    var total_output: usize = 0;
+    for (chunks) |c| {
+        total_output += c.compressed_data.len;
+    }
+    try std.testing.expect(total_output > 0);
+}
+
+test "ParallelCompressor empty input" {
+    var compressor = ParallelCompressor.init(std.testing.allocator, .{});
+    defer compressor.deinit();
+
+    const chunks = compressor.compress("") catch return;
+    defer {
+        for (chunks) |c| std.testing.allocator.free(c.compressed_data);
+        std.testing.allocator.free(chunks);
+    }
+}

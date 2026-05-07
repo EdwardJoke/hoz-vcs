@@ -57,37 +57,46 @@ pub fn build(b: *std.Build) void {
     //
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
+    const need_libc = target.result.os.tag == .linux or target.result.os.tag == .windows;
+    const native_arch = target.result.cpu.arch == b.graph.host.result.cpu.arch;
+
     const exe = b.addExecutable(.{
         .name = "hoz",
         .root_module = b.createModule(.{
-            // b.createModule defines a new module just like b.addModule but,
-            // unlike b.addModule, it does not expose the module to consumers of
-            // this package, which is why in this case we don't have to give it a name.
             .root_source_file = b.path("src/main.zig"),
-            // Target and optimization levels must be explicitly wired in when
-            // defining an executable or library (in the root module), and you
-            // can also hardcode a specific target for an executable or library
-            // definition if desireable (e.g. firmware for embedded devices).
             .target = target,
             .optimize = optimize,
-            // List of modules available for import in source files part of the
-            // root module.
+            .link_libc = need_libc,
             .imports = &.{
-                // Here "hoz" is the name you will use in your source code to
-                // import this module (e.g. `@import("hoz")`). The name is
-                // repeated because you are allowed to rename your imports, which
-                // can be extremely useful in case of collisions (which can happen
-                // importing modules from different packages).
                 .{ .name = "hoz", .module = mod },
             },
         }),
     });
+
+    if (native_arch) {
+        exe.root_module.linkSystemLibrary("ssh2", .{});
+        exe.root_module.linkSystemLibrary("ssl", .{});
+        exe.root_module.linkSystemLibrary("crypto", .{});
+
+        exe.each_lib_rpath = true;
+    }
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
     // step). By default the install prefix is `zig-out/` but can be overridden
     // by passing `--prefix` or `-p`.
     b.installArtifact(exe);
+
+    if (native_arch and target.result.os.tag == .macos) {
+        const fix_dylib = b.addSystemCommand(&.{
+            "sh", "-c",
+            \\install_name_tool -change /opt/zerobrew/opt/libssh2/1.11.1_1/libssh2.1.dylib /opt/zerobrew/lib/libssh2.1.dylib zig-out/bin/hoz
+            \\install_name_tool -change /usr/local/opt/openssl@3/lib/libssl.3.dylib /usr/local/lib/libssl.3.dylib zig-out/bin/hoz
+            \\install_name_tool -change /usr/local/opt/openssl@3/lib/libcrypto.3.dylib /usr/local/lib/libcrypto.3.dylib zig-out/bin/hoz
+        });
+        fix_dylib.step.dependOn(&exe.step);
+        b.default_step.dependOn(&fix_dylib.step);
+    }
 
     // This creates a top level step. Top level steps have a name and can be
     // invoked by name when running `zig build` (e.g. `zig build run`).
@@ -135,12 +144,40 @@ pub fn build(b: *std.Build) void {
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
+    // Integration tests: full roundtrip (init/add/commit/log/branch/checkout)
+    const integration_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/integration_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "hoz", .module = mod },
+            },
+        }),
+    });
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+
+    // Fuzz-style edge-case tests for object parsing (blob/commit/tree/tag)
+    const fuzz_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/object_fuzz_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "hoz", .module = mod },
+            },
+        }),
+    });
+    const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
+
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_integration_tests.step);
+    test_step.dependOn(&run_fuzz_tests.step);
 
     // Cross-platform build targets
     const cross_targets = [_]struct {
@@ -170,12 +207,15 @@ pub fn build(b: *std.Build) void {
     };
 
     inline for (cross_targets) |ct| {
+        const resolved = b.resolveTargetQuery(ct.triple);
+        const cross_need_libc = resolved.result.os.tag == .linux or resolved.result.os.tag == .windows;
         const cross_target = b.addExecutable(.{
             .name = "hoz",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
-                .target = b.resolveTargetQuery(ct.triple),
+                .target = resolved,
                 .optimize = optimize,
+                .link_libc = cross_need_libc,
                 .imports = &.{
                     .{ .name = "hoz", .module = mod },
                 },
@@ -192,12 +232,15 @@ pub fn build(b: *std.Build) void {
 
     const release_step = b.step("release", "Build release binaries for all platforms");
     inline for (cross_targets) |ct| {
+        const resolved = b.resolveTargetQuery(ct.triple);
+        const rel_need_libc = resolved.result.os.tag == .linux or resolved.result.os.tag == .windows;
         const release_target = b.addExecutable(.{
             .name = b.fmt("hoz-{s}", .{ct.name}),
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
-                .target = b.resolveTargetQuery(ct.triple),
+                .target = resolved,
                 .optimize = .ReleaseSafe,
+                .link_libc = rel_need_libc,
                 .imports = &.{
                     .{ .name = "hoz", .module = mod },
                 },

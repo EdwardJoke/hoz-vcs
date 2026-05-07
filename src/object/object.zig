@@ -92,7 +92,7 @@ pub fn computeHeaderSize(t: Type, size: usize) usize {
 pub const Object = struct {
     oid: oid.OID,
     obj_type: Type,
-    data: []u8,
+    data: []const u8,
 };
 
 /// Parse object from raw data (Git loose object format)
@@ -105,7 +105,7 @@ pub fn parse(data: []const u8) !Object {
     const content = data[null_idx + 1 ..];
 
     // Parse header: "<type> <size>"
-    var iter = std.mem.split(u8, header, " ");
+    var iter = std.mem.splitScalar(u8, header, ' ');
     const type_str = iter.next() orelse return error.InvalidObjectFormat;
     const size_str = iter.next() orelse return error.InvalidObjectFormat;
 
@@ -131,10 +131,10 @@ pub fn parse(data: []const u8) !Object {
 /// Serialize object to loose object format
 pub fn serialize(obj: Object, allocator: std.mem.Allocator) ![]u8 {
     const type_str = typeToStr(obj.obj_type);
-    const size_str = try std.fmt.allocPrint(allocator, "{}", .{obj.data.len});
+    const size_str = try std.fmt.allocPrint(allocator, "{d}", .{obj.data.len});
     defer allocator.free(size_str);
 
-    const header = try std.fmt.allocPrint(allocator, "{} {}\x00", .{ type_str, size_str });
+    const header = try std.fmt.allocPrint(allocator, "{s} {s}\x00", .{ type_str, size_str });
     defer allocator.free(header);
 
     var result = try allocator.alloc(u8, header.len + obj.data.len);
@@ -189,8 +189,8 @@ test "object parse size mismatch" {
 }
 
 test "object compute header size" {
-    try std.testing.expectEqual(11, computeHeaderSize(.blob, 0)); // "blob " + "0" + "\0"
-    try std.testing.expectEqual(12, computeHeaderSize(.blob, 9)); // "blob " + "9" + "\0"
-    try std.testing.expectEqual(13, computeHeaderSize(.blob, 99)); // "blob " + "99" + "\0"
-    try std.testing.expectEqual(14, computeHeaderSize(.blob, 999)); // "blob " + "999" + "\0"
+    try std.testing.expectEqual(@as(usize, 16), computeHeaderSize(.blob, 0)); // "blob " (5) + max_digits (10) + "\0" (1)
+    try std.testing.expectEqual(@as(usize, 16), computeHeaderSize(.blob, 9));
+    try std.testing.expectEqual(@as(usize, 16), computeHeaderSize(.blob, 99));
+    try std.testing.expectEqual(@as(usize, 16), computeHeaderSize(.blob, 999));
 }

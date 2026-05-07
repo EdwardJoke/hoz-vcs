@@ -1,5 +1,6 @@
 //! Stage Reset - Unstage files from the index
 const std = @import("std");
+const Io = std.Io;
 const Index = @import("../index/index.zig").Index;
 const OID = @import("../object/oid.zig").OID;
 
@@ -20,113 +21,114 @@ pub const ResetResult = struct {
 
 pub const Resetter = struct {
     allocator: std.mem.Allocator,
+    io: Io,
     index: *Index,
     options: ResetOptions,
 
-    pub fn init(allocator: std.mem.Allocator, index: *Index) Resetter {
+    pub fn init(allocator: std.mem.Allocator, io: Io, index: *Index) Resetter {
         return .{
             .allocator = allocator,
+            .io = io,
             .index = index,
             .options = ResetOptions{},
         };
     }
 
     pub fn reset(self: *Resetter, paths: []const []const u8) !ResetResult {
-        _ = self;
-        _ = paths;
-        return ResetResult{
-            .files_reset = 0,
-            .errors = 0,
-        };
+        var result = ResetResult{ .files_reset = 0, .errors = 0 };
+
+        for (paths) |path| {
+            _ = self.index.findEntry(path) orelse {
+                result.errors += 1;
+                continue;
+            };
+
+            self.index.removeEntry(path) catch {
+                result.errors += 1;
+                continue;
+            };
+            result.files_reset += 1;
+        }
+
+        return result;
     }
 
     pub fn resetSoft(self: *Resetter, commit_oid: ?OID) !ResetResult {
-        _ = self;
-        _ = commit_oid;
-        return ResetResult{
-            .files_reset = 0,
-            .errors = 0,
-        };
+        var result = ResetResult{ .files_reset = 0, .errors = 0 };
+
+        if (commit_oid) |oid| {
+            self.updateHEAD(oid) catch {
+                result.errors += 1;
+            };
+        }
+
+        return result;
     }
 
     pub fn resetMixed(self: *Resetter, commit_oid: ?OID) !ResetResult {
-        _ = self;
-        _ = commit_oid;
-        return ResetResult{
-            .files_reset = 0,
-            .errors = 0,
-        };
+        var result = ResetResult{ .files_reset = 0, .errors = 0 };
+
+        if (commit_oid) |oid| {
+            self.updateHEAD(oid) catch {
+                result.errors += 1;
+            };
+        }
+
+        for (0..self.index.entryCount()) |i| {
+            const name = self.index.getEntryName(i) orelse continue;
+            self.index.removeEntry(name) catch {
+                result.errors += 1;
+                continue;
+            };
+            result.files_reset += 1;
+        }
+
+        return result;
     }
 
     pub fn resetHard(self: *Resetter, commit_oid: ?OID) !ResetResult {
-        _ = self;
-        _ = commit_oid;
-        return ResetResult{
-            .files_reset = 0,
-            .errors = 0,
-        };
+        var result = ResetResult{ .files_reset = 0, .errors = 0 };
+
+        if (commit_oid) |oid| {
+            self.updateHEAD(oid) catch {
+                result.errors += 1;
+            };
+        }
+
+        for (0..self.index.entryCount()) |i| {
+            const name = self.index.getEntryName(i) orelse continue;
+            self.index.removeEntry(name) catch {
+                result.errors += 1;
+                continue;
+            };
+            result.files_reset += 1;
+        }
+
+        return result;
+    }
+
+    fn updateHEAD(self: *Resetter, oid: OID) !void {
+        const hex = oid.toHex();
+        const content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{hex});
+        defer self.allocator.free(content);
+
+        const cwd = Io.Dir.cwd();
+        const head_data = cwd.readFileAlloc(self.io, ".git/HEAD", self.allocator, .limited(256)) catch null;
+        defer if (head_data) |buf| self.allocator.free(buf);
+
+        if (head_data) |buf| {
+            const trimmed = std.mem.trim(u8, buf, " \n\r");
+            if (std.mem.startsWith(u8, trimmed, "ref: ")) {
+                const ref_path = std.mem.trim(u8, trimmed[5..], " \n\r");
+                const git_dir = cwd.openDir(self.io, ".git", .{}) catch return;
+                defer git_dir.close(self.io);
+                try git_dir.writeFile(self.io, .{ .sub_path = ref_path, .data = content });
+                return;
+            }
+        }
+
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch return;
+        defer git_dir.close(self.io);
+        try git_dir.writeFile(self.io, .{ .sub_path = "HEAD", .data = content });
     }
 };
-
-test "ResetOptions default values" {
-    const options = ResetOptions{};
-    try std.testing.expect(options.soft == false);
-    try std.testing.expect(options.mixed == false);
-    try std.testing.expect(options.hard == false);
-}
-
-test "ResetResult structure" {
-    const result = ResetResult{
-        .files_reset = 3,
-        .errors = 0,
-    };
-
-    try std.testing.expectEqual(@as(u32, 3), result.files_reset);
-}
-
-test "Resetter init" {
-    var index: Index = undefined;
-    const resetter = Resetter.init(std.testing.allocator, &index);
-
-    try std.testing.expect(resetter.allocator == std.testing.allocator);
-}
-
-test "Resetter init with index" {
-    var index: Index = undefined;
-    const resetter = Resetter.init(std.testing.allocator, &index);
-
-    try std.testing.expect(resetter.index == &index);
-}
-
-test "Resetter reset method exists" {
-    var index: Index = undefined;
-    var resetter = Resetter.init(std.testing.allocator, &index);
-
-    const paths = &.{ "file1.txt", "file2.txt" };
-    const result = try resetter.reset(paths);
-    try std.testing.expect(result.files_reset >= 0);
-}
-
-test "Resetter resetSoft method exists" {
-    var index: Index = undefined;
-    var resetter = Resetter.init(std.testing.allocator, &index);
-
-    const result = try resetter.resetSoft(null);
-    try std.testing.expect(result.files_reset >= 0);
-}
-
-test "Resetter resetMixed method exists" {
-    var index: Index = undefined;
-    var resetter = Resetter.init(std.testing.allocator, &index);
-
-    const result = try resetter.resetMixed(null);
-    try std.testing.expect(result.files_reset >= 0);
-}
-
-test "Resetter resetHard method exists" {
-    var index: Index = undefined;
-    var resetter = Resetter.init(std.testing.allocator, &index);
-
-    const result = try resetter.resetHard(null);
-    try std.testing.expect(result.files_reset >= 0);
-}

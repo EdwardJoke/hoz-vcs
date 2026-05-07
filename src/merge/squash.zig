@@ -29,21 +29,35 @@ pub const SquashMerger = struct {
     }
 
     pub fn squash(self: *SquashMerger, commits: []const OID) !SquashResult {
-        _ = self;
-        _ = commits;
+        if (commits.len == 0) {
+            return SquashResult{
+                .success = false,
+                .tree_oid = OID.zero(),
+                .commit_message = "",
+                .num_squashed = 0,
+            };
+        }
+
+        const message = self.options.message orelse try self.generateSquashMessage(commits);
+
         return SquashResult{
             .success = true,
-            .tree_oid = undefined,
-            .commit_message = "",
-            .num_squashed = 0,
+            .tree_oid = commits[commits.len - 1],
+            .commit_message = message,
+            .num_squashed = @intCast(commits.len),
         };
     }
 
     pub fn generateSquashMessage(self: *SquashMerger, commits: []const OID) ![]u8 {
-        _ = self;
-        _ = commits;
         var buf = std.ArrayList(u8).init(self.allocator);
-        try buf.writer().print("Squashed commit of the following:\n\n", .{});
+        errdefer buf.deinit();
+
+        try buf.appendSlice("Squashed commit of the following:\n\n");
+        for (commits, 0..) |commit_oid, i| {
+            const hex = commit_oid.toHex();
+            try buf.writer().print("{d}. commit {s}\n", .{ i + 1, &hex });
+        }
+
         return buf.toOwnedSlice();
     }
 
@@ -57,14 +71,47 @@ pub fn squashCommits(
     commits: []const OID,
     message: []const u8,
 ) !SquashResult {
-    _ = allocator;
-    _ = commits;
-    _ = message;
+    if (commits.len == 0) {
+        return SquashResult{
+            .success = false,
+            .tree_oid = OID.zero(),
+            .commit_message = "",
+            .num_squashed = 0,
+        };
+    }
+
+    const msg = if (message.len > 0) message else "Squashed commits";
+
     return SquashResult{
         .success = true,
-        .tree_oid = undefined,
-        .commit_message = "",
-        .num_squashed = 0,
+        .tree_oid = commits[commits.len - 1],
+        .commit_message = msg,
+        .num_squashed = @intCast(commits.len),
+    };
+}
+
+pub fn squashInto(
+    allocator: std.mem.Allocator,
+    source_commits: []const OID,
+    target_oid: OID,
+    message: []const u8,
+) !SquashResult {
+    if (source_commits.len == 0) {
+        return SquashResult{
+            .success = false,
+            .tree_oid = target_oid,
+            .commit_message = "",
+            .num_squashed = 0,
+        };
+    }
+
+    const msg = if (message.len > 0) message else try std.fmt.allocPrint(allocator, "Squash into {s}", .{&target_oid.toHex()});
+
+    return SquashResult{
+        .success = true,
+        .tree_oid = target_oid,
+        .commit_message = msg,
+        .num_squashed = @intCast(source_commits.len),
     };
 }
 

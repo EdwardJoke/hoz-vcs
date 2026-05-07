@@ -1,9 +1,11 @@
 //! Branch management for Hoz
 const std = @import("std");
+const Io = std.Io;
 const RefStore = @import("store.zig").RefStore;
 const Ref = @import("ref.zig").Ref;
 const RefError = @import("ref.zig").RefError;
 const Oid = @import("../object/oid.zig").Oid;
+const Commit = @import("../object/commit.zig").Commit;
 
 pub const BranchError = error{
     UpstreamNotFound,
@@ -11,25 +13,29 @@ pub const BranchError = error{
     InvalidBranchName,
 } || RefError;
 
-/// Branch tracking information
 pub const BranchTracking = struct {
     branch: []const u8,
     upstream: ?[]const u8,
     remote: ?[]const u8,
 };
 
-/// Branch manager for Git branch operations
 pub const BranchManager = struct {
     store: *RefStore,
     allocator: std.mem.Allocator,
+    io: Io,
+    git_dir: Io.Dir,
     config: ?*const anyopaque,
 
-    /// Create a new BranchManager
-    pub fn init(store: *RefStore, allocator: std.mem.Allocator) BranchManager {
-        return .{ .store = store, .allocator = allocator, .config = null };
+    pub fn init(store: *RefStore, allocator: std.mem.Allocator, io: Io, git_dir: Io.Dir) BranchManager {
+        return .{
+            .store = store,
+            .allocator = allocator,
+            .io = io,
+            .git_dir = git_dir,
+            .config = null,
+        };
     }
 
-    /// Create a new branch pointing to the given OID
     pub fn create(self: BranchManager, name: []const u8, oid: Oid) RefError!void {
         const ref_name = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{name});
         defer self.allocator.free(ref_name);
@@ -38,7 +44,6 @@ pub const BranchManager = struct {
         try self.store.write(ref);
     }
 
-    /// Create a new branch at an existing ref
     pub fn createFromRef(self: BranchManager, name: []const u8, target: []const u8) RefError!void {
         const ref_name = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{name});
         defer self.allocator.free(ref_name);
@@ -47,7 +52,6 @@ pub const BranchManager = struct {
         try self.store.write(ref);
     }
 
-    /// Get a branch by name
     pub fn get(self: BranchManager, name: []const u8) RefError!Ref {
         const ref_name = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{name});
         defer self.allocator.free(ref_name);
@@ -55,13 +59,11 @@ pub const BranchManager = struct {
         return self.store.read(ref_name);
     }
 
-    /// Check if a branch exists
     pub fn exists(self: BranchManager, name: []const u8) bool {
         const ref_name = std.fmt.comptimePrint("refs/heads/{s}", .{name});
         return self.store.exists(ref_name);
     }
 
-    /// Delete a branch
     pub fn delete(self: BranchManager, name: []const u8) RefError!void {
         const ref_name = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{name});
         defer self.allocator.free(ref_name);
@@ -69,12 +71,10 @@ pub const BranchManager = struct {
         try self.store.delete(ref_name);
     }
 
-    /// List all branches
     pub fn list(self: BranchManager) RefError![]const Ref {
         return self.store.list("refs/heads/");
     }
 
-    /// Get current branch name from HEAD
     pub fn current(self: BranchManager) RefError!?[]const u8 {
         const head = self.store.read("HEAD") catch {
             return null;
@@ -91,30 +91,227 @@ pub const BranchManager = struct {
         return null;
     }
 
-    /// Get upstream tracking branch for a local branch
-    /// Returns the upstream ref name (e.g., "refs/remotes/origin/main")
-    pub fn getUpstream(self: BranchManager, branch_name: []const u8) BranchError!?[]const u8 {
-        _ = self;
-        _ = branch_name;
+    fn getConfigKey(self: BranchManager, branch_name: []const u8, key: []const u8) ![]const u8 {
+        return try std.fmt.allocPrint(self.allocator, "branch \"{s}\" {s}", .{ branch_name, key });
+    }
+
+    fn readConfigValue(self: BranchManager, config_key: []const u8) !?[]const u8 {
+        const config_path = ".git/config";
+        const content = self.git_dir.readFileAlloc(self.io, config_path, self.allocator, .limited(65536)) catch {
+            return null;
+        };
+        defer self.allocator.free(content);
+
+        var lines = std.mem.splitScalar(u8, content, '\n');
+        while (lines.next()) |line| {
+            const trimmed = std.mem.trim(u8, line, " \t");
+            if (trimmed.len > 0 and !std.mem.startsWith(u8, trimmed, "#")) {
+                var parts = std.mem.splitScalar(u8, trimmed, '=');
+                if (parts.next()) |key| {
+                    const value = parts.rest();
+                    const trimmed_key = std.mem.trim(u8, key, " \t");
+                    const trimmed_value = std.mem.trim(u8, value, " \t");
+                    if (std.mem.eql(u8, trimmed_key, config_key)) {
+                        return try self.allocator.dupe(u8, trimmed_value);
+                    }
+                }
+            }
+        }
         return null;
     }
 
-    /// Set upstream tracking branch for a local branch
+    fn writeConfigValue(self: BranchManager, config_key: []const u8, value: []const u8) !void {
+        const config_path = ".git/config";
+        const existing_content = self.git_dir.readFileAlloc(self.io, config_path, self.allocator, .limited(65536)) catch null;
+        defer if (existing_content) |c| self.allocator.free(c);
+
+        const content_to_write: []const u8 = if (existing_content) |c| c else "";
+
+        var lines = std.mem.splitScalar(u8, content_to_write, '\n');
+        var new_lines = std.ArrayList(u8).init(self.allocator);
+        errdefer new_lines.deinit();
+
+        var found = false;
+        var in_branch_section = false;
+
+        const config_key_branch = std.fmt.comptimePrint("branch \"", .{});
+
+        while (lines.next()) |line| {
+            try new_lines.appendSlice(line);
+            try new_lines.append('\n');
+
+            const trimmed = std.mem.trim(u8, line, " \t");
+            if (trimmed.len > 0 and !std.mem.startsWith(u8, trimmed, "#")) {
+                if (std.mem.startsWith(u8, trimmed, "[") and std.mem.endsWith(u8, trimmed, "]")) {
+                    in_branch_section = false;
+                }
+                if (std.mem.startsWith(u8, trimmed, config_key_branch)) {
+                    const bracket_idx = std.mem.indexOf(u8, trimmed, "\"");
+                    const end_bracket_idx = if (bracket_idx) |bi| std.mem.indexOf(u8, trimmed[bi + 1 ..], "\"") else null;
+                    if (bracket_idx != null and end_bracket_idx != null) {
+                        in_branch_section = true;
+                    }
+                }
+                if (in_branch_section) {
+                    var parts = std.mem.splitScalar(u8, trimmed, '=');
+                    if (parts.next()) |key| {
+                        const trimmed_key = std.mem.trim(u8, key, " \t");
+                        if (std.mem.eql(u8, trimmed_key, config_key)) {
+                            found = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!found) {
+            try new_lines.appendSlice("        ");
+            try new_lines.appendSlice(config_key);
+            try new_lines.append('=');
+            try new_lines.appendSlice(value);
+            try new_lines.append('\n');
+        }
+
+        self.git_dir.writeFile(self.io, .{ .sub_path = config_path, .data = new_lines.items }) catch {};
+    }
+
+    pub fn getUpstream(self: BranchManager, branch_name: []const u8) BranchError!?[]const u8 {
+        const key = try self.getConfigKey(branch_name, "pushRemote");
+        defer self.allocator.free(key);
+        if (try self.readConfigValue(key)) |upstream| {
+            return upstream;
+        }
+
+        const remote_key = try self.getConfigKey(branch_name, "remote");
+        defer self.allocator.free(remote_key);
+        if (try self.readConfigValue(remote_key)) |remote| {
+            const merge_key = try self.getConfigKey(branch_name, "merge");
+            defer self.allocator.free(merge_key);
+            if (try self.readConfigValue(merge_key)) |merge| {
+                const merge_ref = if (std.mem.startsWith(u8, merge, "refs/heads/"))
+                    merge["refs/heads/".len..]
+                else
+                    merge;
+                const upstream_ref = try std.fmt.allocPrint(self.allocator, "refs/remotes/{s}/{s}", .{ remote, merge_ref });
+                defer self.allocator.free(upstream_ref);
+                return upstream_ref;
+            }
+        }
+
+        return null;
+    }
+
     pub fn setUpstream(self: BranchManager, branch_name: []const u8, upstream: []const u8) BranchError!void {
-        _ = self;
-        _ = branch_name;
-        _ = upstream;
+        const remote_key = try self.getConfigKey(branch_name, "remote");
+        defer self.allocator.free(remote_key);
+
+        const merge_key = try self.getConfigKey(branch_name, "merge");
+        defer self.allocator.free(merge_key);
+
+        if (std.mem.startsWith(u8, upstream, "refs/remotes/")) {
+            const rest = upstream["refs/remotes/".len..];
+            if (std.mem.indexOf(u8, rest, "/")) |slash_idx| {
+                const remote = rest[0..slash_idx];
+                const branch = rest[slash_idx + 1 ..];
+                try self.writeConfigValue(remote_key, remote);
+                const merge_ref = try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{branch});
+                defer self.allocator.free(merge_ref);
+                try self.writeConfigValue(merge_key, merge_ref);
+                return;
+            }
+        }
+
+        return error.InvalidUpstream;
     }
 
-    /// Get the relationship between a local branch and its upstream
-    /// Returns ahead/behind count
     pub fn getUpstreamStatus(self: BranchManager, branch_name: []const u8) BranchError!struct { ahead: u32, behind: u32 } {
-        _ = self;
-        _ = branch_name;
-        return .{ .ahead = 0, .behind = 0 };
+        const upstream = try self.getUpstream(branch_name) orelse {
+            return .{ .ahead = 0, .behind = 0 };
+        };
+        defer self.allocator.free(upstream);
+
+        const local_ref = try self.store.read("refs/heads/" ++ branch_name);
+        const local_oid = local_ref.getOid();
+
+        const upstream_ref = self.store.read(upstream) catch {
+            return .{ .ahead = 0, .behind = 0 };
+        };
+        const upstream_oid = upstream_ref.getOid();
+
+        if (local_oid.eql(upstream_oid)) {
+            return .{ .ahead = 0, .behind = 0 };
+        }
+
+        var ahead: u32 = 0;
+        var behind: u32 = 0;
+
+        var visited = std.AutoHashMap(Oid, void).init(self.allocator);
+        defer visited.deinit();
+
+        var to_visit = std.ArrayList(Oid).init(self.allocator);
+        defer to_visit.deinit();
+
+        try to_visit.append(local_oid);
+        try visited.put(local_oid, {});
+
+        while (to_visit.pop()) |oid| {
+            if (oid.eql(upstream_oid)) continue;
+
+            const commit_data = self.readCommitData(oid) catch {
+                continue;
+            };
+
+            for (commit_data.parents) |parent_oid| {
+                if (parent_oid.eql(upstream_oid)) {
+                    ahead +%= 1;
+                } else if (!visited.contains(parent_oid)) {
+                    try visited.put(parent_oid, {});
+                    try to_visit.append(parent_oid);
+                }
+            }
+        }
+
+        visited = std.AutoHashMap(Oid, void).init(self.allocator);
+        to_visit = std.ArrayList(Oid).init(self.allocator);
+
+        try to_visit.append(upstream_oid);
+        try visited.put(upstream_oid, {});
+
+        while (to_visit.pop()) |oid| {
+            if (oid.eql(local_oid)) continue;
+
+            const commit_data = self.readCommitData(oid) catch {
+                continue;
+            };
+
+            for (commit_data.parents) |parent_oid| {
+                if (parent_oid.eql(local_oid)) {
+                    behind +%= 1;
+                } else if (!visited.contains(parent_oid)) {
+                    try visited.put(parent_oid, {});
+                    try to_visit.append(parent_oid);
+                }
+            }
+        }
+
+        return .{ .ahead = ahead, .behind = behind };
     }
 
-    /// Check if branch has an upstream configured
+    fn readCommitData(self: BranchManager, oid: Oid) !Commit {
+        const hex = oid.toHex();
+        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..40] });
+        defer self.allocator.free(obj_path);
+
+        const raw_data = self.git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(65536)) catch {
+            return error.ObjectNotFound;
+        };
+        defer self.allocator.free(raw_data);
+
+        return Commit.parse(self.allocator, raw_data) catch {
+            return error.InvalidCommit;
+        };
+    }
+
     pub fn hasUpstream(self: BranchManager, branch_name: []const u8) bool {
         if (self.getUpstream(branch_name)) |_| {
             return true;
@@ -124,17 +321,13 @@ pub const BranchManager = struct {
     }
 };
 
-// TESTS
 test "BranchManager init" {
-    // Placeholder - requires mock RefStore
     try std.testing.expect(true);
 }
 
 test "BranchManager branch name format" {
     const name = "main";
     const expected = "refs/heads/main";
-
-    // Test the format pattern
     const result = std.fmt.comptimePrint("refs/heads/{s}", .{name});
     try std.testing.expectEqualStrings(expected, result);
 }

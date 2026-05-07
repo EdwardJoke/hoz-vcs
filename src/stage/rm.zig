@@ -30,23 +30,65 @@ pub const StagerRemover = struct {
     }
 
     pub fn remove(self: *StagerRemover, paths: []const []const u8) !RemoveResult {
-        _ = self;
-        _ = paths;
-        return RemoveResult{
+        if (self.options.dry_run) {
+            return .{ .files_removed = @intCast(paths.len), .files_deleted = 0, .errors = 0 };
+        }
+
+        var result = RemoveResult{
             .files_removed = 0,
             .files_deleted = 0,
             .errors = 0,
         };
+
+        for (paths) |path| {
+            const idx = self.index.findEntry(path) orelse {
+                result.errors += 1;
+                continue;
+            };
+
+            _ = self.index.getEntry(idx);
+
+            self.index.removeEntry(path) catch {
+                result.errors += 1;
+                continue;
+            };
+
+            result.files_removed += 1;
+
+            if (!self.options.cached) {
+                result.files_deleted +|= 1;
+            }
+        }
+
+        return result;
     }
 
     pub fn removeCached(self: *StagerRemover, paths: []const []const u8) !RemoveResult {
-        _ = self;
-        _ = paths;
-        return RemoveResult{
+        if (self.options.dry_run) {
+            return .{ .files_removed = @intCast(paths.len), .files_deleted = 0, .errors = 0 };
+        }
+
+        var result = RemoveResult{
             .files_removed = 0,
             .files_deleted = 0,
             .errors = 0,
         };
+
+        for (paths) |path| {
+            _ = self.index.findEntry(path) orelse {
+                result.errors += 1;
+                continue;
+            };
+
+            self.index.removeEntry(path) catch {
+                result.errors += 1;
+                continue;
+            };
+
+            result.files_removed += 1;
+        }
+
+        return result;
     }
 };
 
@@ -84,7 +126,7 @@ test "StagerRemover init with index" {
 
 test "StagerRemover remove method exists" {
     var index: Index = undefined;
-    var remover = StagerRemover.init(std.testing.allocator, &index);
+    const remover = StagerRemover.init(std.testing.allocator, &index);
 
     const paths = &.{ "file1.txt", "file2.txt" };
     const result = try remover.remove(paths);
@@ -93,16 +135,16 @@ test "StagerRemover remove method exists" {
 
 test "StagerRemover removeCached method exists" {
     var index: Index = undefined;
-    var remover = StagerRemover.init(std.testing.allocator, &index);
+    const remover = StagerRemover.init(std.testing.allocator, &index);
 
-    const paths = &.{ "file1.txt" };
+    const paths = &.{"file1.txt"};
     const result = try remover.removeCached(paths);
     try std.testing.expect(result.files_removed >= 0);
 }
 
 test "StagerRemover options access" {
     var index: Index = undefined;
-    var remover = StagerRemover.init(std.testing.allocator, &index);
+    const remover = StagerRemover.init(std.testing.allocator, &index);
 
     try std.testing.expect(remover.options.cached == false);
     try std.testing.expect(remover.options.force == false);

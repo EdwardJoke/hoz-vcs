@@ -35,14 +35,14 @@ pub const BenchmarkStats = struct {
 pub const BenchmarkSuite = struct {
     allocator: std.mem.Allocator,
     config: BenchmarkConfig,
-    results: std.ArrayList(BenchmarkResult),
+    results: std.ArrayListUnmanaged(BenchmarkResult),
     stats: BenchmarkStats,
 
     pub fn init(allocator: std.mem.Allocator, config: BenchmarkConfig) BenchmarkSuite {
         return .{
             .allocator = allocator,
             .config = config,
-            .results = std.ArrayList(BenchmarkResult).init(allocator),
+            .results = .empty,
             .stats = .{},
         };
     }
@@ -51,14 +51,14 @@ pub const BenchmarkSuite = struct {
         for (self.results.items) |result| {
             self.allocator.free(result.samples);
         }
-        self.results.deinit();
+        self.results.deinit(self.allocator);
     }
 
     pub fn run(self: *BenchmarkSuite, name: []const u8, func: *const fn () void) !void {
         try self.warmup(func);
         const samples = try self.measure(func);
         const result = try self.computeStats(name, samples);
-        try self.results.append(result);
+        try self.results.append(self.allocator, result);
         self.stats.benchmarks_run += 1;
     }
 
@@ -133,8 +133,8 @@ pub const BenchmarkSuite = struct {
     pub fn printResults(self: *const BenchmarkSuite) !void {
         const stdout = std.io.getStdOut().writer();
         try stdout.print("\n=== Benchmark Results ===\n", .{});
-        try stdout.print("{:<20} {:>12} {:>12} {:>12} {:>12}\n", .{"Name", "Mean(ns)", "Median(ns)", "StdDev(ns)", "Min(ns)"});
-        try stdout.print("{:<20} {:>12} {:>12} {:>12} {:>12}\n", .{"----", "--------", "--------", "---------", "-------"});
+        try stdout.print("{:<20} {:>12} {:>12} {:>12} {:>12}\n", .{ "Name", "Mean(ns)", "Median(ns)", "StdDev(ns)", "Min(ns)" });
+        try stdout.print("{:<20} {:>12} {:>12} {:>12} {:>12}\n", .{ "----", "--------", "--------", "---------", "-------" });
 
         for (self.results.items) |result| {
             try stdout.print("{:<20} {:>12.2} {:>12.2} {:>12.2} {:>12}\n", .{

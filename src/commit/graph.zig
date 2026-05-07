@@ -30,18 +30,18 @@ pub const CommitNode = struct {
 pub const CommitGraph = struct {
     allocator: std.mem.Allocator,
     config: CommitGraphConfig,
-    nodes: std.AutoArrayHashMap(oid_mod.OID, CommitNode),
-    children_map: std.AutoArrayHashMap(oid_mod.OID, std.ArrayList(oid_mod.OID)),
-    roots: std.ArrayList(oid_mod.OID),
+    nodes: std.array_hash_map.Auto(oid_mod.OID, CommitNode),
+    children_map: std.array_hash_map.Auto(oid_mod.OID, std.ArrayListUnmanaged(oid_mod.OID)),
+    roots: std.ArrayListUnmanaged(oid_mod.OID),
     stats: CommitGraphStats,
 
     pub fn init(allocator: std.mem.Allocator, config: CommitGraphConfig) CommitGraph {
         return .{
             .allocator = allocator,
             .config = config,
-            .nodes = std.AutoArrayHashMap(oid_mod.OID, CommitNode).init(allocator),
-            .children_map = std.AutoArrayHashMap(oid_mod.OID, std.ArrayList(oid_mod.OID)).init(allocator),
-            .roots = std.ArrayList(oid_mod.OID).init(allocator),
+            .nodes = .empty,
+            .children_map = .empty,
+            .roots = .empty,
             .stats = .{},
         };
     }
@@ -51,14 +51,14 @@ pub const CommitGraph = struct {
         while (node_iter.next()) |entry| {
             self.allocator.free(entry.value_ptr.parents);
         }
-        self.nodes.deinit();
+        self.nodes.deinit(self.allocator);
 
         var child_iter = self.children_map.iterator();
         while (child_iter.next()) |entry| {
-            entry.value_ptr.deinit();
+            entry.value_ptr.deinit(self.allocator);
         }
-        self.children_map.deinit();
-        self.roots.deinit();
+        self.children_map.deinit(self.allocator);
+        self.roots.deinit(self.allocator);
     }
 
     pub fn addCommit(self: *CommitGraph, oid: oid_mod.OID, parents: []const oid_mod.OID) !void {
@@ -69,7 +69,7 @@ pub const CommitGraph = struct {
         const parents_copy = try self.allocator.dupe(oid_mod.OID, parents);
         errdefer self.allocator.free(parents_copy);
 
-        try self.nodes.put(oid, .{
+        try self.nodes.put(self.allocator, oid, .{
             .oid = oid,
             .parents = parents_copy,
             .generation = 0,
@@ -77,14 +77,14 @@ pub const CommitGraph = struct {
         });
 
         if (parents.len == 0) {
-            try self.roots.append(oid);
+            try self.roots.append(self.allocator, oid);
         } else {
             for (parents) |parent| {
-                var children = self.children_map.getOrPut(parent) catch continue;
+                var children = try self.children_map.getOrPut(self.allocator, parent);
                 if (!children.found_existing) {
-                    children.value_ptr.* = std.ArrayList(oid_mod.OID).init(self.allocator);
+                    children.value_ptr.* = .empty;
                 }
-                children.value_ptr.append(oid) catch continue;
+                try children.value_ptr.append(self.allocator, oid);
             }
         }
 
@@ -122,22 +122,22 @@ pub const CommitGraph = struct {
     }
 
     pub fn isReachable(self: *CommitGraph, from: oid_mod.OID, to: oid_mod.OID) bool {
-        var visited = std.AutoArrayHashMap(oid_mod.OID, void).init(self.allocator);
-        defer visited.deinit();
-        visited.put(from, {}) catch return false;
+        var visited = std.array_hash_map.Auto(oid_mod.OID, void).empty;
+        defer visited.deinit(self.allocator);
+        visited.put(self.allocator, from, {}) catch return false;
 
-        var queue = std.ArrayList(oid_mod.OID).init(self.allocator);
-        defer queue.deinit();
-        queue.append(from) catch return false;
+        var stack = std.ArrayListUnmanaged(oid_mod.OID).empty;
+        defer stack.deinit(self.allocator);
+        stack.append(self.allocator, from) catch return false;
 
-        while (queue.popOrNull()) |current| {
+        while (stack.popOrNull()) |current| {
             if (std.mem.eql(u8, &current.bytes, &to.bytes)) {
                 return true;
             }
-            for (self.getChildren(current)) |child| {
-                if (!visited.contains(child)) {
-                    visited.put(child, {}) catch return false;
-                    queue.append(child) catch return false;
+            for (self.getParents(current)) |parent| {
+                if (!visited.contains(parent)) {
+                    visited.put(self.allocator, parent, {}) catch return false;
+                    stack.append(self.allocator, parent) catch return false;
                 }
             }
         }
@@ -145,36 +145,36 @@ pub const CommitGraph = struct {
     }
 
     pub fn getAncestryPath(self: *CommitGraph, from: oid_mod.OID, to: oid_mod.OID) !?[]const oid_mod.OID {
-        var visited = std.AutoArrayHashMap(oid_mod.OID, void).init(self.allocator);
-        defer visited.deinit();
-        visited.put(from, {}) catch return false;
+        var visited = std.array_hash_map.Auto(oid_mod.OID, void).empty;
+        defer visited.deinit(self.allocator);
+        try visited.put(self.allocator, from, {});
 
-        var parent_map = std.AutoArrayHashMap(oid_mod.OID, oid_mod.OID).init(self.allocator);
-        defer parent_map.deinit();
+        var parent_map = std.array_hash_map.Auto(oid_mod.OID, oid_mod.OID).empty;
+        defer parent_map.deinit(self.allocator);
 
-        var queue = std.ArrayList(oid_mod.OID).init(self.allocator);
-        defer queue.deinit();
-        queue.append(from) catch return false;
+        var stack = std.ArrayListUnmanaged(oid_mod.OID).empty;
+        defer stack.deinit(self.allocator);
+        try stack.append(self.allocator, from);
 
-        while (queue.popOrNull()) |current| {
+        while (stack.popOrNull()) |current| {
             if (std.mem.eql(u8, &current.bytes, &to.bytes)) {
-                var path = std.ArrayList(oid_mod.OID).init(self.allocator);
-                errdefer path.deinit();
+                var path = std.ArrayListUnmanaged(oid_mod.OID).empty;
+                errdefer path.deinit(self.allocator);
 
                 var node = to;
                 while (true) {
-                    try path.append(node);
+                    try path.append(self.allocator, node);
                     if (std.mem.eql(u8, &node.bytes, &from.bytes)) break;
                     node = parent_map.get(node) orelse break;
                 }
                 std.mem.reverse(oid_mod.OID, path.items);
-                return path.toOwnedSlice();
+                return path.toOwnedSlice(self.allocator);
             }
-            for (self.getChildren(current)) |child| {
-                if (!visited.contains(child)) {
-                    visited.put(child, {}) catch return false;
-                    parent_map.put(child, current) catch return false;
-                    queue.append(child) catch return false;
+            for (self.getParents(current)) |parent| {
+                if (!visited.contains(parent)) {
+                    try visited.put(self.allocator, parent, {});
+                    try parent_map.put(self.allocator, parent, current);
+                    try stack.append(self.allocator, parent);
                 }
             }
         }

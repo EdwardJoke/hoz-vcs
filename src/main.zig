@@ -40,6 +40,21 @@ pub const Command = enum {
     show,
     help,
     version,
+    switch_cmd,
+    bisect,
+    config,
+    blame,
+    grep_cmd,
+    describe,
+    fsck,
+    format_patch,
+    mv,
+    archive,
+    rev_parse,
+    write_tree,
+    cherry_pick,
+    revert,
+    notes,
 };
 
 const CommandInfo = struct {
@@ -73,6 +88,21 @@ const ALL_COMMANDS = [_]CommandInfo{
     .{ .name = "show", .description = "Show various types of objects" },
     .{ .name = "cat-file", .description = "Provide content or type information" },
     .{ .name = "hash-object", .description = "Compute object ID" },
+    .{ .name = "switch", .description = "Switch branches", .aliases = &.{} },
+    .{ .name = "bisect", .description = "Binary search for bugs", .aliases = &.{} },
+    .{ .name = "config", .description = "Get and set repository options", .aliases = &.{} },
+    .{ .name = "blame", .description = "Annotate lines with commit info", .aliases = &.{} },
+    .{ .name = "grep", .description = "Search files tracked by git", .aliases = &.{} },
+    .{ .name = "describe", .description = "Describe commit using tags", .aliases = &.{} },
+    .{ .name = "fsck", .description = "Verify repository integrity", .aliases = &.{} },
+    .{ .name = "format-patch", .description = "Generate patch files from commits", .aliases = &.{} },
+    .{ .name = "mv", .description = "Move or rename files", .aliases = &.{} },
+    .{ .name = "archive", .description = "Create archive from tree object", .aliases = &.{} },
+    .{ .name = "rev-parse", .description = "Parse and resolve revision identifiers", .aliases = &.{} },
+    .{ .name = "write-tree", .description = "Create tree object from index", .aliases = &.{} },
+    .{ .name = "cherry-pick", .description = "Apply changes from existing commits", .aliases = &.{} },
+    .{ .name = "revert", .description = "Revert some existing commits", .aliases = &.{} },
+    .{ .name = "notes", .description = "Add or inspect object notes", .aliases = &.{} },
 };
 
 fn findCommand(name: []const u8) ?Command {
@@ -107,6 +137,21 @@ fn findCommand(name: []const u8) ?Command {
     if (std.mem.eql(u8, name, "cat_file")) return .cat_file;
     if (std.mem.eql(u8, name, "hash-object")) return .hash_object;
     if (std.mem.eql(u8, name, "hash_object")) return .hash_object;
+    if (std.mem.eql(u8, name, "switch")) return .switch_cmd;
+    if (std.mem.eql(u8, name, "bisect")) return .bisect;
+    if (std.mem.eql(u8, name, "config")) return .config;
+    if (std.mem.eql(u8, name, "blame")) return .blame;
+    if (std.mem.eql(u8, name, "grep")) return .grep_cmd;
+    if (std.mem.eql(u8, name, "describe")) return .describe;
+    if (std.mem.eql(u8, name, "fsck")) return .fsck;
+    if (std.mem.eql(u8, name, "format-patch") or std.mem.eql(u8, name, "format_patch")) return .format_patch;
+    if (std.mem.eql(u8, name, "mv")) return .mv;
+    if (std.mem.eql(u8, name, "archive")) return .archive;
+    if (std.mem.eql(u8, name, "rev-parse") or std.mem.eql(u8, name, "rev_parse")) return .rev_parse;
+    if (std.mem.eql(u8, name, "write-tree") or std.mem.eql(u8, name, "write_tree")) return .write_tree;
+    if (std.mem.eql(u8, name, "cherry-pick")) return .cherry_pick;
+    if (std.mem.eql(u8, name, "revert")) return .revert;
+    if (std.mem.eql(u8, name, "notes")) return .notes;
     return null;
 }
 
@@ -196,7 +241,7 @@ fn printHelp(writer: *Io.Writer, style: OutputStyle) !void {
 
 fn printVersion(writer: *Io.Writer, style: OutputStyle) !void {
     var out = Output.init(writer, style, std.heap.page_allocator);
-    try out.result(.{ .success = true, .code = 0, .message = "hoz version 0.1.0" });
+    try out.result(.{ .success = true, .code = 0, .message = "hoz version 0.3.1" });
 }
 
 fn printUnknown(writer: *Io.Writer, cmd: []const u8, style: OutputStyle) !void {

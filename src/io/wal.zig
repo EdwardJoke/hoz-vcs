@@ -215,7 +215,18 @@ pub const RefWAL = struct {
 
     fn applyEntry(self: *RefWAL, entry: WALEntry) !void {
         _ = self;
-        _ = entry;
+        switch (entry.operation) {
+            .create => {
+                if (entry.new_oid == null and entry.new_target == null) return error.MissingTarget;
+            },
+            .update => {
+                if (entry.old_oid == null and entry.old_target == null) return error.MissingSource;
+                if (entry.new_oid == null and entry.new_target == null) return error.MissingTarget;
+            },
+            .delete => {},
+            .lock => {},
+            .unlock => {},
+        }
     }
 
     pub fn getStats(self: *const RefWAL) WALStats {

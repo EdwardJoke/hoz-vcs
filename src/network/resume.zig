@@ -68,16 +68,16 @@ pub const ResumableStats = struct {
 pub const TransferIndex = struct {
     allocator: std.mem.Allocator,
     config: ResumableConfig,
-    entries: std.AutoArrayHashMap(oid_mod.OID, TransferIndexEntry),
-    transfers: std.AutoArrayHashMap([]const u8, ResumableTransfer),
+    entries: std.array_hash_map.Auto(oid_mod.OID, TransferIndexEntry),
+    transfers: std.array_hash_map.Auto([]const u8, ResumableTransfer),
     stats: ResumableStats,
 
     pub fn init(allocator: std.mem.Allocator, config: ResumableConfig) TransferIndex {
         return .{
             .allocator = allocator,
             .config = config,
-            .entries = std.AutoArrayHashMap(oid_mod.OID, TransferIndexEntry).init(allocator),
-            .transfers = std.AutoArrayHashMap([]const u8, ResumableTransfer).init(allocator),
+            .entries = .empty,
+            .transfers = .empty,
             .stats = .{},
         };
     }
@@ -85,13 +85,13 @@ pub const TransferIndex = struct {
     pub fn deinit(self: *TransferIndex) void {
         var entry_iter = self.entries.iterator();
         while (entry_iter.next()) |_| {}
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
 
         var transfer_iter = self.transfers.iterator();
         while (transfer_iter.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
         }
-        self.transfers.deinit();
+        self.transfers.deinit(self.allocator);
     }
 
     pub fn startTransfer(self: *TransferIndex, id: []const u8, remote_url: []const u8, ref_name: []const u8, total_objects: u64, total_bytes: u64) !*ResumableTransfer {
@@ -104,7 +104,7 @@ pub const TransferIndex = struct {
         const ref_copy = try self.allocator.dupe(u8, ref_name);
         errdefer self.allocator.free(ref_copy);
 
-        try self.transfers.put(id_copy, .{
+        try self.transfers.put(self.allocator, id_copy, .{
             .id = id_copy,
             .remote_url = remote_copy,
             .ref_name = ref_copy,
@@ -160,21 +160,21 @@ pub const TransferIndex = struct {
     }
 
     pub fn getPendingTransfers(self: *TransferIndex) ![]const []const u8 {
-        var result = std.ArrayList([]const u8).init(self.allocator);
-        errdefer result.deinit();
+        var result = std.ArrayListUnmanaged([]const u8).empty;
+        defer result.deinit(self.allocator);
 
         var iter = self.transfers.iterator();
         while (iter.next()) |entry| {
             if (entry.value_ptr.state == .failed or entry.value_ptr.state == .in_progress) {
-                try result.append(entry.key_ptr.*);
+                try result.append(self.allocator, entry.key_ptr.*);
             }
         }
 
-        return result.toOwnedSlice();
+        return result.toOwnedSlice(self.allocator);
     }
 
     pub fn addIndexEntry(self: *TransferIndex, oid: oid_mod.OID, offset: u64, size: u64) !void {
-        try self.entries.put(oid, .{
+        try self.entries.put(self.allocator, oid, .{
             .offset = offset,
             .oid = oid,
             .size = size,

@@ -114,9 +114,48 @@ pub const BinaryDetection = struct {
 
     pub fn suggestPrefix(self: *BinaryDetection, old_path: []const u8, new_path: []const u8) []const u8 {
         _ = self;
-        _ = old_path;
-        _ = new_path;
-        return "Binary";
+        const old_prefix = getBinaryPrefix(old_path);
+        const new_prefix = getBinaryPrefix(new_path);
+        if (std.mem.eql(u8, old_prefix, "Binary") or std.mem.eql(u8, new_prefix, "Binary"))
+            return "Binary";
+        return "text";
+    }
+
+    pub fn detectBinary(self: *BinaryDetection, content: []const u8) BinaryResult {
+        return self.detect(content);
+    }
+
+    pub fn formatBinary(self: *BinaryDetection, path: []const u8, content: []const u8) ![]const u8 {
+        const result = self.detect(content);
+        if (result.is_binary) {
+            return try std.fmt.allocPrint(self.allocator, "Binary files {s} and {s} differ\n", .{ path, path });
+        }
+        return try std.fmt.allocPrint(self.allocator, "{s} is a text file\n", .{path});
+    }
+
+    pub fn renderBinary(self: *BinaryDetection, old_path: []const u8, new_path: []const u8, old_content: []const u8, new_content: []const u8) ![]const u8 {
+        const old_result = self.detect(old_content);
+        const new_result = self.detect(new_content);
+
+        if (old_result.is_binary and new_result.is_binary) {
+            return try std.fmt.allocPrint(self.allocator, "Binary files {s} and {s} differ\n", .{ old_path, new_path });
+        } else if (old_result.is_binary) {
+            return try std.fmt.allocPrint(self.allocator, "Binary file {s} changed to text file {s}\n", .{ old_path, new_path });
+        } else if (new_result.is_binary) {
+            return try std.fmt.allocPrint(self.allocator, "Text file {s} changed to binary file {s}\n", .{ old_path, new_path });
+        }
+
+        return try std.fmt.allocPrint(self.allocator, "Both files are text files\n", .{});
+    }
+
+    pub fn textOrBinary(self: *BinaryDetection, content: []const u8) enum { text, binary } {
+        const result = self.detect(content);
+        return if (result.is_binary) .binary else .text;
+    }
+
+    pub fn isBinary(self: *BinaryDetection, content: []const u8) bool {
+        const result = self.detect(content);
+        return result.is_binary;
     }
 };
 
@@ -126,7 +165,7 @@ pub const KNOWN_BINARY_EXTENSIONS = [_][]const u8{
     ".zip",   ".tar", ".gz",   ".bz2",   ".xz",   ".rar", ".7z",
     ".mp3",   ".mp4", ".avi",  ".mov",   ".wmv",  ".flv", ".wav",
     ".exe",   ".dll", ".so",   ".dylib", ".o",    ".a",   ".lib",
-    ".class", ".pyc", ".o",    ".obj",   ".bin",
+    ".class", ".pyc", ".obj",  ".bin",
 };
 
 pub fn isKnownBinaryExtension(ext: []const u8) bool {
@@ -162,7 +201,7 @@ test "BinaryDetection init" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var detector = BinaryDetection.init(gpa.allocator());
+    const detector = BinaryDetection.init(gpa.allocator());
     try std.testing.expect(detector.allocator == gpa.allocator());
 }
 
@@ -170,7 +209,7 @@ test "BinaryDetection text file" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var detector = BinaryDetection.init(gpa.allocator());
+    const detector = BinaryDetection.init(gpa.allocator());
     const content = "Hello, World!\nThis is a text file.\n";
 
     const result = detector.detect(content);
@@ -182,7 +221,7 @@ test "BinaryDetection binary file" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var detector = BinaryDetection.init(gpa.allocator());
+    const detector = BinaryDetection.init(gpa.allocator());
     const content = [_]u8{ 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00 };
 
     const result = detector.detect(&content);
@@ -194,7 +233,7 @@ test "BinaryDetection empty content" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var detector = BinaryDetection.init(gpa.allocator());
+    const detector = BinaryDetection.init(gpa.allocator());
     const content: []const u8 = &.{};
 
     const result = detector.detect(content);
@@ -206,7 +245,7 @@ test "BinaryDetection high null byte ratio" {
     const gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
-    var detector = BinaryDetection.init(gpa.allocator());
+    const detector = BinaryDetection.init(gpa.allocator());
     var content: [100]u8 = .{0} ** 100;
     content[0] = 'h';
     content[1] = 'i';

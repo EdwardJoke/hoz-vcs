@@ -11,7 +11,3 @@ pub usingnamespace @import("conflict.zig");
 pub usingnamespace @import("abort.zig");
 pub usingnamespace @import("picker.zig");
 pub usingnamespace @import("continue.zig");
-
-test "rebase module loads" {
-    try std.testing.expect(true);
-}

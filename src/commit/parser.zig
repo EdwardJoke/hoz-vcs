@@ -12,25 +12,26 @@ pub const CommitParser = struct {
     }
 
     pub fn parse(self: *CommitParser, data: []const u8) !Commit {
-        var tree_oid: OID = undefined;
+        var tree_oid: OID = std.mem.zeroes(OID);
         var parents = std.ArrayList(OID).init(self.allocator);
         defer parents.deinit();
-        var author: Identity = undefined;
-        var committer: Identity = undefined;
+        var author: Identity = std.mem.zeroes(Identity);
+        var committer: Identity = std.mem.zeroes(Identity);
         var encoding: []const u8 = "UTF-8";
         var message_start: usize = 0;
 
         var lines = std.mem.split(u8, data, "\n");
         var state: enum { header, message } = .header;
+        var bytes_consumed: usize = 0;
 
         while (lines.next()) |line| {
             if (line.len == 0) {
                 state = .message;
-                message_start = lines.index;
-                continue;
+                message_start = bytes_consumed + 1;
+                break;
             }
 
-            if (state == .message) break;
+            bytes_consumed += line.len + 1;
 
             if (std.mem.startsWith(u8, line, "tree ")) {
                 const hex = line[5..];
@@ -48,7 +49,7 @@ pub const CommitParser = struct {
             }
         }
 
-        const message = if (message_start > 0) data[message_start - 1 ..] else "";
+        const message = if (message_start > 0) data[message_start..] else "";
 
         return Commit{
             .tree = tree_oid,
@@ -61,7 +62,46 @@ pub const CommitParser = struct {
     }
 
     pub fn validateFormat(data: []const u8) !bool {
-        _ = data;
+        if (data.len == 0) return false;
+
+        var has_tree = false;
+        var has_author = false;
+        var has_committer = false;
+        var found_separator = false;
+
+        var lines = std.mem.split(u8, data, "\n");
+        while (lines.next()) |line| {
+            if (line.len == 0) {
+                found_separator = true;
+                break;
+            }
+            if (std.mem.startsWith(u8, line, "tree ")) {
+                const hex = line[5..];
+                if (hex.len < 40) return false;
+                for (hex[0..40]) |c| {
+                    if (!std.ascii.isHex(c)) return false;
+                }
+                has_tree = true;
+            } else if (std.mem.startsWith(u8, line, "parent ")) {
+                const hex = line[7..];
+                if (hex.len < 40) return false;
+                for (hex[0..40]) |c| {
+                    if (!std.ascii.isHex(c)) return false;
+                }
+            } else if (std.mem.startsWith(u8, line, "author ")) {
+                if (line.len <= 7) return false;
+                has_author = true;
+            } else if (std.mem.startsWith(u8, line, "committer ")) {
+                if (line.len <= 10) return false;
+                has_committer = true;
+            }
+        }
+
+        if (!has_tree) return false;
+        if (!has_author) return false;
+        if (!has_committer) return false;
+        if (!found_separator) return false;
+
         return true;
     }
 };
@@ -77,7 +117,7 @@ test "CommitParser parse tree line" {
 }
 
 test "CommitParser validate format" {
-    const data = "tree abc123\n";
+    const data = "tree " ++ "0123456789abcdef0123456789abcdef01234567\nauthor Test <t@e> 0 +0000\ncommitter Test <t@e> 0 +0000\n\n";
     const valid = try CommitParser.validateFormat(data);
     try std.testing.expect(valid);
 }

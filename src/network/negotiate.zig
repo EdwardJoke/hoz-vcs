@@ -73,6 +73,23 @@ pub const CapabilityNegotiator = struct {
         return buf.toOwnedSlice();
     }
 
+    pub fn buildWantLine(self: *CapabilityNegotiator, oid: []const u8, caps: []const Capability) ![]const u8 {
+        const cap_str = try self.formatCapabilities(caps);
+        defer self.allocator.free(cap_str);
+
+        var buf = std.ArrayList(u8).initCapacity(self.allocator, 4 + 4 + oid.len + 1 + cap_str.len + 1);
+        errdefer buf.deinit(self.allocator);
+
+        var line_buf: [1024]u8 = undefined;
+        const payload = if (cap_str.len > 0)
+            try std.fmt.bufPrint(&line_buf, "want {s} {s}\n", .{ oid, cap_str })
+        else
+            try std.fmt.bufPrint(&line_buf, "want {s}\n", .{oid});
+        const len = payload.len + 4;
+        try buf.writer().print("{d:0>4}{s}", .{ len, payload });
+        return buf.toOwnedSlice();
+    }
+
     fn parseAndValidateCapability(self: *CapabilityNegotiator, cap_str: []const u8) ?Capability {
         const dash_idx = std.mem.indexOfScalar(u8, cap_str, '-');
         const cap_name = if (dash_idx) |idx| cap_str[0..idx] else cap_str;

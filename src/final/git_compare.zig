@@ -32,14 +32,14 @@ pub const GitComparisonStats = struct {
 pub const GitComparison = struct {
     allocator: std.mem.Allocator,
     config: GitConfig,
-    results: std.ArrayList(GitBenchmarkResult),
+    results: std.ArrayListUnmanaged(GitBenchmarkResult),
     stats: GitComparisonStats,
 
     pub fn init(allocator: std.mem.Allocator, config: GitConfig) GitComparison {
         return .{
             .allocator = allocator,
             .config = config,
-            .results = std.ArrayList(GitBenchmarkResult).init(allocator),
+            .results = .empty,
             .stats = .{},
         };
     }
@@ -48,7 +48,7 @@ pub const GitComparison = struct {
         for (self.results.items) |result| {
             self.allocator.free(result.operation);
         }
-        self.results.deinit();
+        self.results.deinit(self.allocator);
     }
 
     pub fn compare(self: *GitComparison, operation: []const u8, hoz_func: *const fn () void, git_args: []const []const u8) !GitBenchmarkResult {
@@ -67,7 +67,7 @@ pub const GitComparison = struct {
             .sample_count = 5,
         };
 
-        try self.results.append(result);
+        try self.results.append(self.allocator, result);
 
         self.stats.operations_compared += 1;
         self.stats.total_hoz_time_ns += hoz_time;
@@ -101,45 +101,54 @@ pub const GitComparison = struct {
         var total: u64 = 0;
         var i: u32 = 0;
         while (i < samples) : (i += 1) {
-            const start = std.time.nanoTimestamp();
-            const child = child_process.Child.init(args, self.allocator);
-            _ = child;
-            const end = std.time.nanoTimestamp();
-            total += end - start;
+            var timer = try std.time.Timer.start();
+            var child = child_process.Child.init(args, self.allocator);
+            child.spawn() catch continue;
+            child.wait() catch continue;
+            const elapsed = timer.read();
+            total += elapsed;
         }
-        return total / @as(u64, samples);
+        return if (samples > 0) total / @as(u64, samples) else 0;
     }
 
-    pub fn runInitComparison(self: *GitComparison) !void {
-        _ = self;
+    pub fn runInitComparison(self: *GitComparison, hoz_func: *const fn () void) !void {
+        const git_args = [_][]const u8{ self.config.git_path, "init", "--bare", "/tmp/hoz_bench_init" };
+        try self.compare("init", hoz_func, &git_args);
     }
 
-    pub fn runAddComparison(self: *GitComparison) !void {
-        _ = self;
+    pub fn runAddComparison(self: *GitComparison, hoz_func: *const fn () void) !void {
+        const git_args = [_][]const u8{ self.config.git_path, "add", "." };
+        try self.compare("add", hoz_func, &git_args);
     }
 
-    pub fn runCommitComparison(self: *GitComparison) !void {
-        _ = self;
+    pub fn runCommitComparison(self: *GitComparison, hoz_func: *const fn () void) !void {
+        const git_args = [_][]const u8{ self.config.git_path, "commit", "-m", "benchmark" };
+        try self.compare("commit", hoz_func, &git_args);
     }
 
-    pub fn runLogComparison(self: *GitComparison) !void {
-        _ = self;
+    pub fn runLogComparison(self: *GitComparison, hoz_func: *const fn () void) !void {
+        const git_args = [_][]const u8{ self.config.git_path, "log", "--oneline", "-10" };
+        try self.compare("log", hoz_func, &git_args);
     }
 
-    pub fn runDiffComparison(self: *GitComparison) !void {
-        _ = self;
+    pub fn runDiffComparison(self: *GitComparison, hoz_func: *const fn () void) !void {
+        const git_args = [_][]const u8{ self.config.git_path, "diff", "--stat" };
+        try self.compare("diff", hoz_func, &git_args);
     }
 
-    pub fn runStatusComparison(self: *GitComparison) !void {
-        _ = self;
+    pub fn runStatusComparison(self: *GitComparison, hoz_func: *const fn () void) !void {
+        const git_args = [_][]const u8{ self.config.git_path, "status", "--short" };
+        try self.compare("status", hoz_func, &git_args);
     }
 
-    pub fn runBranchComparison(self: *GitComparison) !void {
-        _ = self;
+    pub fn runBranchComparison(self: *GitComparison, hoz_func: *const fn () void) !void {
+        const git_args = [_][]const u8{ self.config.git_path, "branch", "-a" };
+        try self.compare("branch", hoz_func, &git_args);
     }
 
-    pub fn runCheckoutComparison(self: *GitComparison) !void {
-        _ = self;
+    pub fn runCheckoutComparison(self: *GitComparison, hoz_func: *const fn () void) !void {
+        const git_args = [_][]const u8{ self.config.git_path, "checkout", "-b", "_bench_test" };
+        try self.compare("checkout", hoz_func, &git_args);
     }
 
     pub fn getResults(self: *GitComparison) []const GitBenchmarkResult {
@@ -151,10 +160,10 @@ pub const GitComparison = struct {
     }
 
     pub fn printComparison(self: *GitComparison) !void {
-        const stdout = std.io.getStdOut().writer();
+        const stdout = std.Io.File.stdout().writer(&.{});
         try stdout.print("\n=== Hoz vs GNU Git Comparison ===\n", .{});
-        try stdout.print("{:<15} {:>12} {:>12} {:>10}\n", .{"Operation", "Hoz(ns)", "Git(ns)", "Speedup"});
-        try stdout.print("{:<15} {:>12} {:>12} {:>10}\n", .{"---------", "-------", "-------", "-------"});
+        try stdout.print("{:<15} {:>12} {:>12} {:>10}\n", .{ "Operation", "Hoz(ns)", "Git(ns)", "Speedup" });
+        try stdout.print("{:<15} {:>12} {:>12} {:>10}\n", .{ "---------", "-------", "-------", "-------" });
 
         for (self.results.items) |result| {
             const winner = if (result.hoz_faster) "Hoz" else "Git";
@@ -176,7 +185,7 @@ pub const GitComparison = struct {
 
         if (self.stats.total_git_time_ns > 0) {
             const overall = @as(f64, @floatFromInt(self.stats.total_git_time_ns)) / @as(f64, @floatFromInt(self.stats.total_hoz_time_ns));
-            try stdout.print("Overall speedup: {d:.2f}x\n", .{overall});
+            try stdout.print("Overall speedup: {:.2f}x\n", .{overall});
         }
     }
 };

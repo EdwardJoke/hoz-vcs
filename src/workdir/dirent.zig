@@ -42,7 +42,7 @@ pub fn listDirectory(
     defer subdir.close(io.*);
 
     var entries = try std.ArrayList(DirEntry).initCapacity(allocator, 16);
-    errdefer entries.deinit();
+    errdefer entries.deinit(allocator);
 
     var iterator = subdir.iterate();
     while (try iterator.next(io.*)) |entry| {
