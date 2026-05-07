@@ -13,7 +13,7 @@ const errors_mod = @import("errors.zig");
 const complete = @import("complete.zig");
 const git_compare = @import("git_compare.zig");
 
-pub const VERSION = "0.3.0";
+pub const VERSION = "0.3.1";
 
 pub const Benchmark = benchmark_mod.Benchmark;
 pub const BenchResult = benchmark_mod.BenchResult;
