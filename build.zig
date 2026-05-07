@@ -77,6 +77,8 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("ssh2", .{});
         exe.root_module.linkSystemLibrary("ssl", .{});
         exe.root_module.linkSystemLibrary("crypto", .{});
+
+        exe.each_lib_rpath = true;
     }
 
     // This declares intent for the executable to be installed into the
@@ -84,6 +86,17 @@ pub fn build(b: *std.Build) void {
     // step). By default the install prefix is `zig-out/` but can be overridden
     // by passing `--prefix` or `-p`.
     b.installArtifact(exe);
+
+    if (native_arch and target.result.os.tag == .macos) {
+        const fix_dylib = b.addSystemCommand(&.{
+            "sh", "-c",
+            \\install_name_tool -change /opt/zerobrew/opt/libssh2/1.11.1_1/libssh2.1.dylib /opt/zerobrew/lib/libssh2.1.dylib zig-out/bin/hoz
+            \\install_name_tool -change /usr/local/opt/openssl@3/lib/libssl.3.dylib /usr/local/lib/libssl.3.dylib zig-out/bin/hoz
+            \\install_name_tool -change /usr/local/opt/openssl@3/lib/libcrypto.3.dylib /usr/local/lib/libcrypto.3.dylib zig-out/bin/hoz
+        });
+        fix_dylib.step.dependOn(&exe.step);
+        b.default_step.dependOn(&fix_dylib.step);
+    }
 
     // This creates a top level step. Top level steps have a name and can be
     // invoked by name when running `zig build` (e.g. `zig build run`).
