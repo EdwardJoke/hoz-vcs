@@ -70,8 +70,8 @@ const ALL_COMMANDS = [_]CommandInfo{
     .{ .name = "status", .description = "Show working tree status", .aliases = &.{"st"} },
     .{ .name = "log", .description = "Show commit logs" },
     .{ .name = "diff", .description = "Show changes between commits" },
-    .{ .name = "branch", .description = "List, create, or delete branches", .aliases = &.{"br"} },
-    .{ .name = "checkout", .description = "Switch branches or restore files", .aliases = &.{"co"} },
+    .{ .name = "branch", .description = "List, create, delete branches; switch (out/checkout/switch)", .aliases = &.{"br"} },
+    .{ .name = "checkout", .description = "[deprecated] Use 'branch out' instead", .aliases = &.{"co"} },
     .{ .name = "clone", .description = "Clone a repository" },
     .{ .name = "fetch", .description = "Download objects and refs from remote" },
     .{ .name = "push", .description = "Update remote refs" },
@@ -88,7 +88,7 @@ const ALL_COMMANDS = [_]CommandInfo{
     .{ .name = "show", .description = "Show various types of objects" },
     .{ .name = "cat-file", .description = "Provide content or type information" },
     .{ .name = "hash-object", .description = "Compute object ID" },
-    .{ .name = "switch", .description = "Switch branches", .aliases = &.{} },
+    .{ .name = "switch", .description = "[deprecated] Use 'branch switch' instead", .aliases = &.{} },
     .{ .name = "bisect", .description = "Binary search for bugs", .aliases = &.{} },
     .{ .name = "config", .description = "Get and set repository options", .aliases = &.{} },
     .{ .name = "blame", .description = "Annotate lines with commit info", .aliases = &.{} },
@@ -241,7 +241,7 @@ fn printHelp(writer: *Io.Writer, style: OutputStyle) !void {
 
 fn printVersion(writer: *Io.Writer, style: OutputStyle) !void {
     var out = Output.init(writer, style, std.heap.page_allocator);
-    try out.result(.{ .success = true, .code = 0, .message = "hoz version 0.3.3" });
+    try out.result(.{ .success = true, .code = 0, .message = "hoz version 0.3.4" });
 }
 
 fn printUnknown(writer: *Io.Writer, cmd: []const u8, style: OutputStyle) !void {
