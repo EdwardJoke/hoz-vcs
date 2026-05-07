@@ -1,4 +1,4 @@
-//! Integration tests - seed repo roundtrip: init/add/commit/log/branch/checkout
+//! Integration tests - seed repo roundtrip: init/add/commit/log/branch/branch-out
 const std = @import("std");
 const Io = std.Io;
 
@@ -7,7 +7,6 @@ const Add = @import("./cli/add.zig").Add;
 const Commit = @import("./cli/commit.zig").Commit;
 const Log = @import("./cli/log.zig").Log;
 const Branch = @import("./cli/branch.zig").Branch;
-const Checkout = @import("./cli/checkout.zig").Checkout;
 
 const test_allocator = std.testing.allocator;
 
@@ -209,8 +208,10 @@ test "integration: checkout branch switch" {
     defer co_out.deinit(test_allocator);
     var co_writer = Io.Writer.fixed(co_out.items);
 
-    var checkout_cmd = Checkout.init(test_allocator, io, &co_writer, .{});
-    try checkout_cmd.run(&.{"checkout-target"});
+    var checkout_cmd = Branch.init(test_allocator, io, &co_writer, .{});
+    checkout_cmd.action = .checkout;
+    checkout_cmd.target = "checkout-target";
+    try checkout_cmd.run();
 
     const head_content = tmp.dir.readFileAlloc(io, ".git/HEAD", test_allocator, .limited(256)) catch {
         try std.testing.expect(false);
