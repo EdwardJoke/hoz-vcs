@@ -8,7 +8,7 @@
 ![Runs on Linux](https://shieldcn.dev/badge/Runs%20on-Linux-FCC624.svg?logo=linux&logoColor=000) ![Runs on MacOS](https://shieldcn.dev/badge/Runs%20on-MacOS-000000.svg?mode=light&logo=apple&logoColor=fff) ![Cross Platform](https://shieldcn.dev/badge/cross-platform-brightgreen.svg?variant=outline&logo=ri%3AGoDeviceDesktop)
 
 *A full-featured Git implementation in Zig 0.16.0,* <br/>
-*built for type safety and performance.*
+*built for type safety and performance.* <br/>
 Hoz is the next generation of Git-compatible version control with a clean, modern codebase.
 
 </div>
