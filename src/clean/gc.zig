@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 const OID = @import("../object/oid.zig").OID;
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
 
 pub const GcOptions = struct {
     aggressive: bool = false,
@@ -447,20 +448,7 @@ pub const GarbageCollector = struct {
     }
 
     fn readObject(self: *GarbageCollector, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = self.git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024)) catch |err| {
-            return err;
-        };
-        defer self.allocator.free(compressed);
-
-        const decompressed = compress_mod.Zlib.decompress(compressed, self.allocator) catch |err| {
-            return err;
-        };
-
-        return decompressed;
+        return object_io.readObject(&self.git_dir, self.io, self.allocator, oid);
     }
 
     fn zlibCompress(self: *GarbageCollector, data: []const u8) ![]u8 {

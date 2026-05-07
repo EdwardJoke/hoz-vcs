@@ -4,6 +4,7 @@ const Io = std.Io;
 const OID = @import("../object/oid.zig").OID;
 const object_mod = @import("../object/object.zig");
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
 const SoftReset = @import("soft.zig").SoftReset;
 
 pub const RestoreSource = struct {
@@ -97,14 +98,7 @@ pub const RestoreSource = struct {
     }
 
     fn readObject(self: *RestoreSource, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const object_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(object_path);
-
-        const compressed = try self.git_dir.readFileAlloc(self.io, object_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
+        return object_io.readObject(&self.git_dir, self.io, self.allocator, oid);
     }
 
     fn resolveCommit(_: *RestoreSource, spec: []const u8) ![]const u8 {

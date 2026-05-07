@@ -5,6 +5,7 @@ const OutputStyle = @import("output.zig").OutputStyle;
 const OID = @import("../object/oid.zig").OID;
 const RefStore = @import("../ref/store.zig").RefStore;
 const Ref = @import("../ref/ref.zig").Ref;
+const head_mod = @import("../commit/head.zig");
 
 pub const NameRevOptions = struct {
     all: bool = false,
@@ -122,19 +123,7 @@ pub const NameRev = struct {
     }
 
     fn resolveHead(git_dir: *const Io.Dir, allocator: std.mem.Allocator, io: Io) ?OID {
-        const content = git_dir.readFileAlloc(io, "HEAD", allocator, .limited(256)) catch return null;
-        defer allocator.free(content);
-        const trimmed = std.mem.trim(u8, content, " \t\r\n");
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const target = trimmed[5..];
-            const ref_store = RefStore.init(git_dir.*, allocator, io);
-            const resolved = ref_store.resolve(target) catch return null;
-            if (resolved.isDirect()) {
-                return resolved.target.direct;
-            }
-            return null;
-        }
-        return OID.fromHex(trimmed) catch null;
+        return head_mod.resolveHeadOid(git_dir, io, allocator);
     }
 
     fn parseArgs(self: *NameRev, args: []const []const u8) void {

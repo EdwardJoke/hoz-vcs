@@ -1,19 +1,24 @@
 # Project Purpose
 
 ## What
-Fix all test failures (35 failing + 5 crashing + 11 leaks) and replace dummy/placeholder test code with production-ready tests across the Hoz codebase.
+Refactor duplicate code across the Hoz codebase by extracting repeated patterns into shared reusable components, reducing maintenance burden and eliminating copy-paste drift risk.
 
 ## Why
-v0.3.1 introduced standardized CLI output formatting but left the test suite in a broken state:
-- **77 pass, 35 fail, 5 crash, 11 leaks** out of 117 total tests
-- Root causes: Identity.parse() whitespace handling bug, OID test data using invalid hex lengths, Object.parse() error type mismatches, Tree.parse() hardcoded allocator causing memory leaks, and stub/dummy test code that doesn't validate real behavior
-- Without passing tests, v0.3.1's output formatting changes have no safety net against regressions
+v0.3.2 fixed all test failures but left significant structural debt: **7 categories of duplicated code** totaling ~1140+ redundant lines spread across 50+ files. The most critical issues:
+- **`readObject()` copied 25+ times** — same OID→path→read→decompress logic in CLI commands, reset, stash, blame, describe, checkout, clean modules. A bug fix here requires touching 25+ files.
+- **`resolveHead()` copied 8+ times** — `commit/head.zig` already has a proper implementation but nobody imports it; each copy has slightly different error handling.
+- **`makeMockCommit()` duplicated** in both merge test files (fast_forward.zig + analyze.zig) with identical ~15-line function bodies.
+- **GitCompatTester's 16 `run*()` methods** in compat.zig are nearly identical boilerplate (~400+ lines) differing only in which git/hoz commands they run.
+- **Empty tree pattern repeated 4x** inside commit.zig's single `writeTree()` function.
+- **`writeLooseObject()` duplicated** between commit.zig and filter_repo.zig.
+- Without shared components, every bug fix or behavior change risks inconsistent fixes across copies.
 
 ## Success Criteria
-- [ ] All 117+ tests pass with zero failures, zero crashes, zero memory leaks
-- [ ] Identity.parse() correctly handles whitespace in author/committer/tagger strings (root cause of commit/tag parse failures)
-- [ ] OID tests use valid hex strings matching Zig 0.16 API contract
-- [ ] Object.parse() error types match test expectations (or tests updated to match actual behavior)
-- [ ] Tree.parse() accepts allocator parameter instead of hardcoding std.testing.allocator
-- [ ] All dummyGetCommit stubs replaced with proper mock commit objects
-- [ ] Placeholder tests (ReflogEntry format) replaced with real validation logic
+- [ ] `readObject()` consolidated into a single shared location (e.g., `object/io.zig` or enhanced `object/reader.zig`), all 25+ call sites updated to use it
+- [ ] `resolveHead()` consolidated via reusing existing `commit/head.zig`, all 8+ inline copies replaced with import
+- [ ] `makeMockCommit()` extracted to shared test helper (e.g., `src/testing/mock.zig`), both merge test files updated to import it
+- [ ] GitCompatTester refactored with generic `runPairTest()` helper eliminating ~300+ lines of boilerplate from 16 run* methods
+- [ ] Empty tree creation extracted as a helper method inside commit.zig, removing 4 duplicate blocks
+- [ ] `writeLooseObject()` unified into one shared implementation, filter_repo.zig and commit.zig both delegate to it
+- [ ] All existing tests still pass after refactoring (zero regressions)
+- [ ] Net reduction of at least 600 lines of redundant code

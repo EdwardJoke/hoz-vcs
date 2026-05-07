@@ -5,6 +5,8 @@ const OID = @import("../object/oid.zig").OID;
 const CommitObj = @import("../object/commit.zig").Commit;
 const Identity = @import("../object/commit.zig").Identity;
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
+const head_mod = @import("../commit/head.zig");
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 const TreeKind = @import("output.zig").TreeKind;
@@ -171,23 +173,7 @@ pub const Log = struct {
     }
 
     fn resolveHead(self: *Log, git_dir: *const Io.Dir) !OID {
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch {
-            return OID{ .bytes = .{0} ** 20 };
-        };
-        defer self.allocator.free(head_content);
-
-        const trimmed = std.mem.trim(u8, head_content, " \n\r");
-
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const ref_path = std.mem.trim(u8, trimmed["ref: ".len..], " \n\r");
-            return self.resolveRefPath(git_dir, ref_path);
-        }
-
-        if (trimmed.len >= 40) {
-            return OID.fromHex(trimmed[0..40]) catch OID{ .bytes = .{0} ** 20 };
-        }
-
-        return OID{ .bytes = .{0} ** 20 };
+        return head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
     }
 
     fn resolveRef(self: *Log, git_dir: *const Io.Dir, refspec: []const u8) !?OID {
@@ -235,18 +221,7 @@ pub const Log = struct {
     }
 
     fn readObject(self: *Log, git_dir: *const Io.Dir, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024)) catch {
-            return error.ObjectNotFound;
-        };
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator) catch {
-            return error.CorruptObject;
-        };
+        return object_io.readObject(git_dir, self.io, self.allocator, oid);
     }
 
     fn formatDate(self: *Log, timestamp: i64) []const u8 {

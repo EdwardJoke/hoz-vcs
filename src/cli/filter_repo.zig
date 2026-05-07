@@ -4,6 +4,7 @@ const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 const compress_mod = @import("../compress/zlib.zig");
 const crypto_sha1 = @import("../crypto/sha1.zig");
+const object_io = @import("../object/io.zig");
 
 fn mkdirP(io: Io, path: []const u8) void {
     _ = std.Io.Dir.cwd().createDirPath(io, path) catch {};
@@ -622,18 +623,7 @@ pub const FilterBranch = struct {
     }
 
     fn readObjectRaw(self: *FilterBranch, git_dir: *const Io.Dir, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024)) catch {
-            return error.ObjectNotFound;
-        };
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator) catch {
-            return error.CorruptObject;
-        };
+        return object_io.readObject(git_dir, self.io, self.allocator, oid);
     }
 
     fn resolveHeadRef(self: *FilterBranch, git_dir: *const Io.Dir) ![]u8 {
@@ -686,26 +676,7 @@ pub const FilterBranch = struct {
 };
 
 fn writeLooseObject(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocator, data: []const u8) ![20]u8 {
-    var hash: [20]u8 = undefined;
-    crypto_sha1.Sha1.hash(data, &hash, .{});
-
-    const prefix = hexLower(hash[0..2]);
-    const suffix = hexLower(hash[2..]);
-
-    const dir_path = try std.fmt.allocPrint(allocator, ".git/objects/{s}", .{prefix});
-    defer allocator.free(dir_path);
-
-    _ = mkdirP(io, dir_path);
-
-    const file_path_rel = try std.fmt.allocPrint(allocator, "objects/{s}/{s}", .{ prefix, suffix });
-    defer allocator.free(file_path_rel);
-
-    const compressed = try compress_mod.Zlib.compress(data, allocator);
-    defer allocator.free(compressed);
-
-    _ = try git_dir.writeFile(io, .{ .sub_path = file_path_rel, .data = compressed });
-
-    return hash;
+    return object_io.writeLooseObject(git_dir, io, allocator, data);
 }
 
 fn hexLower(bytes: []const u8) [64]u8 {

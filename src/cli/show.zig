@@ -6,6 +6,7 @@ const OutputStyle = @import("output.zig").OutputStyle;
 const OID = @import("../object/oid.zig").OID;
 const object_mod = @import("../object/object.zig");
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
 
 pub const Show = struct {
     allocator: std.mem.Allocator,
@@ -118,14 +119,7 @@ pub const Show = struct {
     }
 
     fn readObject(self: *Show, git_dir: Io.Dir, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = try git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
+        return object_io.readObject(&git_dir, self.io, self.allocator, oid);
     }
 };
 

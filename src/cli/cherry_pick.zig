@@ -7,6 +7,7 @@ const oid_mod = @import("../object/oid.zig");
 const OID = oid_mod.OID;
 const object_mod = @import("../object/object.zig");
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
 
 pub const CherryPickOptions = struct {
     no_commit: bool = false,
@@ -336,14 +337,7 @@ pub const CherryPick = struct {
     }
 
     fn readObject(self: *CherryPick, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const object_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(object_path);
-
-        const compressed = try self.git_dir.readFileAlloc(self.io.*, object_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
+        return object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid);
     }
 };
 

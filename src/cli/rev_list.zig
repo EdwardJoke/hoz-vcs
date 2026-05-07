@@ -8,6 +8,7 @@ const RevParse = @import("rev_parse.zig").RevParse;
 const ObjectStore = @import("../object/store.zig").ObjectStore;
 const Commit = @import("../object/commit.zig").Commit;
 const OID = @import("../object/oid.zig").OID;
+const head_mod = @import("../commit/head.zig");
 
 pub const RevList = struct {
     allocator: std.mem.Allocator,
@@ -60,22 +61,7 @@ pub const RevList = struct {
     }
 
     fn resolveHead(self: *RevList, git_dir: *const Io.Dir) !OID {
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch
-            return error.InvalidOid;
-        defer self.allocator.free(head_content);
-
-        const trimmed = std.mem.trim(u8, head_content, " \n\r");
-
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const ref_path = std.mem.trim(u8, trimmed["ref: ".len..], " \n\r");
-            return self.resolveRefPath(git_dir, ref_path);
-        }
-
-        if (trimmed.len >= 40) {
-            return OID.fromHex(trimmed[0..40]);
-        }
-
-        return error.InvalidOid;
+        return head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.InvalidOid;
     }
 
     fn resolveRefPath(self: *RevList, git_dir: *const Io.Dir, path: []const u8) !OID {

@@ -36,6 +36,30 @@ pub const HeadUpdate = struct {
     }
 };
 
+/// Resolve HEAD to an OID — reads HEAD file, follows symbolic refs.
+/// Returns null if HEAD cannot be resolved (detached empty repo, missing file, etc.)
+pub fn resolveHeadOid(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocator) ?OID {
+    const head_content = git_dir.readFileAlloc(io, "HEAD", allocator, .limited(256)) catch return null;
+    defer allocator.free(head_content);
+    const trimmed = std.mem.trim(u8, head_content, " \t\r\n");
+
+    if (std.mem.startsWith(u8, trimmed, "ref: ")) {
+        const ref_path = trimmed["ref: ".len..];
+        const ref_content = git_dir.readFileAlloc(io, ref_path, allocator, .limited(256)) catch return null;
+        defer allocator.free(ref_content);
+        const ref_trimmed = std.mem.trim(u8, ref_content, " \t\r\n");
+        if (ref_trimmed.len >= 40) {
+            return OID.fromHex(ref_trimmed[0..40]) catch null;
+        }
+        return null;
+    }
+
+    if (trimmed.len >= 40) {
+        return OID.fromHex(trimmed[0..40]) catch null;
+    }
+    return null;
+}
+
 test "HeadUpdate init" {
     var ref_store: RefStore = std.mem.zeroes(RefStore);
     const updater = HeadUpdate.init(std.testing.allocator, &ref_store);

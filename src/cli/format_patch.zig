@@ -4,7 +4,10 @@ const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 const object_mod = @import("../object/object.zig");
 const oid_mod = @import("../object/oid.zig");
+const OID = oid_mod.OID;
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
+const head_mod = @import("../commit/head.zig");
 
 pub const FormatPatchOptions = struct {
     output_directory: ?[]const u8 = null,
@@ -137,40 +140,17 @@ pub const FormatPatch = struct {
     }
 
     fn resolveHead(self: *FormatPatch, git_dir: *const Io.Dir) !oid_mod.OID {
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch {
-            return error.NoHead;
-        };
-        defer self.allocator.free(head_content);
-        const trimmed = std.mem.trim(u8, head_content, " \n\r");
-
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const ref_path = trimmed[5..];
-            const ref_content = git_dir.readFileAlloc(self.io, ref_path, self.allocator, .limited(256)) catch {
-                return error.NoHead;
-            };
-            defer self.allocator.free(ref_content);
-            const ref_trimmed = std.mem.trim(u8, ref_content, " \n\r");
-            return oid_mod.OID.fromHex(ref_trimmed[0..40]) catch error.InvalidOid;
-        }
-        return oid_mod.OID.fromHex(trimmed[0..40]) catch error.InvalidOid;
+        return head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
     }
 
     fn readObject(self: *FormatPatch, git_dir: *const Io.Dir, oid: *const [40]u8) ![]const u8 {
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ oid[0..2], oid[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = try git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
+        const parsed_oid = OID.fromHex(oid.*) catch return error.ObjectNotFound;
+        return object_io.readObject(git_dir, self.io, self.allocator, parsed_oid);
     }
 
     fn readObjectByHex(self: *FormatPatch, git_dir: *const Io.Dir, hex: []const u8) ![]const u8 {
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = try git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
+        const parsed_oid = OID.fromHex(hex) catch return error.ObjectNotFound;
+        return object_io.readObject(git_dir, self.io, self.allocator, parsed_oid);
     }
 
     fn extractField(data: []const u8, field: []const u8) ?[]const u8 {

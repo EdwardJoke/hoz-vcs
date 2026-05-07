@@ -9,7 +9,10 @@ extern fn getgid() c_uint;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 const oid_mod = @import("../object/oid.zig");
+const OID = oid_mod.OID;
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
+const head_mod = @import("../commit/head.zig");
 
 pub const ArchiveFormat = enum {
     tar,
@@ -111,15 +114,7 @@ pub const Archive = struct {
     }
 
     fn resolveHeadOid(self: *Archive, git_dir: *const Io.Dir) !oid_mod.OID {
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch
-            return error.NoHead;
-        defer self.allocator.free(head_content);
-        const trimmed = std.mem.trim(u8, head_content, " \n\r");
-
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            return self.resolveRef(git_dir, trimmed[5..]);
-        }
-        return oid_mod.OID.fromHex(trimmed[0..40]) catch error.InvalidOid;
+        return head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
     }
 
     fn resolveToTree(self: *Archive, git_dir: *const Io.Dir, spec: []const u8) !oid_mod.OID {
@@ -177,12 +172,8 @@ pub const Archive = struct {
     }
 
     fn readObject(self: *Archive, git_dir: *const Io.Dir, oid_hex: *const [40]u8) ![]u8 {
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = try git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
+        const parsed_oid = OID.fromHex(oid_hex[0..]) catch return error.ObjectNotFound;
+        return object_io.readObject(git_dir, self.io, self.allocator, parsed_oid);
     }
 
     fn buildTar(self: *Archive, git_dir: *const Io.Dir, tree_data: []const u8, out: *std.ArrayList(u8)) !void {

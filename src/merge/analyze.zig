@@ -2,6 +2,7 @@
 const std = @import("std");
 const OID = @import("../object/oid.zig").OID;
 const commit_mod = @import("../commit/commit.zig");
+const mock = @import("../testing/mock.zig");
 
 pub const MergeAnalysis = struct {
     is_fast_forward: bool,
@@ -227,27 +228,12 @@ test "MergeAnalyzer init" {
     try std.testing.expect(analyzer.allocator == std.testing.allocator);
 }
 
-fn makeMockCommit(oid_hex: []const u8, parent_hexs: []const []const u8) commit_mod.Commit {
-    const oid = OID.fromHex(oid_hex) catch unreachable;
-    var parents_buf: [4]OID = undefined;
-    for (parent_hexs, 0..) |ph, i| {
-        parents_buf[i] = OID.fromHex(ph) catch unreachable;
-    }
-    return commit_mod.Commit.create(
-        oid,
-        parents_buf[0..parent_hexs.len],
-        .{ .name = "a", .email = "a@b", .timestamp = 0, .timezone = 0 },
-        .{ .name = "a", .email = "a@b", .timestamp = 0, .timezone = 0 },
-        "msg",
-    );
-}
-
 test "MergeAnalyzer detects fast-forward" {
     const base_oid = "1111111111111111111111111111111111111111";
     const tip_oid = "2222222222222222222222222222222222222222";
 
-    const base_commit = makeMockCommit(base_oid, &.{});
-    const tip_commit = makeMockCommit(tip_oid, &.{base_oid});
+    const base_commit = mock.makeMockCommit(base_oid, &.{});
+    const tip_commit = mock.makeMockCommit(tip_oid, &.{base_oid});
 
     const MockStore = struct {
         fn get(oid: OID) ?*const commit_mod.Commit {
@@ -274,9 +260,9 @@ test "MergeAnalyzer detects divergent branches" {
     const left_oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const right_oid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-    const base_commit = makeMockCommit(base_oid, &.{});
-    _ = makeMockCommit(left_oid, &.{base_oid});
-    _ = makeMockCommit(right_oid, &.{base_oid});
+    const base_commit = mock.makeMockCommit(base_oid, &.{});
+    _ = mock.makeMockCommit(left_oid, &.{base_oid});
+    _ = mock.makeMockCommit(right_oid, &.{base_oid});
 
     const MockStore = struct {
         fn get(oid: OID) ?*const commit_mod.Commit {
@@ -300,8 +286,8 @@ test "MergeAnalyzer canMerge returns true for related branches" {
     const base_oid = "1111111111111111111111111111111111111111";
     const tip_oid = "2222222222222222222222222222222222222222";
 
-    const base_commit = makeMockCommit(base_oid, &.{});
-    _ = makeMockCommit(tip_oid, &.{base_oid});
+    const base_commit = mock.makeMockCommit(base_oid, &.{});
+    _ = mock.makeMockCommit(tip_oid, &.{base_oid});
 
     const MockStore = struct {
         fn get(oid: OID) ?*const commit_mod.Commit {

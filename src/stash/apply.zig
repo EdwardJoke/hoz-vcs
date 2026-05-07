@@ -7,6 +7,7 @@ const OID = @import("../object/oid.zig").OID;
 const oid_mod = @import("../object/oid.zig");
 const object_mod = @import("../object/object.zig");
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
 
 pub const ApplyOptions = struct {
     index: u32 = 0,
@@ -130,20 +131,7 @@ pub const StashApplier = struct {
     }
 
     fn readObject(self: *StashApplier, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const object_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(object_path);
-
-        const compressed = self.git_dir.readFileAlloc(self.io, object_path, self.allocator, .limited(16 * 1024 * 1024)) catch |err| {
-            return err;
-        };
-        defer self.allocator.free(compressed);
-
-        const decompressed = compress_mod.Zlib.decompress(compressed, self.allocator) catch |err| {
-            return err;
-        };
-
-        return decompressed;
+        return object_io.readObject(&self.git_dir, self.io, self.allocator, oid);
     }
 
     fn parseTreeFromCommit(_: *StashApplier, commit_data: []const u8) !OID {

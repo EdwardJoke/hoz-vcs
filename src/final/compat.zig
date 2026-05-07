@@ -123,6 +123,15 @@ pub const GitCompatTester = struct {
         return count;
     }
 
+    fn setupRepo(self: *GitCompatTester, name: []const u8) ![]const u8 {
+        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, name });
+        self.cleanupDir(repo_path);
+        try self.makeDir(repo_path);
+        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
+        try self.runCommand(&.{ "hoz", "init" }, repo_path);
+        return repo_path;
+    }
+
     fn runInit(self: *GitCompatTester) !void {
         const git_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "git_repo" });
         defer self.allocator.free(git_path);
@@ -151,11 +160,9 @@ pub const GitCompatTester = struct {
     }
 
     fn runAdd(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "add_test" });
+        const repo_path = try self.setupRepo("add_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
 
-        try self.makeDir(repo_path);
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
         try self.writeFileData(file_path, "hello world\n");
@@ -179,13 +186,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runCommit(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "commit_test" });
+        const repo_path = try self.setupRepo("commit_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
@@ -210,13 +212,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runBranch(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "branch_test" });
+        const repo_path = try self.setupRepo("branch_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "init" }, ".");
         try self.runCommand(&.{ "hoz", "commit", "--allow-empty", "-m", "init" }, repo_path);
@@ -240,13 +237,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runCheckout(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "checkout_test" });
+        const repo_path = try self.setupRepo("checkout_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
@@ -270,13 +262,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runMerge(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "merge_test" });
+        const repo_path = try self.setupRepo("merge_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "base" }, ".");
         try self.runCommand(&.{ "hoz", "commit", "--allow-empty", "-m", "base" }, repo_path);
@@ -305,13 +292,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runRebase(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "rebase_test" });
+        const repo_path = try self.setupRepo("rebase_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "base" }, ".");
         try self.runCommand(&.{ "hoz", "commit", "--allow-empty", "-m", "base" }, repo_path);
@@ -345,13 +327,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runStash(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "stash_test" });
+        const repo_path = try self.setupRepo("stash_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
@@ -373,13 +350,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runTag(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "tag_test" });
+        const repo_path = try self.setupRepo("tag_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "init" }, ".");
         try self.runCommand(&.{ "hoz", "commit", "--allow-empty", "-m", "init" }, repo_path);
@@ -403,13 +375,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runLog(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "log_test" });
+        const repo_path = try self.setupRepo("log_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "first" }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "second" }, ".");
@@ -427,13 +394,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runDiff(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "diff_test" });
+        const repo_path = try self.setupRepo("diff_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
@@ -457,13 +419,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runShow(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "show_test" });
+        const repo_path = try self.setupRepo("show_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "test" }, ".");
         try self.runCommand(&.{ "hoz", "commit", "--allow-empty", "-m", "test" }, repo_path);
@@ -479,13 +436,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runBlame(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "blame_test" });
+        const repo_path = try self.setupRepo("blame_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         const file_path = try std.fs.path.join(self.allocator, &.{ repo_path, "test.txt" });
         defer self.allocator.free(file_path);
@@ -507,13 +459,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runBisect(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "bisect_test" });
+        const repo_path = try self.setupRepo("bisect_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "good1" }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "good2" }, ".");
@@ -540,13 +487,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runWorktree(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "worktree_test" });
+        const repo_path = try self.setupRepo("worktree_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "init" }, ".");
         try self.runCommand(&.{ "hoz", "commit", "--allow-empty", "-m", "init" }, repo_path);
@@ -570,13 +512,8 @@ pub const GitCompatTester = struct {
     }
 
     fn runRemote(self: *GitCompatTester) !void {
-        const repo_path = try std.fs.path.join(self.allocator, &.{ self.temp_dir, "remote_test" });
+        const repo_path = try self.setupRepo("remote_test");
         defer self.allocator.free(repo_path);
-        self.cleanupDir(repo_path);
-
-        try self.makeDir(repo_path);
-        try self.runCommand(&.{ "git", "-C", repo_path, "init" }, ".");
-        try self.runCommand(&.{ "hoz", "init" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "remote", "add", "origin", "https://example.com/repo.git" }, ".");
         try self.runCommand(&.{ "hoz", "remote", "add", "origin", "https://example.com/repo.git" }, repo_path);
