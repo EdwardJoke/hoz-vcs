@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
+const TreeKind = @import("output.zig").TreeKind;
 const StashSaver = @import("../stash/save.zig").StashSaver;
 const StashLister = @import("../stash/list.zig").StashLister;
 const SaveOptions = @import("../stash/save.zig").SaveOptions;
@@ -83,8 +84,10 @@ pub const Stash = struct {
             return;
         }
 
-        for (entries) |entry| {
-            try self.output.infoMessage("{d}: {s} ({s}) - {s}", .{
+        try self.output.section("Stash");
+        for (entries, 0..) |entry, idx| {
+            const kind: TreeKind = if (idx == entries.len - 1) .last else .branch;
+            try self.output.treeNode(kind, 1, "stash@{{{d}}}: {s} ({s}) - {s}", .{
                 entry.index,
                 entry.branch,
                 entry.date,

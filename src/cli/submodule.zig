@@ -2,6 +2,8 @@ const std = @import("std");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
+const TreeKind = @import("output.zig").TreeKind;
+const StatusIcon = @import("output.zig").StatusIcon;
 
 pub const SubmoduleOptions = struct {
     init: bool = false,
@@ -87,9 +89,14 @@ pub const Submodule = struct {
             return;
         }
 
-        for (modules.items) |m| {
-            const status_prefix: []const u8 = if (m.initialized) " " else "-";
-            try self.output.writer.print("{s} {s} ({s})\n", .{ status_prefix, m.path, m.url });
+        for (modules.items, 0..) |m, idx| {
+            const kind: TreeKind = if (idx == modules.items.len - 1) .last else .branch;
+            const status_icon: StatusIcon = if (m.initialized) .submodule else .conflicted;
+            try self.output.treeNode(kind, 0, "{s} {s} ({s})", .{
+                status_icon.symbol(self.output.style.use_unicode),
+                m.path,
+                m.url,
+            });
         }
     }
 
