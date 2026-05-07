@@ -1,10 +1,16 @@
+
+<div align="center">
+
 # Hoz - Git-Compatible Version Control System
 
-> [!WARNING]  
-> This project is in active development and now just a toy, please do not use it in production.
+![GitHub Stars](https://shieldcn.dev/github/stars/edwardjoke/hoz-vcs.svg?variant=branded) ![GitHub Forks](https://shieldcn.dev/github/forks/edwardjoke/hoz-vcs.svg?variant=branded) ![GitHub Release](https://shieldcn.dev/github/release/edwardjoke/hoz-vcs.svg?variant=branded)<br/>
+![GitHub Last Commit](https://shieldcn.dev/github/last-commit/edwardjoke/hoz-vcs.svg?variant=outline) ![GitHub Open Issues](https://shieldcn.dev/github/open-issues/vercel/next.js.svg?variant=outline)
 
-A full-featured Git implementation in Zig 0.16.0, built for type safety and performance. 
+*A full-featured Git implementation in Zig 0.16.0, *<br/>
+*built for type safety and performance. *
 Hoz is the next generation of Git-compatible version control with a clean, modern codebase.
+
+</div>
 
 ## Why Hoz?
 
@@ -14,6 +20,9 @@ Hoz is the next generation of Git-compatible version control with a clean, moder
 - **Portable** - Runs anywhere Zig 0.16.0 is available
 
 ## Quick Start
+
+> [!WARNING]  
+> This project is in active development and now just a toy, please do not use it in production.
 
 Initialize a new repository:
 
