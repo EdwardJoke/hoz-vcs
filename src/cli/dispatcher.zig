@@ -123,6 +123,20 @@ pub const CommandDispatcher = struct {
             try self.runReset(args);
         } else if (std.mem.eql(u8, cmd, "branch")) {
             try self.runBranch(args);
+        } else if (std.mem.eql(u8, cmd, "checkout")) {
+            try self.writer.print("warning: 'checkout' is deprecated, use 'branch out' instead\n", .{});
+            var branch_args = try std.ArrayList([]const u8).initCapacity(self.allocator, args.len + 1);
+            defer branch_args.deinit(self.allocator);
+            branch_args.appendAssumeCapacity("out");
+            for (args) |arg| branch_args.appendAssumeCapacity(arg);
+            try self.runBranch(branch_args.items);
+        } else if (std.mem.eql(u8, cmd, "switch")) {
+            try self.writer.print("warning: 'switch' is deprecated, use 'branch switch' instead\n", .{});
+            var branch_args = try std.ArrayList([]const u8).initCapacity(self.allocator, args.len + 1);
+            defer branch_args.deinit(self.allocator);
+            branch_args.appendAssumeCapacity("switch");
+            for (args) |arg| branch_args.appendAssumeCapacity(arg);
+            try self.runBranch(branch_args.items);
         } else if (std.mem.eql(u8, cmd, "stash")) {
             try self.runStash(args);
         } else if (std.mem.eql(u8, cmd, "tag")) {
