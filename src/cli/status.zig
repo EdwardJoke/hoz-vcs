@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
+const StatusIcon = @import("output.zig").StatusIcon;
 const StatusScanner = @import("../workdir/scanner.zig").StatusScanner;
 const status_mod = @import("../workdir/status.zig");
 
@@ -52,18 +53,18 @@ pub const Status = struct {
 
     fn runPorcelain(self: *Status, result: status_mod.StatusResult) !void {
         for (result.entries) |entry| {
-            const code = switch (entry.status) {
-                .unmodified => " ",
-                .modified => "M",
-                .added => "A",
-                .deleted => "D",
-                .renamed => "R",
-                .copied => "C",
-                .untracked => "?",
-                .ignored => "I",
-                .conflicted => "U",
+            const icon: StatusIcon = switch (entry.status) {
+                .unmodified => .unmodified,
+                .modified => .modified,
+                .added => .added,
+                .deleted => .deleted,
+                .renamed => .renamed,
+                .copied => .copied,
+                .untracked => .untracked,
+                .ignored => .ignored,
+                .conflicted => .conflicted,
             };
-            try self.output.writer.print(" {s} {s}\n", .{ code, entry.path });
+            try self.output.statusItem(icon, false, entry.path);
         }
         if (!result.has_changes) {
             try self.output.result(.{ .success = true, .code = 0, .message = "Working tree clean" });
@@ -90,28 +91,36 @@ pub const Status = struct {
         try self.output.section("Status");
 
         if (unstaged > 0) {
-            try self.output.item("Changes not staged", "");
+            try self.output.groupHeader("Changes not staged for commit ({d})", .{unstaged});
             for (result.entries) |entry| {
-                switch (entry.status) {
-                    .modified => try self.output.writer.print("  modified: {s}\n", .{entry.path}),
-                    .added => try self.output.writer.print("  new file: {s}\n", .{entry.path}),
-                    .deleted => try self.output.writer.print("  deleted: {s}\n", .{entry.path}),
-                    else => {},
-                }
+                const icon: StatusIcon = switch (entry.status) {
+                    .modified => .modified,
+                    .added => .added,
+                    .deleted => .deleted,
+                    .renamed => .renamed,
+                    .copied => .copied,
+                    else => continue,
+                };
+                try self.output.treeNode(.branch, 1, "{s} {s}", .{
+                    icon.symbol(self.output.style.use_unicode),
+                    entry.path,
+                });
             }
+            try self.output.sectionDivider();
         }
 
         if (untracked > 0) {
-            try self.output.item("Untracked files", "");
+            try self.output.groupHeader("Untracked files ({d})", .{untracked});
             for (result.entries) |entry| {
                 if (entry.status == .untracked) {
-                    try self.output.writer.print("  {s}\n", .{entry.path});
+                    try self.output.treeNode(.branch, 1, "? {s}", .{entry.path});
                 }
             }
+            try self.output.sectionDivider();
         }
 
         if (unstaged == 0 and untracked == 0) {
-            try self.output.result(.{ .success = true, .code = 0, .message = "Working tree clean" });
+            try self.output.successMessage("Working tree clean", .{});
         }
 
         try self.output.hint("Run 'hoz add <file>' to stage changes", .{});
