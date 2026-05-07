@@ -26,9 +26,11 @@ pub const Blob = struct {
         if (total_len <= 1024) {
             var buffer: [1024]u8 = undefined;
             @memcpy(buffer[0..5], "blob ");
-            _ = std.fmt.bufPrint(buffer[5..], "{d}", .{self.data.len}) catch unreachable;
-            buffer[5 + size_str_len] = 0;
-            @memcpy(buffer[header_len..], self.data);
+            const size_buf = std.fmt.bufPrint(buffer[5..], "{d}", .{self.data.len}) catch {
+                return oid_mod.OID.zero();
+            };
+            buffer[5 + size_buf.len] = 0;
+            @memcpy(buffer[header_len .. header_len + self.data.len], self.data);
             return oid_mod.oidFromContent(buffer[0..total_len]);
         } else {
             var buffer = std.ArrayList(u8).initCapacity(std.heap.page_allocator, total_len) catch return oid_mod.OID.zero();

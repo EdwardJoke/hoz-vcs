@@ -277,10 +277,59 @@ test "ReflogManager getLogPath simple name" {
 }
 
 test "ReflogManager init" {
-    try std.testing.expect(true);
+    const manager = ReflogManager.init(undefined, std.testing.allocator);
+    try std.testing.expect(manager.allocator == std.testing.allocator);
 }
 
-test "ReflogEntry format placeholder" {
-    // Placeholder - requires mock file system
-    try std.testing.expect(true);
+test "ReflogEntry Timezone formatZoned" {
+    const tz_pos = ReflogEntry.Timezone{ .offset = 0 };
+    const formatted = tz_pos.formatZoned();
+    try std.testing.expectEqualSlices(u8, "+0000", &formatted);
+
+    const tz_neg = ReflogEntry.Timezone{ .offset = -16 };
+    const neg_formatted = tz_neg.formatZoned();
+    try std.testing.expectEqualSlices(u8, "-0400", &neg_formatted);
+
+    const tz_half = ReflogEntry.Timezone{ .offset = 10 };
+    const half_formatted = tz_half.formatZoned();
+    try std.testing.expectEqualSlices(u8, "+0230", &half_formatted);
+}
+
+test "ReflogEntry Timezone parse" {
+    const tz = try ReflogEntry.Timezone.parse("+0000");
+    try std.testing.expectEqual(@as(i8, 0), tz.offset);
+
+    const tz_neg = try ReflogEntry.Timezone.parse("-0800");
+    try std.testing.expectEqual(@as(i8, -32), tz_neg.offset);
+
+    const tz_530 = try ReflogEntry.Timezone.parse("+0530");
+    try std.testing.expectEqual(@as(i8, 22), tz_530.offset);
+}
+
+test "ReflogEntry Timezone parse rejects invalid" {
+    try std.testing.expectError(error.InvalidTimezone, ReflogEntry.Timezone.parse("0000"));
+    try std.testing.expectError(error.InvalidTimezone, ReflogEntry.Timezone.parse("+00"));
+    try std.testing.expectError(error.InvalidTimezone, ReflogEntry.Timezone.parse("abcde"));
+}
+
+test "ReflogEntry Timezone toArray roundtrip" {
+    const original = ReflogEntry.Timezone{ .offset = 20 };
+    const arr = original.toArray();
+    try std.testing.expectEqual(@as(usize, 5), arr.len);
+    const parsed = try ReflogEntry.Timezone.parse(&arr);
+    try std.testing.expectEqual(original.offset, parsed.offset);
+}
+
+test "ReflogEntry struct fields" {
+    const entry = ReflogEntry{
+        .old_oid = OID.zero(),
+        .new_oid = OID.zero(),
+        .committer = .{ .name = "Test", .email = "test@example.com" },
+        .timestamp = 1700000000,
+        .timezone = .{ .offset = 0 },
+        .message = "commit: initial",
+    };
+    try std.testing.expect(entry.old_oid.isZero());
+    try std.testing.expectEqualSlices(u8, "Test", entry.committer.name);
+    try std.testing.expectEqualSlices(u8, "commit: initial", entry.message);
 }

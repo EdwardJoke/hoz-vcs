@@ -195,7 +195,10 @@ pub const Tag = struct {
     /// Parse tagger identity from string
     fn parseTagger(str: []const u8) !Tagger {
         const email_start = std.mem.indexOf(u8, str, "<") orelse return error.InvalidTagger;
-        const name = str[0..email_start];
+        var name = str[0..email_start];
+        while (name.len > 0 and (name[name.len - 1] == ' ' or name[name.len - 1] == '\t')) {
+            name = name[0 .. name.len - 1];
+        }
 
         const email_end = std.mem.indexOf(u8, str, ">") orelse return error.InvalidTagger;
         const email = str[email_start + 1 .. email_end];
@@ -203,11 +206,21 @@ pub const Tag = struct {
         const rest = str[email_end + 1 ..];
         var iter = std.mem.splitSequence(u8, rest, " ");
 
-        const timestamp_str = iter.next() orelse return error.InvalidTagger;
-        const timestamp = try std.fmt.parseInt(i64, timestamp_str, 10);
+        var timestamp_str = iter.next();
+        while (timestamp_str) |ts| {
+            if (ts.len > 0) break;
+            timestamp_str = iter.next();
+        }
+        const ts = timestamp_str orelse return error.InvalidTagger;
+        const timestamp = try std.fmt.parseInt(i64, ts, 10);
 
-        const tz_str = iter.next() orelse return error.InvalidTagger;
-        const tz_parsed = try parseTimezone(tz_str);
+        var tz_str = iter.next();
+        while (tz_str) |tz| {
+            if (tz.len > 0) break;
+            tz_str = iter.next();
+        }
+        const tz_final = tz_str orelse return error.InvalidTagger;
+        const tz_parsed = try parseTimezone(tz_final);
 
         return .{
             .name = name,

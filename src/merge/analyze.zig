@@ -218,34 +218,103 @@ test "AnalysisResult structure" {
 }
 
 test "MergeAnalyzer init" {
-    const dummyGetCommit: *const fn (OID) ?*const commit_mod.Commit = struct {
+    const MockStore = struct {
         fn get(_: OID) ?*const commit_mod.Commit {
             return null;
         }
-    }.get;
-    const analyzer = MergeAnalyzer.init(std.testing.allocator, dummyGetCommit);
+    };
+    const analyzer = MergeAnalyzer.init(std.testing.allocator, MockStore.get);
     try std.testing.expect(analyzer.allocator == std.testing.allocator);
 }
 
-test "MergeAnalyzer analyze method exists" {
-    const dummyGetCommit: *const fn (OID) ?*const commit_mod.Commit = struct {
-        fn get(_: OID) ?*const commit_mod.Commit {
-            return null;
-        }
-    }.get;
-    var analyzer = MergeAnalyzer.init(std.testing.allocator, dummyGetCommit);
-    const result = try analyzer.analyze(undefined, undefined);
-    try std.testing.expect(result.analysis.is_normal == true);
+fn makeMockCommit(oid_hex: []const u8, parent_hexs: []const []const u8) commit_mod.Commit {
+    const oid = OID.fromHex(oid_hex) catch unreachable;
+    var parents_buf: [4]OID = undefined;
+    for (parent_hexs, 0..) |ph, i| {
+        parents_buf[i] = OID.fromHex(ph) catch unreachable;
+    }
+    return commit_mod.Commit.create(
+        oid,
+        parents_buf[0..parent_hexs.len],
+        .{ .name = "a", .email = "a@b", .timestamp = 0, .timezone = 0 },
+        .{ .name = "a", .email = "a@b", .timestamp = 0, .timezone = 0 },
+        "msg",
+    );
 }
 
-test "MergeAnalyzer canMerge method exists" {
-    const dummyGetCommit: *const fn (OID) ?*const commit_mod.Commit = struct {
-        fn get(_: OID) ?*const commit_mod.Commit {
+test "MergeAnalyzer detects fast-forward" {
+    const base_oid = "1111111111111111111111111111111111111111";
+    const tip_oid = "2222222222222222222222222222222222222222";
+
+    const base_commit = makeMockCommit(base_oid, &.{});
+    const tip_commit = makeMockCommit(tip_oid, &.{base_oid});
+
+    const MockStore = struct {
+        fn get(oid: OID) ?*const commit_mod.Commit {
+            const o1 = OID.fromHex(base_oid) catch return null;
+            const o2 = OID.fromHex(tip_oid) catch return null;
+            if (std.mem.eql(u8, &oid.bytes, &o1.bytes)) return @constCast(&base_commit);
+            if (std.mem.eql(u8, &oid.bytes, &o2.bytes)) return @constCast(&tip_commit);
             return null;
         }
-    }.get;
-    var analyzer = MergeAnalyzer.init(std.testing.allocator, dummyGetCommit);
-    const can = analyzer.canMerge(undefined, undefined);
-    _ = can;
-    try std.testing.expect(analyzer.allocator != undefined);
+    };
+
+    const ours = OID.fromHex(base_oid) catch unreachable;
+    const theirs = OID.fromHex(tip_oid) catch unreachable;
+    var analyzer = MergeAnalyzer.init(std.testing.allocator, MockStore.get);
+
+    const result = try analyzer.analyze(ours, theirs);
+    try std.testing.expect(result.analysis.is_fast_forward == true);
+    try std.testing.expect(result.analysis.can_ff == true);
+    try std.testing.expect(result.commits_behind == 1);
+}
+
+test "MergeAnalyzer detects divergent branches" {
+    const base_oid = "1111111111111111111111111111111111111111";
+    const left_oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const right_oid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    const base_commit = makeMockCommit(base_oid, &.{});
+    _ = makeMockCommit(left_oid, &.{base_oid});
+    _ = makeMockCommit(right_oid, &.{base_oid});
+
+    const MockStore = struct {
+        fn get(oid: OID) ?*const commit_mod.Commit {
+            const o1 = OID.fromHex(base_oid) catch return null;
+            if (std.mem.eql(u8, &oid.bytes, &o1.bytes)) return @constCast(&base_commit);
+            return null;
+        }
+    };
+
+    const ours = OID.fromHex(left_oid) catch unreachable;
+    const theirs = OID.fromHex(right_oid) catch unreachable;
+    var analyzer = MergeAnalyzer.init(std.testing.allocator, MockStore.get);
+
+    const result = try analyzer.analyze(ours, theirs);
+    try std.testing.expect(result.analysis.is_normal == true);
+    try std.testing.expect(result.analysis.is_fast_forward == false);
+    try std.testing.expect(result.common_ancestor != null);
+}
+
+test "MergeAnalyzer canMerge returns true for related branches" {
+    const base_oid = "1111111111111111111111111111111111111111";
+    const tip_oid = "2222222222222222222222222222222222222222";
+
+    const base_commit = makeMockCommit(base_oid, &.{});
+    _ = makeMockCommit(tip_oid, &.{base_oid});
+
+    const MockStore = struct {
+        fn get(oid: OID) ?*const commit_mod.Commit {
+            const o1 = OID.fromHex(base_oid) catch return null;
+            if (std.mem.eql(u8, &oid.bytes, &o1.bytes)) return @constCast(&base_commit);
+            return null;
+        }
+    };
+
+    const ours = OID.fromHex(base_oid) catch unreachable;
+    const theirs = OID.fromHex(tip_oid) catch unreachable;
+    var analyzer = MergeAnalyzer.init(std.testing.allocator, MockStore.get);
+
+    const can = analyzer.canMerge(ours, theirs);
+    try std.testing.expect(can == true);
 }

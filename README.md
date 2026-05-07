@@ -1,6 +1,8 @@
 
 <div align="center">
 
+![Brand Logo](/assets/Hoz.png)
+
 # Hoz - Git-Compatible Version Control System
 
 ![GitHub Stars](https://shieldcn.dev/github/stars/edwardjoke/hoz-vcs.svg?variant=branded) ![GitHub Forks](https://shieldcn.dev/github/forks/edwardjoke/hoz-vcs.svg?variant=branded) ![GitHub Release](https://shieldcn.dev/github/release/edwardjoke/hoz-vcs.svg?variant=branded)<br/>
@@ -97,7 +99,7 @@ Hoz is in active development. Core Git functionality is implemented including:
 
 ## Contributing
 
-Contributions welcome. Please ensure `zig build test` passes before submitting changes.
+Contributions welcome. Please ensure `just asset` passes before submitting changes.
 
 ## License
 

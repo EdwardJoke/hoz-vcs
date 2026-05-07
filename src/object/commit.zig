@@ -49,23 +49,33 @@ pub const Identity = struct {
 
     /// Parse identity from string (e.g., "John Doe <john@example.com> 1234567890 +0000")
     pub fn parse(str: []const u8) !Identity {
-        // Find name (everything before '<')
         const email_start = std.mem.indexOf(u8, str, "<") orelse return error.InvalidIdentity;
-        const name = str[0..email_start];
+        var name = str[0..email_start];
+        while (name.len > 0 and (name[name.len - 1] == ' ' or name[name.len - 1] == '\t')) {
+            name = name[0 .. name.len - 1];
+        }
 
-        // Find email (between '<' and '>')
         const email_end = std.mem.indexOf(u8, str, ">") orelse return error.InvalidIdentity;
         const email = str[email_start + 1 .. email_end];
 
-        // Find timestamp and timezone
         const rest = str[email_end + 1 ..];
         var iter = std.mem.splitScalar(u8, rest, ' ');
 
-        const timestamp_str = iter.next() orelse return error.InvalidIdentity;
-        const timestamp = try std.fmt.parseInt(i64, timestamp_str, 10);
+        var timestamp_str = iter.next();
+        while (timestamp_str) |ts| {
+            if (ts.len > 0) break;
+            timestamp_str = iter.next();
+        }
+        const ts = timestamp_str orelse return error.InvalidIdentity;
+        const timestamp = try std.fmt.parseInt(i64, ts, 10);
 
-        const tz_str = iter.next() orelse return error.InvalidIdentity;
-        const tz_parsed = try parseTimezone(tz_str);
+        var tz_str = iter.next();
+        while (tz_str) |tz| {
+            if (tz.len > 0) break;
+            tz_str = iter.next();
+        }
+        const tz_final = tz_str orelse return error.InvalidIdentity;
+        const tz_parsed = try parseTimezone(tz_final);
 
         return Identity{
             .name = name,
@@ -336,7 +346,7 @@ test "identity timezone edge cases" {
 test "identity parse invalid" {
     try std.testing.expectError(error.InvalidIdentity, Identity.parse("no email"));
     try std.testing.expectError(error.InvalidIdentity, Identity.parse("Name <email>"));
-    try std.testing.expectError(error.InvalidTimezone, Identity.parse("Name <e@e.com> 12345"));
+    try std.testing.expectError(error.InvalidIdentity, Identity.parse("Name <e@e.com> 12345"));
 }
 
 test "commit serialize and parse roundtrip" {
