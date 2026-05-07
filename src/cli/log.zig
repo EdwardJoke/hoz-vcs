@@ -98,7 +98,9 @@ pub const Log = struct {
 
     fn printShort(self: *Log, commit: *const CommitObj) !void {
         const hex = commit.tree.toHex();
-        try self.output.groupHeader("commit {s}", .{hex[0..7]});
+        const commit_label = try std.fmt.allocPrint(self.allocator, "commit {s}", .{hex[0..7]});
+        defer self.allocator.free(commit_label);
+        try self.output.groupHeader(commit_label, null);
         const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
         defer self.allocator.free(author_str);
         try self.output.treeNode(.branch, 1, "Author: {s}", .{author_str});
@@ -109,7 +111,9 @@ pub const Log = struct {
 
     fn printMedium(self: *Log, commit: *const CommitObj) !void {
         const hex = commit.tree.toHex();
-        try self.output.groupHeader("commit {s}", .{hex[0..7]});
+        const commit_label = try std.fmt.allocPrint(self.allocator, "commit {s}", .{hex[0..7]});
+        defer self.allocator.free(commit_label);
+        try self.output.groupHeader(commit_label, null);
         const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
         defer self.allocator.free(author_str);
         try self.output.treeNode(.branch, 1, "Author: {s}", .{author_str});
@@ -129,7 +133,9 @@ pub const Log = struct {
 
     fn printFull(self: *Log, commit: *const CommitObj) !void {
         const tree_hex = commit.tree.toHex();
-        try self.output.groupHeader("commit {s}", .{tree_hex[0..]});
+        const commit_label = try std.fmt.allocPrint(self.allocator, "commit {s}", .{tree_hex[0..]});
+        defer self.allocator.free(commit_label);
+        try self.output.groupHeader(commit_label, null);
         try self.output.treeNode(.branch, 1, "Tree: {s}", .{tree_hex[0..]});
 
         for (commit.parents) |p| {

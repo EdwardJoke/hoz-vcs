@@ -91,7 +91,7 @@ pub const Status = struct {
         try self.output.section("Status");
 
         if (unstaged > 0) {
-            try self.output.groupHeader("Changes not staged for commit ({d})", .{unstaged});
+            try self.output.groupHeader("Changes not staged for commit", unstaged);
             for (result.entries) |entry| {
                 const icon: StatusIcon = switch (entry.status) {
                     .modified => .modified,
@@ -110,7 +110,7 @@ pub const Status = struct {
         }
 
         if (untracked > 0) {
-            try self.output.groupHeader("Untracked files ({d})", .{untracked});
+            try self.output.groupHeader("Untracked files", untracked);
             for (result.entries) |entry| {
                 if (entry.status == .untracked) {
                     try self.output.treeNode(.branch, 1, "? {s}", .{entry.path});

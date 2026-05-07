@@ -159,7 +159,9 @@ pub const Diff = struct {
                 else => .modified,
             };
 
-            try self.output.groupHeader("File: {s}", .{path});
+            const file_label = try std.fmt.allocPrint(self.allocator, "File: {s}", .{path});
+            defer self.allocator.free(file_label);
+            try self.output.groupHeader(file_label, null);
             try self.output.statusItem(icon, true, path);
 
             switch (change.change_type) {
@@ -227,7 +229,9 @@ pub const Diff = struct {
                 else => .modified,
             };
 
-            try self.output.groupHeader("File: {s}", .{path});
+            const file_label = try std.fmt.allocPrint(self.allocator, "File: {s}", .{path});
+            defer self.allocator.free(file_label);
+            try self.output.groupHeader(file_label, null);
             try self.output.statusItem(icon, false, path);
 
             switch (change.change_type) {
