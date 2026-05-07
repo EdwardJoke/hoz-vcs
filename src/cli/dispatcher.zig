@@ -528,33 +528,55 @@ pub const CommandDispatcher = struct {
         var branch = Branch.init(self.allocator, self.io, self.writer, self.style);
 
         var i: usize = 0;
-        while (i < args.len) : (i += 1) {
-            const arg = args[i];
-            if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--delete")) {
-                branch.action = .delete;
-            } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--move")) {
-                branch.action = .rename;
-            } else if (std.mem.eql(u8, arg, "-D")) {
-                branch.action = .delete;
-            } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--list")) {
-                branch.action = .list;
-            } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--set-upstream-to")) {
-                branch.action = .set_upstream;
-                i += 1;
-                if (i < args.len) {
-                    branch.upstream_name = args[i];
+        if (args.len > 0 and (std.mem.eql(u8, args[0], "out") or std.mem.eql(u8, args[0], "checkout"))) {
+            branch.action = .checkout;
+            i = 1;
+            while (i < args.len) : (i += 1) {
+                const arg = args[i];
+                if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--force")) {
+                    branch.checkout_options.strategy = .force;
+                    branch.checkout_options.force = true;
+                } else if (std.mem.eql(u8, arg, "-b")) {
+                    branch.checkout_options.create_branch = true;
+                } else if (std.mem.eql(u8, arg, "-B")) {
+                    branch.checkout_options.force_create_branch = true;
+                } else if (std.mem.eql(u8, arg, "--detach")) {
+                    branch.checkout_options.detach = true;
+                } else if (std.mem.eql(u8, arg, "--track")) {
+                    branch.checkout_options.track = "";
+                } else if (!std.mem.startsWith(u8, arg, "-") and branch.target == null) {
+                    branch.target = arg;
                 }
-            } else if (std.mem.eql(u8, arg, "--unset-upstream")) {
-                branch.action = .unset_upstream;
-            } else if (!std.mem.startsWith(u8, arg, "-") and branch.upstream_name != null and branch.new_branch_name == null) {
-                branch.new_branch_name = arg;
-            } else if (!std.mem.startsWith(u8, arg, "-") and branch.new_branch_name == null) {
-                branch.new_branch_name = arg;
-                if (branch.action != .set_upstream and branch.action != .unset_upstream) {
-                    branch.action = .create;
+            }
+        } else {
+            while (i < args.len) : (i += 1) {
+                const arg = args[i];
+                if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--delete")) {
+                    branch.action = .delete;
+                } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--move")) {
+                    branch.action = .rename;
+                } else if (std.mem.eql(u8, arg, "-D")) {
+                    branch.action = .delete;
+                } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--list")) {
+                    branch.action = .list;
+                } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--set-upstream-to")) {
+                    branch.action = .set_upstream;
+                    i += 1;
+                    if (i < args.len) {
+                        branch.upstream_name = args[i];
+                    }
+                } else if (std.mem.eql(u8, arg, "--unset-upstream")) {
+                    branch.action = .unset_upstream;
+                } else if (!std.mem.startsWith(u8, arg, "-") and branch.upstream_name != null and branch.new_branch_name == null) {
+                    branch.new_branch_name = arg;
+                } else if (!std.mem.startsWith(u8, arg, "-") and branch.new_branch_name == null) {
+                    branch.new_branch_name = arg;
+                    if (branch.action != .set_upstream and branch.action != .unset_upstream) {
+                        branch.action = .create;
+                    }
+                } else if (!std.mem.startsWith(u8, arg, "-") and branch.old_branch_name == null and branch.action == .rename) {
+                    branch.old_branch_name = arg;
                 }
-            } else if (!std.mem.startsWith(u8, arg, "-") and branch.old_branch_name == null and branch.action == .rename) {
-                branch.old_branch_name = arg;
             }
         }
 
