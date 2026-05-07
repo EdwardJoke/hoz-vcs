@@ -548,6 +548,26 @@ pub const CommandDispatcher = struct {
                     branch.target = arg;
                 }
             }
+        } else if (args.len > 0 and std.mem.eql(u8, args[0], "switch")) {
+            branch.action = .switch_branch;
+            i = 1;
+            while (i < args.len) : (i += 1) {
+                const arg = args[i];
+                if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--create")) {
+                    branch.switch_options.create_branch = true;
+                } else if (std.mem.eql(u8, arg, "-C") or std.mem.eql(u8, arg, "--force-create")) {
+                    branch.switch_options.force_create = true;
+                    branch.switch_options.create_branch = true;
+                } else if (std.mem.eql(u8, arg, "--detach")) {
+                    branch.switch_options.detach = true;
+                } else if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--force")) {
+                    branch.switch_options.force = true;
+                } else if (std.mem.eql(u8, arg, "--track")) {
+                    branch.switch_options.track = "";
+                } else if (!std.mem.startsWith(u8, arg, "-") and branch.target == null) {
+                    branch.target = arg;
+                }
+            }
         } else {
             while (i < args.len) : (i += 1) {
                 const arg = args[i];

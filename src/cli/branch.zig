@@ -17,6 +17,8 @@ const RenameOptions = @import("../branch/rename.zig").RenameOptions;
 const UpstreamOptions = @import("../branch/upstream.zig").UpstreamOptions;
 const CheckoutOptions = @import("../checkout/options.zig").CheckoutOptions;
 const CheckoutStrategy = @import("../checkout/options.zig").CheckoutStrategy;
+const BranchSwitcher = @import("../checkout/switch.zig").BranchSwitcher;
+const SwitchOptions = @import("../checkout/switch.zig").SwitchOptions;
 const OID = @import("../object/oid.zig").OID;
 const HeadManager = @import("../ref/head.zig").HeadManager;
 const Commit = @import("../object/commit.zig").Commit;
@@ -33,6 +35,7 @@ pub const BranchAction = enum {
     set_upstream,
     unset_upstream,
     checkout,
+    switch_branch,
 };
 
 pub const Branch = struct {
@@ -46,6 +49,7 @@ pub const Branch = struct {
     output: Output,
     target: ?[]const u8,
     checkout_options: CheckoutOptions,
+    switch_options: SwitchOptions,
 
     pub fn init(allocator: std.mem.Allocator, io: Io, writer: *std.Io.Writer, style: OutputStyle) Branch {
         return .{
@@ -59,6 +63,7 @@ pub const Branch = struct {
             .output = Output.init(writer, style, allocator),
             .target = null,
             .checkout_options = CheckoutOptions{},
+            .switch_options = SwitchOptions{},
         };
     }
 
@@ -78,6 +83,7 @@ pub const Branch = struct {
             .set_upstream => try self.runSetUpstream(git_dir),
             .unset_upstream => try self.runUnsetUpstream(git_dir),
             .checkout => try self.runCheckout(git_dir),
+            .switch_branch => try self.runSwitchBranch(git_dir),
         }
     }
 
@@ -254,6 +260,42 @@ pub const Branch = struct {
         try self.checkoutTreeToWorkdir(git_dir, commit.tree);
 
         try self.output.successMessage("Checked out {s} (tree {s})", .{ target, commit.tree.toHex() });
+    }
+
+    fn runSwitchBranch(self: *Branch, git_dir: Io.Dir) !void {
+        const target = self.target orelse {
+            try self.output.errorMessage("Usage: hoz branch switch <branch>", .{});
+            return;
+        };
+
+        var ref_store = RefStore.init(git_dir, self.allocator, self.io);
+
+        const sw_opts = SwitchOptions{
+            .create_branch = self.switch_options.create_branch,
+            .force_create = self.switch_options.force_create,
+            .detach = self.switch_options.detach,
+            .force = self.switch_options.force,
+        };
+
+        var switcher = BranchSwitcher.init(self.allocator, self.io, &ref_store, sw_opts, ".git");
+
+        if (self.switch_options.create_branch) {
+            const result = try switcher.createAndSwitch(target);
+            if (result.success) {
+                try self.output.successMessage("Switched to a new branch '{s}'", .{target});
+            } else {
+                try self.output.errorMessage("Failed to create and switch to branch '{s}'", .{target});
+            }
+        } else if (self.switch_options.detach) {
+            try self.output.errorMessage("switch --detach requires a commit OID", .{});
+        } else {
+            const result = try switcher.@"switch"(target);
+            if (result.success) {
+                try self.output.successMessage("Switched to branch '{s}'", .{target});
+            } else {
+                try self.output.errorMessage("Failed to switch to '{s}'", .{target});
+            }
+        }
     }
 
     pub fn isBranchName(name: []const u8) bool {
