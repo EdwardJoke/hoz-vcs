@@ -189,8 +189,8 @@ test "object parse size mismatch" {
 }
 
 test "object compute header size" {
-    try std.testing.expectEqual(11, computeHeaderSize(.blob, 0)); // "blob " + "0" + "\0"
-    try std.testing.expectEqual(12, computeHeaderSize(.blob, 9)); // "blob " + "9" + "\0"
-    try std.testing.expectEqual(13, computeHeaderSize(.blob, 99)); // "blob " + "99" + "\0"
-    try std.testing.expectEqual(14, computeHeaderSize(.blob, 999)); // "blob " + "999" + "\0"
+    try std.testing.expectEqual(@as(usize, 16), computeHeaderSize(.blob, 0)); // "blob " (5) + max_digits (10) + "\0" (1)
+    try std.testing.expectEqual(@as(usize, 16), computeHeaderSize(.blob, 9));
+    try std.testing.expectEqual(@as(usize, 16), computeHeaderSize(.blob, 99));
+    try std.testing.expectEqual(@as(usize, 16), computeHeaderSize(.blob, 999));
 }

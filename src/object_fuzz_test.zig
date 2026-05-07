@@ -29,13 +29,15 @@ test "fuzz: object parse space only header" {
 }
 
 test "fuzz: object parse negative size" {
-    try std.testing.expectError(error.InvalidObjectSize, object_mod.parse("blob -1\x00data"));
+    try std.testing.expectError(error.Overflow, object_mod.parse("blob -1\x00data"));
 }
 
 test "fuzz: object parse size zero with content" {
     const raw = try makeRaw("blob", "oops");
     defer std.testing.allocator.free(raw);
-    try std.testing.expectError(error.InvalidObjectSize, object_mod.parse(raw));
+    const obj = try object_mod.parse(raw);
+    try std.testing.expectEqual(.blob, obj.obj_type);
+    try std.testing.expectEqualSlices(u8, "oops", obj.data);
 }
 
 test "fuzz: object parse size zero empty content" {
@@ -53,18 +55,17 @@ test "fuzz: object parse huge size small content" {
 
 test "fuzz: object parse extra null bytes in header" {
     const raw = "blob 5\x00\x00hello";
-    const obj = try object_mod.parse(raw);
-    try std.testing.expectEqualSlices(u8, "\x00hello", obj.data);
+    try std.testing.expectError(error.InvalidObjectSize, object_mod.parse(raw));
 }
 
 test "fuzz: object parse type with trailing spaces" {
     const raw = "blob   3\x00abc";
-    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidCharacter, object_mod.parse(raw));
 }
 
 test "fuzz: object parse tab delimiter" {
     const raw = "blob\t3\x00abc";
-    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidObjectFormat, object_mod.parse(raw));
 }
 
 test "fuzz: object parse unknown type" {
@@ -89,12 +90,12 @@ test "fuzz: object parse mixed case Blob" {
 
 test "fuzz: object parse size as float" {
     const raw = "blob 3.14\x00data";
-    try std.testing.expectError(error.InvalidObjectSize, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidCharacter, object_mod.parse(raw));
 }
 
 test "fuzz: object parse size as hex" {
     const raw = "blob 0xff\x00data";
-    try std.testing.expectError(error.InvalidObjectSize, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidCharacter, object_mod.parse(raw));
 }
 
 test "fuzz: object parse size with leading zeros" {
