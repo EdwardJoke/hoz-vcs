@@ -33,18 +33,21 @@ macos-x86_64:
 linux-x86_64:
     zig build -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe
     mkdir -p assets
+    rm -f zig-out/bin/hoz-compressed
     upx -9 -q -o zig-out/bin/hoz-compressed zig-out/bin/hoz
     cp zig-out/bin/hoz-compressed assets/hoz-{{version}}-linux-x86_64
 
 linux-aarch64:
     zig build -Dtarget=aarch64-linux-gnu -Doptimize=ReleaseSafe
     mkdir -p assets
+    rm -f zig-out/bin/hoz-compressed
     upx -9 -q -o zig-out/bin/hoz-compressed zig-out/bin/hoz
     cp zig-out/bin/hoz-compressed assets/hoz-{{version}}-linux-aarch64
 
 windows-x86_64:
     zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseSafe
     mkdir -p assets
+    rm -f zig-out/bin/hoz-compressed.exe
     upx -9 -q -o zig-out/bin/hoz-compressed.exe zig-out/bin/hoz.exe
     cp zig-out/bin/hoz-compressed.exe assets/hoz-{{version}}-windows-x86_64.exe
 

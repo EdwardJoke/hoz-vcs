@@ -1,5 +1,6 @@
 //! Git Instaweb - Launch web browser for gitweb interface
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
@@ -29,6 +30,10 @@ pub const Instaweb = struct {
     }
 
     pub fn run(self: *Instaweb, args: []const []const u8) !void {
+        if (builtin.os.tag == .windows) {
+            try self.output.errorMessage("Instaweb is not supported on Windows", .{});
+            return;
+        }
         self.parseArgs(args);
 
         const cwd = Io.Dir.cwd();
@@ -72,95 +77,108 @@ pub const Instaweb = struct {
     }
 
     fn startServer(self: *Instaweb, git_dir: *const Io.Dir) !void {
-        const port_str = try std.fmt.allocPrint(self.allocator, "{d}", .{self.options.port});
-        defer self.allocator.free(port_str);
+        switch (builtin.os.tag) {
+            .windows => return,
+            else => {
+                const port_str = try std.fmt.allocPrint(self.allocator, "{d}", .{self.options.port});
+                defer self.allocator.free(port_str);
 
-        const pid_file_path = try std.fs.path.join(self.allocator, &.{ ".git", ".pid" });
-        defer self.allocator.free(pid_file_path);
+                const pid_file_path = try std.fs.path.join(self.allocator, &.{ ".git", ".pid" });
+                defer self.allocator.free(pid_file_path);
 
-        const existing_pid = git_dir.readFileAlloc(self.io, pid_file_path, self.allocator, .limited(32)) catch null;
-        if (existing_pid) |pid| {
-            defer self.allocator.free(pid);
-            const trimmed = std.mem.trim(u8, pid, " \n\r");
-            if (trimmed.len > 0) {
-                const parsed_pid = std.fmt.parseInt(i32, trimmed, 10) catch 0;
-                if (parsed_pid > 0) {
-                    _ = std.posix.kill(parsed_pid, @enumFromInt(@as(c_uint, 0))) catch {};
+                const existing_pid = git_dir.readFileAlloc(self.io, pid_file_path, self.allocator, .limited(32)) catch null;
+                if (existing_pid) |pid| {
+                    defer self.allocator.free(pid);
+                    const trimmed = std.mem.trim(u8, pid, " \n\r");
+                    if (trimmed.len > 0) {
+                        const parsed_pid = std.fmt.parseInt(i32, trimmed, 10) catch 0;
+                        if (parsed_pid > 0) {
+                            _ = std.posix.kill(parsed_pid, @enumFromInt(@as(c_uint, 0))) catch {};
+                        }
+                        try self.output.infoMessage("Instaweb already running on port {s} (PID: {s})", .{ port_str, trimmed });
+                        try self.launchBrowser(port_str);
+                        return;
+                    }
                 }
-                try self.output.infoMessage("Instaweb already running on port {s} (PID: {s})", .{ port_str, trimmed });
+
+                try self.output.section("Starting Git Web Interface");
+                try self.output.item("HTTP Server", self.options.httpd);
+                try self.output.item("Port", port_str);
+                try self.output.item("Root", ".");
+
+                const bind_addr = if (self.options.local) "127.0.0.1" else "0.0.0.0";
+
+                try self.generateGitwebConfig(git_dir, port_str, bind_addr);
+
+                const url = try std.fmt.allocPrint(self.allocator, "http://{s}:{s}/", .{ bind_addr, port_str });
+                defer self.allocator.free(url);
+
+                const server_argv = try self.buildHttpdCommand(port_str, bind_addr);
+
+                const child = std.process.spawn(self.io, .{
+                    .argv = server_argv,
+                    .stdin = .close,
+                    .stdout = .close,
+                    .stderr = .close,
+                }) catch {
+                    try self.output.errorMessage("Failed to start HTTP server: {s}", .{self.options.httpd});
+                    return;
+                };
+
+                const child_pid: i32 = child.id orelse 0;
+                const pid_str = try std.fmt.allocPrint(self.allocator, "{d}", .{child_pid});
+
+                git_dir.writeFile(self.io, .{ .sub_path = pid_file_path, .data = pid_str }) catch {
+                    try self.output.errorMessage("Failed to write PID file", .{});
+                };
+                self.allocator.free(pid_str);
+
+                try self.output.successMessage("Git web interface available at: {s}", .{url});
+
                 try self.launchBrowser(port_str);
-                return;
-            }
+            },
         }
-
-        try self.output.section("Starting Git Web Interface");
-        try self.output.item("HTTP Server", self.options.httpd);
-        try self.output.item("Port", port_str);
-        try self.output.item("Root", ".");
-
-        const bind_addr = if (self.options.local) "127.0.0.1" else "0.0.0.0";
-
-        try self.generateGitwebConfig(git_dir, port_str, bind_addr);
-
-        const url = try std.fmt.allocPrint(self.allocator, "http://{s}:{s}/", .{ bind_addr, port_str });
-        defer self.allocator.free(url);
-
-        const server_argv = try self.buildHttpdCommand(port_str, bind_addr);
-
-        const child = std.process.spawn(self.io, .{
-            .argv = server_argv,
-            .stdin = .close,
-            .stdout = .close,
-            .stderr = .close,
-        }) catch {
-            try self.output.errorMessage("Failed to start HTTP server: {s}", .{self.options.httpd});
-            return;
-        };
-
-        const child_pid: i32 = child.id orelse 0;
-        const pid_str = try std.fmt.allocPrint(self.allocator, "{d}", .{child_pid});
-
-        git_dir.writeFile(self.io, .{ .sub_path = pid_file_path, .data = pid_str }) catch {
-            try self.output.errorMessage("Failed to write PID file", .{});
-        };
-        self.allocator.free(pid_str);
-
-        try self.output.successMessage("Git web interface available at: {s}", .{url});
-
-        try self.launchBrowser(port_str);
     }
 
     fn stopServer(self: *Instaweb, git_dir: *const Io.Dir) !void {
-        const pid_file_path = try std.fs.path.join(self.allocator, &.{ ".git", ".pid" });
-        defer self.allocator.free(pid_file_path);
-
-        const pid_content = git_dir.readFileAlloc(self.io, pid_file_path, self.allocator, .limited(32)) catch {
-            try self.output.infoMessage("Instaweb not running", .{});
-            return;
-        };
-        defer self.allocator.free(pid_content);
-
-        const trimmed = std.mem.trim(u8, pid_content, " \n\r");
-        if (trimmed.len == 0) {
-            try self.output.infoMessage("Instaweb not running", .{});
-            return;
-        }
-
-        const pid = std.fmt.parseInt(i32, trimmed, 10) catch {
-            try self.output.errorMessage("Invalid PID in pid file", .{});
-            return;
-        };
-
-        _ = std.posix.kill(pid, @enumFromInt(@as(c_uint, 15))) catch {
-            _ = std.posix.kill(pid, @enumFromInt(@as(c_uint, 9))) catch {
-                try self.output.errorMessage("Failed to kill process (PID: {d})", .{pid});
+        switch (builtin.os.tag) {
+            .windows => {
+                try self.output.errorMessage("Instaweb is not supported on Windows", .{});
                 return;
-            };
-        };
+            },
+            else => {
+                const pid_file_path = try std.fs.path.join(self.allocator, &.{ ".git", ".pid" });
+                defer self.allocator.free(pid_file_path);
 
-        git_dir.deleteFile(self.io, pid_file_path) catch {};
+                const pid_content = git_dir.readFileAlloc(self.io, pid_file_path, self.allocator, .limited(32)) catch {
+                    try self.output.infoMessage("Instaweb not running", .{});
+                    return;
+                };
+                defer self.allocator.free(pid_content);
 
-        try self.output.successMessage("Stopped instaweb server (PID: {d})", .{pid});
+                const trimmed = std.mem.trim(u8, pid_content, " \n\r");
+                if (trimmed.len == 0) {
+                    try self.output.infoMessage("Instaweb not running", .{});
+                    return;
+                }
+
+                const pid = std.fmt.parseInt(i32, trimmed, 10) catch {
+                    try self.output.errorMessage("Invalid PID in pid file", .{});
+                    return;
+                };
+
+                _ = std.posix.kill(pid, .TERM) catch {
+                    _ = std.posix.kill(pid, .KILL) catch {
+                        try self.output.errorMessage("Failed to kill process (PID: {d})", .{pid});
+                        return;
+                    };
+                };
+
+                git_dir.deleteFile(self.io, pid_file_path) catch {};
+
+                try self.output.successMessage("Stopped instaweb server (PID: {d})", .{pid});
+            },
+        }
     }
 
     fn generateGitwebConfig(self: *Instaweb, git_dir: *const Io.Dir, port: []const u8, bind_addr: []const u8) !void {

@@ -1,5 +1,6 @@
 //! Git Commit - Record changes to the repository
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const OID = @import("../object/oid.zig").OID;
 const oid_mod = @import("../object/oid.zig");
@@ -26,6 +27,7 @@ const c_tm = extern struct {
 };
 extern fn localtime_r([*c]const c_long, [*c]c_tm) [*c]c_tm;
 extern fn time([*c]c_long) c_long;
+const have_localtime = builtin.os.tag != .windows;
 
 pub const Commit = struct {
     allocator: std.mem.Allocator,
@@ -285,6 +287,7 @@ pub const Commit = struct {
     }
 
     fn timezoneOffset(_: *Commit) i32 {
+        if (!have_localtime) return 0;
         var tm: c_tm = undefined;
         var now: c_long = 0;
         _ = time(&now);

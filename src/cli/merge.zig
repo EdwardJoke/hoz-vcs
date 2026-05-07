@@ -1,5 +1,6 @@
 //! Git Merge - Join two or more development histories together
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
@@ -25,6 +26,7 @@ const c_tm = extern struct {
 
 extern fn localtime_r([*c]const c_long, [*c]c_tm) [*c]c_tm;
 extern fn time([*c]c_long) c_long;
+const have_localtime = builtin.os.tag != .windows;
 
 pub const MergeStrategy = enum {
     recursive,
@@ -452,6 +454,7 @@ pub const Merge = struct {
     }
 
     fn timezoneOffset(_: *Merge) i32 {
+        if (!have_localtime) return 0;
         var tm = std.mem.zeroes(c_tm);
         var now: c_long = 0;
         _ = time(&now);

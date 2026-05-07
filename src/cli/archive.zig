@@ -1,7 +1,9 @@
 //! Git Archive - Create archive from tree object
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 extern fn time([*c]c_long) c_long;
+const have_posix_ids = builtin.os.tag != .windows;
 extern fn getuid() c_uint;
 extern fn getgid() c_uint;
 const Output = @import("output.zig").Output;
@@ -272,8 +274,8 @@ pub const Archive = struct {
 
         _ = try std.fmt.bufPrint(header[100..108], "{o:0>7}", .{@as(u32, mode)});
 
-        _ = try std.fmt.bufPrint(header[108..116], "{o:0>7}", .{@as(u32, getuid())});
-        _ = try std.fmt.bufPrint(header[116..124], "{o:0>7}", .{@as(u32, getgid())});
+        _ = try std.fmt.bufPrint(header[108..116], "{o:0>7}", .{@as(u32, if (have_posix_ids) getuid() else 0)});
+        _ = try std.fmt.bufPrint(header[116..124], "{o:0>7}", .{@as(u32, if (have_posix_ids) getgid() else 0)});
         _ = try std.fmt.bufPrint(header[124..136], "{d:0>11}", .{@as(u64, size)});
 
         var now: c_long = 0;
