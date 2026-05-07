@@ -107,48 +107,124 @@ test "FastForwardResult structure" {
     try std.testing.expect(result.commits_moved == 5);
 }
 
-test "FastForwardChecker init" {
-    const dummyGetCommit: *const fn (OID) ?*const commit.Commit = struct {
-        fn get(_: OID) ?*const commit.Commit {
-            return null;
-        }
-    }.get;
-    const checker = FastForwardChecker.init(std.testing.allocator, dummyGetCommit);
-    try std.testing.expect(checker.allocator == std.testing.allocator);
+fn makeMockCommit(oid_hex: []const u8, parent_hexs: []const []const u8) commit.Commit {
+    const oid = OID.fromHex(oid_hex) catch unreachable;
+    var parents_buf: [4]OID = undefined;
+    for (parent_hexs, 0..) |ph, i| {
+        parents_buf[i] = OID.fromHex(ph) catch unreachable;
+    }
+    return commit.Commit.create(
+        oid,
+        parents_buf[0..parent_hexs.len],
+        .{ .name = "a", .email = "a@b", .timestamp = 0, .timezone = 0 },
+        .{ .name = "a", .email = "a@b", .timestamp = 0, .timezone = 0 },
+        "msg",
+    );
 }
 
-test "FastForwardChecker check method exists" {
-    const dummyGetCommit: *const fn (OID) ?*const commit.Commit = struct {
-        fn get(_: OID) ?*const commit.Commit {
+test "FastForwardChecker detects linear history" {
+    const base_oid = "1111111111111111111111111111111111111111";
+    const mid_oid = "2222222222222222222222222222222222222222";
+    const tip_oid = "3333333333333333333333333333333333333333";
+
+    const base_commit = makeMockCommit(base_oid, &.{});
+    const mid_commit = makeMockCommit(mid_oid, &.{base_oid});
+    const tip_commit = makeMockCommit(tip_oid, &.{mid_oid});
+
+    const MockStore = struct {
+        fn get(oid: OID) ?*const commit.Commit {
+            const o1 = OID.fromHex(base_oid) catch return null;
+            const o2 = OID.fromHex(mid_oid) catch return null;
+            const o3 = OID.fromHex(tip_oid) catch return null;
+            if (std.mem.eql(u8, &oid.bytes, &o1.bytes)) return @constCast(&base_commit);
+            if (std.mem.eql(u8, &oid.bytes, &o2.bytes)) return @constCast(&mid_commit);
+            if (std.mem.eql(u8, &oid.bytes, &o3.bytes)) return @constCast(&tip_commit);
             return null;
         }
-    }.get;
-    var checker = FastForwardChecker.init(std.testing.allocator, dummyGetCommit);
-    const result = try checker.check(undefined, undefined);
-    _ = result;
-    try std.testing.expect(checker.allocator != undefined);
+    };
+
+    const ours = OID.fromHex(base_oid) catch unreachable;
+    const theirs = OID.fromHex(tip_oid) catch unreachable;
+    var checker = FastForwardChecker.init(std.testing.allocator, MockStore.get);
+
+    const result = try checker.check(ours, theirs);
+    try std.testing.expect(result.can_ff == true);
+    try std.testing.expect(result.commits_moved == 2);
+    try std.testing.expect(result.ff_target.?.eql(theirs));
 }
 
-test "FastForwardChecker canFastForward method exists" {
-    const dummyGetCommit: *const fn (OID) ?*const commit.Commit = struct {
-        fn get(_: OID) ?*const commit.Commit {
+test "FastForwardChecker rejects divergent history" {
+    const base_oid = "1111111111111111111111111111111111111111";
+    const left_oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const right_oid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    const base_commit = makeMockCommit(base_oid, &.{});
+    const left_commit = makeMockCommit(left_oid, &.{base_oid});
+    const right_commit = makeMockCommit(right_oid, &.{base_oid});
+
+    const MockStore = struct {
+        fn get(oid: OID) ?*const commit.Commit {
+            const o1 = OID.fromHex(base_oid) catch return null;
+            const o2 = OID.fromHex(left_oid) catch return null;
+            const o3 = OID.fromHex(right_oid) catch return null;
+            if (std.mem.eql(u8, &oid.bytes, &o1.bytes)) return @constCast(&base_commit);
+            if (std.mem.eql(u8, &oid.bytes, &o2.bytes)) return @constCast(&left_commit);
+            if (std.mem.eql(u8, &oid.bytes, &o3.bytes)) return @constCast(&right_commit);
             return null;
         }
-    }.get;
-    var checker = FastForwardChecker.init(std.testing.allocator, dummyGetCommit);
-    const can = checker.canFastForward(undefined, undefined);
-    _ = can;
-    try std.testing.expect(checker.allocator != undefined);
+    };
+
+    const ours = OID.fromHex(left_oid) catch unreachable;
+    const theirs = OID.fromHex(right_oid) catch unreachable;
+    var checker = FastForwardChecker.init(std.testing.allocator, MockStore.get);
+
+    const result = try checker.check(ours, theirs);
+    try std.testing.expect(result.can_ff == false);
+    try std.testing.expect(result.commits_moved == 0);
 }
 
-test "FastForwardChecker getMergeBase method exists" {
-    const dummyGetCommit: *const fn (OID) ?*const commit.Commit = struct {
-        fn get(_: OID) ?*const commit.Commit {
+test "FastForwardChecker up-to-date returns zero moves" {
+    const oid_str = "1111111111111111111111111111111111111111";
+    const solo_commit = makeMockCommit(oid_str, &.{});
+
+    const MockStore = struct {
+        fn get(oid: OID) ?*const commit.Commit {
+            const target = OID.fromHex(oid_str) catch return null;
+            if (std.mem.eql(u8, &oid.bytes, &target.bytes)) return @constCast(&solo_commit);
             return null;
         }
-    }.get;
-    var checker = FastForwardChecker.init(std.testing.allocator, dummyGetCommit);
-    const base = checker.getMergeBase(undefined, undefined);
-    _ = base;
-    try std.testing.expect(checker.allocator != undefined);
+    };
+
+    const same = OID.fromHex(oid_str) catch unreachable;
+    var checker = FastForwardChecker.init(std.testing.allocator, MockStore.get);
+
+    const result = try checker.check(same, same);
+    try std.testing.expect(result.can_ff == true);
+    try std.testing.expect(result.commits_moved == 0);
+}
+
+test "FastForwardChecker getMergeBase finds common ancestor" {
+    const base_oid = "1111111111111111111111111111111111111111";
+    const left_oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const right_oid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    const base_commit = makeMockCommit(base_oid, &.{});
+    _ = makeMockCommit(left_oid, &.{base_oid});
+    _ = makeMockCommit(right_oid, &.{base_oid});
+
+    const MockStore = struct {
+        fn get(oid: OID) ?*const commit.Commit {
+            const base = OID.fromHex(base_oid) catch return null;
+            if (std.mem.eql(u8, &oid.bytes, &base.bytes)) return @constCast(&base_commit);
+            return null;
+        }
+    };
+
+    const ours = OID.fromHex(left_oid) catch unreachable;
+    const theirs = OID.fromHex(right_oid) catch unreachable;
+    var checker = FastForwardChecker.init(std.testing.allocator, MockStore.get);
+
+    const base = checker.getMergeBase(ours, theirs);
+    try std.testing.expect(base != null);
+    try std.testing.expect(base.?.eql(OID.fromHex(base_oid) catch unreachable));
 }
