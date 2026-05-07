@@ -7,8 +7,8 @@
 ![GitHub Last Commit](https://shieldcn.dev/github/last-commit/edwardjoke/hoz-vcs.svg?variant=outline) ![GitHub Open Issues](https://shieldcn.dev/github/open-issues/vercel/next.js.svg?variant=outline)<br/>
 ![Runs on Linux](https://shieldcn.dev/badge/Runs%20on-Linux-FCC624.svg?logo=linux&logoColor=000) ![Runs on MacOS](https://shieldcn.dev/badge/Runs%20on-MacOS-000000.svg?mode=light&logo=apple&logoColor=fff) ![Cross Platform](https://shieldcn.dev/badge/cross-platform-brightgreen.svg?variant=outline&logo=ri%3AGoDeviceDesktop)
 
-*A full-featured Git implementation in Zig 0.16.0, *<br/>
-*built for type safety and performance. *
+*A full-featured Git implementation in Zig 0.16.0,* <br/>
+*built for type safety and performance.*
 Hoz is the next generation of Git-compatible version control with a clean, modern codebase.
 
 </div>
