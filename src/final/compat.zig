@@ -57,7 +57,7 @@ pub const GitCompatTester = struct {
         try self.runAdd();
         try self.runCommit();
         try self.runBranch();
-        try self.runCheckout();
+        try self.runBranchCheckout();
         try self.runMerge();
         try self.runRebase();
         try self.runStash();
@@ -236,7 +236,7 @@ pub const GitCompatTester = struct {
         self.passed += 1;
     }
 
-    fn runCheckout(self: *GitCompatTester) !void {
+    fn runBranchCheckout(self: *GitCompatTester) !void {
         const repo_path = try self.setupRepo("checkout_test");
         defer self.allocator.free(repo_path);
 
@@ -250,7 +250,7 @@ pub const GitCompatTester = struct {
         try self.runCommand(&.{ "hoz", "commit", "-m", "init" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "checkout", "-b", "feature" }, ".");
-        try self.runCommand(&.{ "hoz", "checkout", "-b", "feature" }, repo_path);
+        try self.runCommand(&.{ "hoz", "branch", "out", "-b", "feature" }, repo_path);
 
         const git_head = try self.runCommandWithOutput(&.{ "git", "-C", repo_path, "rev-parse", "--abbrev-ref", "HEAD" }, ".");
         defer self.allocator.free(git_head);
@@ -273,12 +273,12 @@ pub const GitCompatTester = struct {
 
         try self.runCommand(&.{ "git", "-C", repo_path, "checkout", "feature" }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "feature" }, ".");
-        try self.runCommand(&.{ "hoz", "checkout", "feature" }, repo_path);
+        try self.runCommand(&.{ "hoz", "branch", "out", "feature" }, repo_path);
         try self.runCommand(&.{ "hoz", "commit", "--allow-empty", "-m", "feature" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "checkout", "main" }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "merge", "feature", "--no-edit" }, ".");
-        try self.runCommand(&.{ "hoz", "checkout", "main" }, repo_path);
+        try self.runCommand(&.{ "hoz", "branch", "out", "main" }, repo_path);
         try self.runCommand(&.{ "hoz", "merge", "feature", "--no-edit" }, repo_path);
 
         const git_log = try self.runCommandWithOutput(&.{ "git", "-C", repo_path, "log", "--oneline" }, ".");
@@ -303,17 +303,17 @@ pub const GitCompatTester = struct {
 
         try self.runCommand(&.{ "git", "-C", repo_path, "checkout", "feature" }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "feature" }, ".");
-        try self.runCommand(&.{ "hoz", "checkout", "feature" }, repo_path);
+        try self.runCommand(&.{ "hoz", "branch", "out", "feature" }, repo_path);
         try self.runCommand(&.{ "hoz", "commit", "--allow-empty", "-m", "feature" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "checkout", "main" }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "commit", "--allow-empty", "-m", "main2" }, ".");
-        try self.runCommand(&.{ "hoz", "checkout", "main" }, repo_path);
+        try self.runCommand(&.{ "hoz", "branch", "out", "main" }, repo_path);
         try self.runCommand(&.{ "hoz", "commit", "--allow-empty", "-m", "main2" }, repo_path);
 
         try self.runCommand(&.{ "git", "-C", repo_path, "checkout", "feature" }, ".");
         try self.runCommand(&.{ "git", "-C", repo_path, "rebase", "main" }, ".");
-        try self.runCommand(&.{ "hoz", "checkout", "feature" }, repo_path);
+        try self.runCommand(&.{ "hoz", "branch", "out", "feature" }, repo_path);
         try self.runCommand(&.{ "hoz", "rebase", "main" }, repo_path);
 
         const git_rebased = try self.runCommandWithOutput(&.{ "git", "-C", repo_path, "log", "--oneline", "-2" }, ".");
