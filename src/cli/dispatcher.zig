@@ -24,7 +24,6 @@ const Notes = @import("notes.zig").Notes;
 const Reset = @import("reset.zig").Reset;
 const ResetMode = @import("reset.zig").ResetMode;
 const Branch = @import("branch.zig").Branch;
-const Checkout = @import("checkout.zig").Checkout;
 const Stash = @import("stash.zig").Stash;
 const Tag = @import("tag.zig").Tag;
 const Reflog = @import("reflog.zig").Reflog;
@@ -44,7 +43,6 @@ const Describe = @import("describe.zig").Describe;
 const Fsck = @import("fsck.zig").Fsck;
 const FormatPatch = @import("format_patch.zig").FormatPatch;
 const Mv = @import("mv.zig").Mv;
-const Switch = @import("switch.zig").Switch;
 const Bisect = @import("bisect.zig").Bisect;
 const Config = @import("config.zig").Config;
 const Archive = @import("archive.zig").Archive;
@@ -125,8 +123,6 @@ pub const CommandDispatcher = struct {
             try self.runReset(args);
         } else if (std.mem.eql(u8, cmd, "branch")) {
             try self.runBranch(args);
-        } else if (std.mem.eql(u8, cmd, "checkout")) {
-            try self.runCheckout(args);
         } else if (std.mem.eql(u8, cmd, "stash")) {
             try self.runStash(args);
         } else if (std.mem.eql(u8, cmd, "tag")) {
@@ -153,8 +149,6 @@ pub const CommandDispatcher = struct {
             try self.runLsTree(args);
         } else if (std.mem.eql(u8, cmd, "show-ref")) {
             try self.runShowRef(args);
-        } else if (std.mem.eql(u8, cmd, "switch")) {
-            try self.runSwitch(args);
         } else if (std.mem.eql(u8, cmd, "bisect")) {
             try self.runBisect(args);
         } else if (std.mem.eql(u8, cmd, "config")) {
@@ -603,29 +597,6 @@ pub const CommandDispatcher = struct {
         try branch.run();
     }
 
-    fn runCheckout(self: *CommandDispatcher, args: []const []const u8) !void {
-        var checkout = Checkout.init(self.allocator, self.io, self.writer, self.style);
-
-        for (args) |arg| {
-            if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--force")) {
-                checkout.options.strategy = .force;
-                checkout.options.force = true;
-            } else if (std.mem.eql(u8, arg, "-b")) {
-                checkout.options.create_branch = true;
-            } else if (std.mem.eql(u8, arg, "-B")) {
-                checkout.options.force_create_branch = true;
-            } else if (std.mem.eql(u8, arg, "--detach")) {
-                checkout.options.detach = true;
-            } else if (std.mem.eql(u8, arg, "--track")) {
-                checkout.options.track = "";
-            } else if (!std.mem.startsWith(u8, arg, "-") and checkout.target == null) {
-                checkout.target = arg;
-            }
-        }
-
-        try checkout.run();
-    }
-
     fn runStash(self: *CommandDispatcher, args: []const []const u8) !void {
         var stash = Stash.init(self.allocator, self.io, self.writer, self.style);
 
@@ -750,11 +721,6 @@ pub const CommandDispatcher = struct {
     fn runShowRef(self: *CommandDispatcher, args: []const []const u8) !void {
         var show_ref = ShowRef.init(self.allocator, self.io, self.writer, self.style);
         try show_ref.run(args);
-    }
-
-    fn runSwitch(self: *CommandDispatcher, args: []const []const u8) !void {
-        var switch_cmd = Switch.init(self.allocator, self.io, self.writer, self.style);
-        try switch_cmd.run(args);
     }
 
     fn runBisect(self: *CommandDispatcher, args: []const []const u8) !void {
