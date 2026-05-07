@@ -180,18 +180,40 @@ pub const UnifiedDiff = struct {
         old_lines: []const []const u8,
         new_lines: []const []const u8,
     ) !void {
-        _ = self;
         _ = old_lines;
         _ = new_lines;
-        try writer.print("@@ -{d},{d} +{d},{d} @@\n", .{
-            hunk.old_start,
-            hunk.old_count,
-            hunk.new_start,
-            hunk.new_count,
-        });
+
+        const cyan = "\x1b[36m";
+        const green = "\x1b[32m";
+        const red = "\x1b[31m";
+        const reset = "\x1b[0m";
+
+        if (self.config.color) {
+            try writer.print("{s}{s}@@ -{d},{d} +{d},{d} @@{s}\n", .{
+                cyan, "\x1b[1m", hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count, reset,
+            });
+        } else {
+            try writer.print("@@ -{d},{d} +{d},{d} @@\n", .{
+                hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count,
+            });
+        }
 
         for (hunk.lines) |line| {
-            try writer.print("{s}\n", .{line});
+            if (line.len == 0) {
+                try writer.writeAll("\n");
+                continue;
+            }
+            if (self.config.color) {
+                if (std.mem.startsWith(u8, line, "+")) {
+                    try writer.print("{s}{s}{s}\n", .{ green, line, reset });
+                } else if (std.mem.startsWith(u8, line, "-")) {
+                    try writer.print("{s}{s}{s}\n", .{ red, line, reset });
+                } else {
+                    try writer.print("{s}\n", .{line});
+                }
+            } else {
+                try writer.print("{s}\n", .{line});
+            }
         }
     }
 };
