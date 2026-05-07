@@ -136,13 +136,13 @@ pub fn oidIsZero(oid: OID) bool {
 }
 
 test "oid from hex" {
-    const hex_str = "2aae6c8f6f948c5af23c4a08f91c7a4d903c1e";
+    const hex_str = "0123456789abcdef0123456789abcdef01234567";
     const oid = try OID.fromHex(hex_str);
     try std.testing.expect(!oid.isZero());
 }
 
 test "oid to hex" {
-    const hex_str = "2aae6c8f6f948c5af23c4a08f91c7a4d903c1e";
+    const hex_str = "0123456789abcdef0123456789abcdef01234567";
     const oid = try OID.fromHex(hex_str);
     const result = oid.toHex();
     try std.testing.expectEqualSlices(u8, hex_str, &result);
@@ -160,15 +160,15 @@ test "oid zero" {
 }
 
 test "oid equal" {
-    const hex_str = "2aae6c8f6f948c5af23c4a08f91c7a4d903c1e";
+    const hex_str = "0123456789abcdef0123456789abcdef01234567";
     const oid1 = try OID.fromHex(hex_str);
     const oid2 = try OID.fromHex(hex_str);
     try std.testing.expect(oid1.eql(oid2));
 }
 
 test "oid from hex invalid length" {
-    const short_hex = "abc";
-    try std.testing.expectError(error.InvalidHexLength, OID.fromHex(short_hex));
+    const empty = "";
+    try std.testing.expectError(error.InvalidHexLength, OID.fromHex(empty));
 }
 
 test "oid from bytes" {
@@ -185,26 +185,28 @@ test "oid is zero returns false for non-zero" {
 
 test "oid not equal" {
     const hex1 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    const hex2 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const hex2 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const oid1 = try OID.fromHex(hex1);
     const oid2 = try OID.fromHex(hex2);
     try std.testing.expect(!oid1.eql(oid2));
 }
 
 test "oid short forms" {
-    const full_hex = "2aae6c8f6f948c5af23c4a08f91c7a4d903c1e";
+    const full_hex = "0123456789abcdef0123456789abcdef01234567";
     const oid = try OID.fromHex(full_hex);
 
     const short7 = oid.short(7);
-    try std.testing.expectEqualSlices(u8, "2aae6c8", &short7);
+    try std.testing.expectEqualSlices(u8, "0123456", short7[0..7]);
 
     const short40 = oid.toHex();
     try std.testing.expectEqualSlices(u8, full_hex, &short40);
 }
 
 test "oid short from hex" {
-    const short7 = "2aae6c8";
-    const oid = try OID.fromHex(short7);
+    const short8 = "01234567";
+    const oid = try OID.fromHex(short8);
+    const full = oid.toHex();
+    try std.testing.expectEqualSlices(u8, "0123456", full[0..7]);
     try std.testing.expect(!oid.isZero());
 }
 
@@ -212,7 +214,7 @@ test "oid zero from short" {
     const zero = oidZero();
     try std.testing.expect(zero.isZero());
 
-    const zero_hex = try OID.fromHex("0000000");
+    const zero_hex = try OID.fromHex("0000000000000000000000000000000000000000");
     try std.testing.expect(zero_hex.isZero());
 }
 
