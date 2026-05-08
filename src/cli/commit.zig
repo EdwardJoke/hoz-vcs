@@ -136,7 +136,7 @@ pub const Commit = struct {
 
         const commit_oid = oid_mod.oidFromContent(serialized);
 
-        try self.writeLooseObject(git_dir, serialized);
+        _ = try object_io.writeLooseObject(git_dir, self.io, self.allocator, serialized);
 
         try self.updateHead(git_dir, commit_oid);
 
@@ -166,14 +166,14 @@ pub const Commit = struct {
         defer self.allocator.free(serialized);
 
         const tree_oid = oid_mod.oidFromContent(serialized);
-        try self.writeLooseObject(git_dir, serialized);
+        _ = try object_io.writeLooseObject(git_dir, self.io, self.allocator, serialized);
         return tree_oid;
     }
 
     fn writeEmptyTree(self: *Commit, git_dir: *const Io.Dir) !OID {
         const empty_tree = "tree 0\x00";
         const empty_oid = oid_mod.oidFromContent(empty_tree);
-        try self.writeLooseObject(git_dir, empty_tree);
+        _ = try object_io.writeLooseObject(git_dir, self.io, self.allocator, empty_tree);
         return empty_oid;
     }
 
@@ -218,10 +218,6 @@ pub const Commit = struct {
         } else {
             try git_dir.writeFile(self.io, .{ .sub_path = "HEAD", .data = content });
         }
-    }
-
-    fn writeLooseObject(self: *Commit, git_dir: *const Io.Dir, data: []const u8) !void {
-        _ = try object_io.writeLooseObject(git_dir, self.io, self.allocator, data);
     }
 
     fn timezoneOffset(_: *Commit) i32 {

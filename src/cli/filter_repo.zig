@@ -148,7 +148,7 @@ pub const FilterRepo = struct {
                     }
 
                     if (!self.options.dry_run) {
-                        _ = try writeLooseObject(git_dir, self.io, self.allocator, new_data);
+                        _ = try object_io.writeLooseObject(git_dir, self.io, self.allocator, new_data);
                     }
 
                     try rewritten.append(self.allocator, .{
@@ -484,7 +484,7 @@ pub const FilterBranch = struct {
             const serialized = try new_commit.serialize(self.allocator);
             defer self.allocator.free(serialized);
 
-            const new_oid_bytes = writeLooseObject(&git_dir, self.io, self.allocator, serialized) catch {
+            const new_oid_bytes = object_io.writeLooseObject(&git_dir, self.io, self.allocator, serialized) catch {
                 try self.output.errorMessage("filter-branch: failed to write rewritten commit {s}", .{abbrevOid(oid)});
                 continue;
             };
@@ -599,7 +599,7 @@ pub const FilterBranch = struct {
         const serialized = try new_tree.serialize(self.allocator);
         defer self.allocator.free(serialized);
 
-        const new_oid_bytes = writeLooseObject(git_dir, self.io, self.allocator, serialized) catch return error.TreeRewriteFailed;
+        const new_oid_bytes = object_io.writeLooseObject(git_dir, self.io, self.allocator, serialized) catch return error.TreeRewriteFailed;
         const new_oid = OID.fromBytes(&new_oid_bytes);
 
         const new_hex = new_oid.toHex();
@@ -660,10 +660,6 @@ pub const FilterBranch = struct {
         _ = try refs_heads.writeFile(self.io, .{ .sub_path = ref_name, .data = content });
     }
 };
-
-fn writeLooseObject(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocator, data: []const u8) ![20]u8 {
-    return object_io.writeLooseObject(git_dir, io, allocator, data);
-}
 
 fn hexLower(bytes: []const u8) [64]u8 {
     const hex_chars = "0123456789abcdef";
