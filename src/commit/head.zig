@@ -60,6 +60,20 @@ pub fn resolveHeadOid(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocat
     return null;
 }
 
+/// Read HEAD's symbolic ref path (e.g., "refs/heads/main").
+/// Returns null if HEAD is detached (contains a raw OID) or unreadable.
+pub fn readHeadRef(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocator) ?[]const u8 {
+    const head_content = git_dir.readFileAlloc(io, "HEAD", allocator, .limited(256)) catch return null;
+    defer allocator.free(head_content);
+    const trimmed = std.mem.trim(u8, head_content, " \t\r\n");
+
+    if (std.mem.startsWith(u8, trimmed, "ref: ")) {
+        const ref_path = std.mem.trim(u8, trimmed["ref: ".len..], " \t\r\n");
+        return allocator.dupe(u8, ref_path) catch null;
+    }
+    return null;
+}
+
 test "HeadUpdate init" {
     var ref_store: RefStore = std.mem.zeroes(RefStore);
     const updater = HeadUpdate.init(std.testing.allocator, &ref_store);

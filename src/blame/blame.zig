@@ -37,9 +37,8 @@ pub const Blame = struct {
         };
         defer git_dir.close(self.io);
 
-        const head_commit_hex = self.resolveHead(&git_dir) catch {
-            return error.NoHead;
-        };
+        const _bh_oid = head_mod.resolveHeadOid(&git_dir, self.io, self.allocator) orelse return error.NoHead;
+        const head_commit_hex = try self.allocator.dupe(u8, &_bh_oid.toHex());
         defer self.allocator.free(head_commit_hex);
 
         const head_content = self.readBlobAtCommit(&git_dir, head_commit_hex, path) orelse {
@@ -316,11 +315,6 @@ pub const Blame = struct {
             list.append(self.allocator, line) catch break;
         }
         return list.toOwnedSlice(self.allocator) catch &.{};
-    }
-
-    fn resolveHead(self: *Blame, git_dir: *const Io.Dir) ![]const u8 {
-        const oid = head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
-        return self.allocator.dupe(u8, &oid.toHex());
     }
 
     fn readCommitObject(self: *Blame, git_dir: *const Io.Dir, oid_hex: []const u8) ?[]const u8 {

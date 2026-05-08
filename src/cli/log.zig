@@ -47,7 +47,7 @@ pub const Log = struct {
         const start_oid = if (rev) |r|
             self.resolveRef(&git_dir, r) catch null
         else
-            self.resolveHead(&git_dir) catch null;
+            head_mod.resolveHeadOid(&git_dir, self.io, self.allocator);
 
         const oid = start_oid orelse {
             try self.output.infoMessage("--→ No commits found", .{});
@@ -172,13 +172,9 @@ pub const Log = struct {
         try self.output.hint("→ {s} {s}", .{ hex[0..7], subject });
     }
 
-    fn resolveHead(self: *Log, git_dir: *const Io.Dir) !OID {
-        return head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
-    }
-
     fn resolveRef(self: *Log, git_dir: *const Io.Dir, refspec: []const u8) !?OID {
         if (std.mem.eql(u8, refspec, "HEAD")) {
-            return try self.resolveHead(git_dir);
+            return head_mod.resolveHeadOid(git_dir, self.io, self.allocator);
         }
 
         if (refspec.len >= 40 and std.ascii.isHex(refspec[0])) {

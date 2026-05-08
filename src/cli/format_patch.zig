@@ -90,7 +90,7 @@ pub const FormatPatch = struct {
     }
 
     pub fn generatePatch(self: *FormatPatch, git_dir: *const Io.Dir) ![]const u8 {
-        const head_oid = try self.resolveHead(git_dir);
+        const head_oid = head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
         const hex = head_oid.toHex();
         const parsed_oid = OID.fromHex(hex[0..]) catch return error.ObjectNotFound;
         const commit_data = object_io.readObject(git_dir, self.io, self.allocator, parsed_oid) catch return error.ObjectNotFound;
@@ -137,10 +137,6 @@ pub const FormatPatch = struct {
         }
 
         return body.toOwnedSlice(self.allocator);
-    }
-
-    fn resolveHead(self: *FormatPatch, git_dir: *const Io.Dir) !oid_mod.OID {
-        return head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
     }
 
     fn extractField(data: []const u8, field: []const u8) ?[]const u8 {

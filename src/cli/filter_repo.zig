@@ -5,6 +5,7 @@ const OutputStyle = @import("output.zig").OutputStyle;
 const compress_mod = @import("../compress/zlib.zig");
 const crypto_sha1 = @import("../crypto/sha1.zig");
 const object_io = @import("../object/io.zig");
+const head_mod = @import("../commit/head.zig");
 
 fn mkdirP(io: Io, path: []const u8) void {
     _ = std.Io.Dir.cwd().createDirPath(io, path) catch {};
@@ -396,10 +397,13 @@ pub const FilterBranch = struct {
             tree_map.deinit();
         }
 
+        const _head_ref = head_mod.readHeadRef(&git_dir, self.io, self.allocator);
         const target_ref = if (self.branch) |b|
             try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{b})
+        else if (_head_ref) |ref|
+            ref
         else
-            try self.resolveHeadRef(&git_dir);
+            try self.allocator.dupe(u8, "HEAD");
         defer if (self.branch == null) self.allocator.free(target_ref);
 
         const tip_oid = self.resolveRefOid(&git_dir, target_ref) catch {
@@ -620,20 +624,6 @@ pub const FilterBranch = struct {
                 self.branch = arg;
             }
         }
-    }
-
-    fn resolveHeadRef(self: *FilterBranch, git_dir: *const Io.Dir) ![]u8 {
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch {
-            return error.HeadNotFound;
-        };
-        defer self.allocator.free(head_content);
-
-        const trimmed = std.mem.trim(u8, head_content, " \n\r");
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const ref_path = std.mem.trim(u8, trimmed["ref: ".len..], " \n\r");
-            return self.allocator.dupe(u8, ref_path);
-        }
-        return self.allocator.dupe(u8, "HEAD");
     }
 
     fn resolveRefOid(self: *FilterBranch, git_dir: *const Io.Dir, ref_path: []const u8) !OID {

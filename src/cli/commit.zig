@@ -64,7 +64,7 @@ pub const Commit = struct {
 
         const commit_oid = try self.createCommit(&git_dir);
         const hex = commit_oid.toHex();
-        const is_root = (self.resolveHead(&git_dir) catch null) == null;
+        const is_root = head_mod.resolveHeadOid(&git_dir, self.io, self.allocator) == null;
         try self.output.successMessage("--→ [{s} {s}] {s}", .{
             if (self.amend) "amended" else if (is_root) "root" else "commit",
             hex[0..7],
@@ -109,14 +109,14 @@ pub const Commit = struct {
         defer parents.deinit(self.allocator);
 
         if (!self.amend) {
-            const head_oid = self.resolveHead(git_dir) catch null;
+            const head_oid = head_mod.resolveHeadOid(git_dir, self.io, self.allocator);
             if (head_oid) |oid| {
                 if (!oid.isZero()) {
                     try parents.append(self.allocator, oid);
                 }
             }
         } else {
-            const head_oid = (self.resolveHead(git_dir) catch null) orelse OID{ .bytes = .{0} ** 20 };
+            const head_oid = head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse OID{ .bytes = .{0} ** 20 };
             if (!head_oid.isZero()) {
                 try parents.append(self.allocator, head_oid);
                 const it = self.readCommitParents(git_dir, head_oid) catch &.{};
@@ -175,10 +175,6 @@ pub const Commit = struct {
         const empty_oid = oid_mod.oidFromContent(empty_tree);
         try self.writeLooseObject(git_dir, empty_tree);
         return empty_oid;
-    }
-
-    fn resolveHead(self: *Commit, git_dir: *const Io.Dir) !?OID {
-        return head_mod.resolveHeadOid(git_dir, self.io, self.allocator);
     }
 
     fn readCommitParents(self: *Commit, git_dir: *const Io.Dir, commit_oid: OID) ![]const OID {

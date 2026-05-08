@@ -49,7 +49,8 @@ pub const Describe = struct {
             if (spec.len >= 40) {
                 target_oid = spec[0..40];
             } else if (std.mem.eql(u8, spec, "HEAD")) {
-                target_oid = try self.resolveHead(&git_dir);
+                const _head_oid = head_mod.resolveHeadOid(&git_dir, self.io, self.allocator) orelse return error.NoHead;
+                target_oid = try self.allocator.dupe(u8, &_head_oid.toHex());
                 defer self.allocator.free(target_oid);
             } else if (std.mem.startsWith(u8, spec, "refs/")) {
                 const ref_content = git_dir.readFileAlloc(self.io, spec, self.allocator, .limited(256)) catch {
@@ -60,12 +61,10 @@ pub const Describe = struct {
                 if (trimmed.len < 40) return error.InvalidOid;
                 target_oid = trimmed[0..40];
             } else {
-                target_oid = try self.resolveHead(&git_dir);
+                const _head_oid2 = head_mod.resolveHeadOid(&git_dir, self.io, self.allocator) orelse return error.NoHead;
+                target_oid = try self.allocator.dupe(u8, &_head_oid2.toHex());
                 defer self.allocator.free(target_oid);
             }
-        } else {
-            target_oid = try self.resolveHead(&git_dir);
-            defer self.allocator.free(target_oid);
         }
 
         const tags = try self.collectTags(&git_dir);
@@ -191,11 +190,6 @@ pub const Describe = struct {
         self.allocator.free(result.description);
         if (result.commit_oid.len > 0) self.allocator.free(result.commit_oid);
         if (result.tag_name) |tn| self.allocator.free(tn);
-    }
-
-    fn resolveHead(self: *Describe, git_dir: *const Io.Dir) ![]const u8 {
-        const oid = head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
-        return self.allocator.dupe(u8, &oid.toHex());
     }
 
     const TagEntry = struct { name: []const u8 };

@@ -111,15 +111,11 @@ pub const Archive = struct {
         return oid_mod.OID.fromHex(trimmed[0..40]) catch error.InvalidOid;
     }
 
-    fn resolveHeadOid(self: *Archive, git_dir: *const Io.Dir) !oid_mod.OID {
-        return head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
-    }
-
     fn resolveToTree(self: *Archive, git_dir: *const Io.Dir, spec: []const u8) !oid_mod.OID {
         var buf: [64]u8 = undefined;
 
         if (std.mem.eql(u8, spec, "HEAD") or std.mem.eql(u8, spec, "@")) {
-            const commit_oid = try self.resolveHeadOid(git_dir);
+            const commit_oid = head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
             return self.extractTreeFromCommit(git_dir, commit_oid);
         }
 

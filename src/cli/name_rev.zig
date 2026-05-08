@@ -47,7 +47,7 @@ pub const NameRev = struct {
         defer self.allocator.free(all_refs);
 
         if (self.options.all) {
-            const head_oid = resolveHead(&git_dir, self.allocator, self.io);
+            const head_oid = head_mod.resolveHeadOid(&git_dir, self.io, self.allocator);
             if (head_oid) |oid| {
                 const hex = oid.toHex();
                 const name = self.findBestName(all_refs, oid);
@@ -120,10 +120,6 @@ pub const NameRev = struct {
             return ref_name["refs/remotes/".len..];
         }
         return ref_name;
-    }
-
-    fn resolveHead(git_dir: *const Io.Dir, allocator: std.mem.Allocator, io: Io) ?OID {
-        return head_mod.resolveHeadOid(git_dir, io, allocator);
     }
 
     fn parseArgs(self: *NameRev, args: []const []const u8) void {

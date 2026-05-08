@@ -44,7 +44,7 @@ pub const RevList = struct {
         defer git_dir.close(self.io);
 
         if (std.mem.eql(u8, ref, "HEAD")) {
-            const oid = self.resolveHead(&git_dir) catch return error.InvalidOid;
+            const oid = head_mod.resolveHeadOid(&git_dir, self.io, self.allocator) orelse return error.InvalidOid;
             return oid.toHex();
         }
 
@@ -58,10 +58,6 @@ pub const RevList = struct {
         defer self.allocator.free(full_ref);
         const oid = self.resolveRefPath(&git_dir, full_ref) catch return error.InvalidOid;
         return oid.toHex();
-    }
-
-    fn resolveHead(self: *RevList, git_dir: *const Io.Dir) !OID {
-        return head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.InvalidOid;
     }
 
     fn resolveRefPath(self: *RevList, git_dir: *const Io.Dir, path: []const u8) !OID {
