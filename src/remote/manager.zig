@@ -415,34 +415,34 @@ test "Remote structure" {
 }
 
 test "RemoteManager init" {
-    const io = std.Io.Threaded.new(.{});
+    const io = std.Io.Threaded.global_single_threaded.io();
     const manager = RemoteManager.init(std.testing.allocator, io.?);
     try std.testing.expect(manager.allocator == std.testing.allocator);
 }
 
 test "RemoteManager addRemote method exists" {
-    const io = std.Io.Threaded.new(.{});
+    const io = std.Io.Threaded.global_single_threaded.io();
     var manager = RemoteManager.init(std.testing.allocator, io.?);
     const remote = try manager.addRemote("origin", "https://github.com/user/repo.git");
     try std.testing.expectEqualStrings("origin", remote.name);
 }
 
 test "RemoteManager removeRemote method exists" {
-    const io = std.Io.Threaded.new(.{});
+    const io = std.Io.Threaded.global_single_threaded.io();
     var manager = RemoteManager.init(std.testing.allocator, io.?);
     try manager.removeRemote("origin");
     try std.testing.expect(true);
 }
 
 test "RemoteManager getRemote method exists" {
-    const io = std.Io.Threaded.new(.{});
+    const io = std.Io.Threaded.global_single_threaded.io();
     var manager = RemoteManager.init(std.testing.allocator, io.?);
     const remote = try manager.getRemote("origin");
     try std.testing.expect(remote == null);
 }
 
 test "RemoteManager renameRemote method exists" {
-    const io = std.Io.Threaded.new(.{});
+    const io = std.Io.Threaded.global_single_threaded.io();
     var manager = RemoteManager.init(std.testing.allocator, io.?);
     const remote = try manager.renameRemote("origin", "new-origin");
     try std.testing.expectEqualStrings("new-origin", remote.name);

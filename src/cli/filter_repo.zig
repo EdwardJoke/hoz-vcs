@@ -4,6 +4,8 @@ const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 const compress_mod = @import("../compress/zlib.zig");
 const crypto_sha1 = @import("../crypto/sha1.zig");
+const object_io = @import("../object/io.zig");
+const head_mod = @import("../commit/head.zig");
 
 fn mkdirP(io: Io, path: []const u8) void {
     _ = std.Io.Dir.cwd().createDirPath(io, path) catch {};
@@ -146,7 +148,7 @@ pub const FilterRepo = struct {
                     }
 
                     if (!self.options.dry_run) {
-                        _ = try writeLooseObject(git_dir, self.io, self.allocator, new_data);
+                        _ = try object_io.writeLooseObject(git_dir, self.io, self.allocator, new_data);
                     }
 
                     try rewritten.append(self.allocator, .{
@@ -395,10 +397,13 @@ pub const FilterBranch = struct {
             tree_map.deinit();
         }
 
+        const _head_ref = head_mod.readHeadRef(&git_dir, self.io, self.allocator);
         const target_ref = if (self.branch) |b|
             try std.fmt.allocPrint(self.allocator, "refs/heads/{s}", .{b})
+        else if (_head_ref) |ref|
+            ref
         else
-            try self.resolveHeadRef(&git_dir);
+            try self.allocator.dupe(u8, "HEAD");
         defer if (self.branch == null) self.allocator.free(target_ref);
 
         const tip_oid = self.resolveRefOid(&git_dir, target_ref) catch {
@@ -434,7 +439,7 @@ pub const FilterBranch = struct {
             try visited.put(hex_str, {});
             try order_list.append(self.allocator, current);
 
-            const obj_data = self.readObjectRaw(&git_dir, current) catch continue;
+            const obj_data = object_io.readObject(&git_dir, self.io, self.allocator, current) catch continue;
             defer self.allocator.free(obj_data);
 
             const commit = CommitObj.parse(self.allocator, obj_data) catch continue;
@@ -449,7 +454,7 @@ pub const FilterBranch = struct {
             const old_hex = oid.toHex();
             const old_hex_str = (&old_hex)[0..];
 
-            const obj_data = self.readObjectRaw(&git_dir, oid) catch continue;
+            const obj_data = object_io.readObject(&git_dir, self.io, self.allocator, oid) catch continue;
             defer self.allocator.free(obj_data);
 
             const commit = CommitObj.parse(self.allocator, obj_data) catch continue;
@@ -479,7 +484,7 @@ pub const FilterBranch = struct {
             const serialized = try new_commit.serialize(self.allocator);
             defer self.allocator.free(serialized);
 
-            const new_oid_bytes = writeLooseObject(&git_dir, self.io, self.allocator, serialized) catch {
+            const new_oid_bytes = object_io.writeLooseObject(&git_dir, self.io, self.allocator, serialized) catch {
                 try self.output.errorMessage("filter-branch: failed to write rewritten commit {s}", .{abbrevOid(oid)});
                 continue;
             };
@@ -525,7 +530,7 @@ pub const FilterBranch = struct {
             return OID.fromHex(cached) catch return error.TreeRewriteFailed;
         }
 
-        const obj_data = self.readObjectRaw(git_dir, tree_oid.*) catch return error.TreeRewriteFailed;
+        const obj_data = object_io.readObject(git_dir, self.io, self.allocator, tree_oid.*) catch return error.TreeRewriteFailed;
         defer self.allocator.free(obj_data);
 
         const tree = parseTreeEntries(self.allocator, obj_data) catch return error.TreeRewriteFailed;
@@ -594,7 +599,7 @@ pub const FilterBranch = struct {
         const serialized = try new_tree.serialize(self.allocator);
         defer self.allocator.free(serialized);
 
-        const new_oid_bytes = writeLooseObject(git_dir, self.io, self.allocator, serialized) catch return error.TreeRewriteFailed;
+        const new_oid_bytes = object_io.writeLooseObject(git_dir, self.io, self.allocator, serialized) catch return error.TreeRewriteFailed;
         const new_oid = OID.fromBytes(&new_oid_bytes);
 
         const new_hex = new_oid.toHex();
@@ -619,35 +624,6 @@ pub const FilterBranch = struct {
                 self.branch = arg;
             }
         }
-    }
-
-    fn readObjectRaw(self: *FilterBranch, git_dir: *const Io.Dir, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024)) catch {
-            return error.ObjectNotFound;
-        };
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator) catch {
-            return error.CorruptObject;
-        };
-    }
-
-    fn resolveHeadRef(self: *FilterBranch, git_dir: *const Io.Dir) ![]u8 {
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch {
-            return error.HeadNotFound;
-        };
-        defer self.allocator.free(head_content);
-
-        const trimmed = std.mem.trim(u8, head_content, " \n\r");
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const ref_path = std.mem.trim(u8, trimmed["ref: ".len..], " \n\r");
-            return self.allocator.dupe(u8, ref_path);
-        }
-        return self.allocator.dupe(u8, "HEAD");
     }
 
     fn resolveRefOid(self: *FilterBranch, git_dir: *const Io.Dir, ref_path: []const u8) !OID {
@@ -684,29 +660,6 @@ pub const FilterBranch = struct {
         _ = try refs_heads.writeFile(self.io, .{ .sub_path = ref_name, .data = content });
     }
 };
-
-fn writeLooseObject(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocator, data: []const u8) ![20]u8 {
-    var hash: [20]u8 = undefined;
-    crypto_sha1.Sha1.hash(data, &hash, .{});
-
-    const prefix = hexLower(hash[0..2]);
-    const suffix = hexLower(hash[2..]);
-
-    const dir_path = try std.fmt.allocPrint(allocator, ".git/objects/{s}", .{prefix});
-    defer allocator.free(dir_path);
-
-    _ = mkdirP(io, dir_path);
-
-    const file_path_rel = try std.fmt.allocPrint(allocator, "objects/{s}/{s}", .{ prefix, suffix });
-    defer allocator.free(file_path_rel);
-
-    const compressed = try compress_mod.Zlib.compress(data, allocator);
-    defer allocator.free(compressed);
-
-    _ = try git_dir.writeFile(io, .{ .sub_path = file_path_rel, .data = compressed });
-
-    return hash;
-}
 
 fn hexLower(bytes: []const u8) [64]u8 {
     const hex_chars = "0123456789abcdef";

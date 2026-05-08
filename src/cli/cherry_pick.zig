@@ -7,6 +7,7 @@ const oid_mod = @import("../object/oid.zig");
 const OID = oid_mod.OID;
 const object_mod = @import("../object/object.zig");
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
 
 pub const CherryPickOptions = struct {
     no_commit: bool = false,
@@ -41,7 +42,7 @@ pub const CherryPick = struct {
         for (commits, 0..) |commit_str, i| {
             const commit_oid = try self.resolveCommitOid(commit_str);
 
-            const commit_data = self.readObject(commit_oid) catch {
+            const commit_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, commit_oid) catch {
                 try self.output.errorMessage("Could not read commit {s}", .{commit_str});
                 return;
             };
@@ -59,7 +60,7 @@ pub const CherryPick = struct {
 
             const parent_oid = try extractParent(obj.data);
             if (!parent_oid.isZero()) {
-                const parent_data = self.readObject(parent_oid) catch {
+                const parent_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, parent_oid) catch {
                     try self.output.errorMessage("Could not read parent commit", .{});
                     return;
                 };
@@ -235,7 +236,7 @@ pub const CherryPick = struct {
 
         if (tree_oid.isZero()) return result;
 
-        const tree_data = self.readObject(tree_oid) catch return result;
+        const tree_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, tree_oid) catch return result;
         defer self.allocator.free(tree_data);
 
         const obj = object_mod.parse(tree_data) catch return result;
@@ -270,7 +271,7 @@ pub const CherryPick = struct {
     fn applyTreeToWorkdirRaw(self: *CherryPick, tree_oid: OID) !void {
         if (tree_oid.isZero()) return;
 
-        const tree_data = self.readObject(tree_oid) catch return;
+        const tree_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, tree_oid) catch return;
         defer self.allocator.free(tree_data);
 
         const obj = object_mod.parse(tree_data) catch return;
@@ -312,14 +313,14 @@ pub const CherryPick = struct {
 
         if (mode == 0o040000) {
             cwd.createDirPath(self.io.*, path) catch {};
-            const tree_data = self.readObject(oid) catch return;
+            const tree_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid) catch return;
             defer self.allocator.free(tree_data);
             const obj = object_mod.parse(tree_data) catch return;
             if (obj.obj_type == .tree) {
                 try self.applyTreeEntries(obj.data, path);
             }
         } else if (mode == 0o100644 or mode == 0o100755) {
-            const blob_data = self.readObject(oid) catch return;
+            const blob_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid) catch return;
             defer self.allocator.free(blob_data);
             const obj = object_mod.parse(blob_data) catch return;
             if (obj.obj_type == .blob) {
@@ -333,17 +334,6 @@ pub const CherryPick = struct {
         const content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{&hex});
         defer self.allocator.free(content);
         try self.git_dir.writeFile(self.io.*, .{ .sub_path = "CHERRY_PICK_HEAD", .data = content });
-    }
-
-    fn readObject(self: *CherryPick, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const object_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(object_path);
-
-        const compressed = try self.git_dir.readFileAlloc(self.io.*, object_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
     }
 };
 

@@ -115,12 +115,7 @@ pub const TagLister = struct {
 };
 
 test "TagLister init" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     const lister = TagLister.init(std.testing.allocator, io);
     try std.testing.expect(lister.allocator == std.testing.allocator);
 }

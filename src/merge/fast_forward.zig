@@ -2,6 +2,7 @@
 const std = @import("std");
 const OID = @import("../object/oid.zig").OID;
 const commit = @import("../commit/commit.zig");
+const mock = @import("../testing/mock.zig");
 
 pub const FastForwardResult = struct {
     can_ff: bool,
@@ -107,29 +108,14 @@ test "FastForwardResult structure" {
     try std.testing.expect(result.commits_moved == 5);
 }
 
-fn makeMockCommit(oid_hex: []const u8, parent_hexs: []const []const u8) commit.Commit {
-    const oid = OID.fromHex(oid_hex) catch unreachable;
-    var parents_buf: [4]OID = undefined;
-    for (parent_hexs, 0..) |ph, i| {
-        parents_buf[i] = OID.fromHex(ph) catch unreachable;
-    }
-    return commit.Commit.create(
-        oid,
-        parents_buf[0..parent_hexs.len],
-        .{ .name = "a", .email = "a@b", .timestamp = 0, .timezone = 0 },
-        .{ .name = "a", .email = "a@b", .timestamp = 0, .timezone = 0 },
-        "msg",
-    );
-}
-
 test "FastForwardChecker detects linear history" {
     const base_oid = "1111111111111111111111111111111111111111";
     const mid_oid = "2222222222222222222222222222222222222222";
     const tip_oid = "3333333333333333333333333333333333333333";
 
-    const base_commit = makeMockCommit(base_oid, &.{});
-    const mid_commit = makeMockCommit(mid_oid, &.{base_oid});
-    const tip_commit = makeMockCommit(tip_oid, &.{mid_oid});
+    const base_commit = mock.makeMockCommit(base_oid, &.{});
+    const mid_commit = mock.makeMockCommit(mid_oid, &.{base_oid});
+    const tip_commit = mock.makeMockCommit(tip_oid, &.{mid_oid});
 
     const MockStore = struct {
         fn get(oid: OID) ?*const commit.Commit {
@@ -158,9 +144,9 @@ test "FastForwardChecker rejects divergent history" {
     const left_oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const right_oid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-    const base_commit = makeMockCommit(base_oid, &.{});
-    const left_commit = makeMockCommit(left_oid, &.{base_oid});
-    const right_commit = makeMockCommit(right_oid, &.{base_oid});
+    const base_commit = mock.makeMockCommit(base_oid, &.{});
+    const left_commit = mock.makeMockCommit(left_oid, &.{base_oid});
+    const right_commit = mock.makeMockCommit(right_oid, &.{base_oid});
 
     const MockStore = struct {
         fn get(oid: OID) ?*const commit.Commit {
@@ -185,7 +171,7 @@ test "FastForwardChecker rejects divergent history" {
 
 test "FastForwardChecker up-to-date returns zero moves" {
     const oid_str = "1111111111111111111111111111111111111111";
-    const solo_commit = makeMockCommit(oid_str, &.{});
+    const solo_commit = mock.makeMockCommit(oid_str, &.{});
 
     const MockStore = struct {
         fn get(oid: OID) ?*const commit.Commit {
@@ -208,9 +194,9 @@ test "FastForwardChecker getMergeBase finds common ancestor" {
     const left_oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const right_oid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-    const base_commit = makeMockCommit(base_oid, &.{});
-    _ = makeMockCommit(left_oid, &.{base_oid});
-    _ = makeMockCommit(right_oid, &.{base_oid});
+    const base_commit = mock.makeMockCommit(base_oid, &.{});
+    _ = mock.makeMockCommit(left_oid, &.{base_oid});
+    _ = mock.makeMockCommit(right_oid, &.{base_oid});
 
     const MockStore = struct {
         fn get(oid: OID) ?*const commit.Commit {

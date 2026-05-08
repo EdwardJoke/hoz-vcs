@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 const OID = @import("../object/oid.zig").OID;
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
 
 pub const GcOptions = struct {
     aggressive: bool = false,
@@ -216,7 +217,7 @@ pub const GarbageCollector = struct {
             var oid_bytes: [OID.hex_length]u8 = undefined;
             @memcpy(&oid_bytes, oid_hex);
 
-            const raw = self.readObject(OID{ .bytes = oid_bytes }) catch continue;
+            const raw = object_io.readObject(&self.git_dir, self.io, self.allocator, OID{ .bytes = oid_bytes }) catch continue;
             defer self.allocator.free(raw);
 
             if (std.mem.startsWith(u8, raw, "commit ")) {
@@ -367,7 +368,7 @@ pub const GarbageCollector = struct {
         try pack_data.append(self.allocator, @truncate(num_objects & 0xff));
 
         for (oids) |oid| {
-            const obj_data = self.readObject(oid) catch continue;
+            const obj_data = object_io.readObject(&self.git_dir, self.io, self.allocator, oid) catch continue;
             defer self.allocator.free(obj_data);
 
             const obj_type = objectTypeFromRaw(obj_data);
@@ -444,23 +445,6 @@ pub const GarbageCollector = struct {
         if (std.mem.startsWith(u8, raw, "commit ")) return 1;
         if (std.mem.startsWith(u8, raw, "tag ")) return 4;
         return 1;
-    }
-
-    fn readObject(self: *GarbageCollector, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = self.git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024)) catch |err| {
-            return err;
-        };
-        defer self.allocator.free(compressed);
-
-        const decompressed = compress_mod.Zlib.decompress(compressed, self.allocator) catch |err| {
-            return err;
-        };
-
-        return decompressed;
     }
 
     fn zlibCompress(self: *GarbageCollector, data: []const u8) ![]u8 {

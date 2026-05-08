@@ -2,6 +2,7 @@
 const std = @import("std");
 const Io = std.Io;
 const OID = @import("../object/oid.zig").OID;
+const head_mod = @import("../commit/head.zig");
 const compress_mod = @import("../compress/zlib.zig");
 
 pub const RestoreSource = enum {
@@ -52,7 +53,7 @@ pub const Restorer = struct {
     }
 
     pub fn restoreFromHead(self: *Restorer, paths: []const []const u8) !void {
-        const head_oid = self.resolveHeadOid() catch return error.NoHeadOid;
+        const head_oid = head_mod.resolveHeadOid(&self.git_dir, self.io, self.allocator) orelse return error.NoHeadOid;
         const tree_data = self.readTreeData(head_oid) catch return error.NoTreeOid;
         defer self.allocator.free(tree_data);
 
@@ -147,31 +148,6 @@ pub const Restorer = struct {
         const result = try self.allocator.dupe(u8, raw[null_idx + 1 ..]);
         self.allocator.free(raw);
         return result;
-    }
-
-    fn resolveHeadOid(self: *Restorer) !OID {
-        const head_data = self.git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch {
-            return error.HeadNotFound;
-        };
-        defer self.allocator.free(head_data);
-        const trimmed = std.mem.trim(u8, head_data, " \n\r");
-
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const ref_path = trimmed[5..];
-            const ref_content = self.git_dir.readFileAlloc(self.io, ref_path, self.allocator, .limited(256)) catch {
-                return error.RefNotFound;
-            };
-            defer self.allocator.free(ref_content);
-            const ref_trimmed = std.mem.trim(u8, ref_content, " \n\r");
-            if (ref_trimmed.len >= 40) {
-                return OID.fromHex(ref_trimmed[0..40]) catch error.InvalidOid;
-            }
-            return error.InvalidRef;
-        }
-        if (trimmed.len >= 40) {
-            return OID.fromHex(trimmed[0..40]) catch error.InvalidOid;
-        }
-        return error.InvalidHead;
     }
 
     fn resolveTreeOid(self: *Restorer, oid: OID) !OID {
@@ -312,7 +288,7 @@ test "Restorer restore method exists" {
     const restorer = Restorer.init(std.testing.allocator, undefined, undefined, options);
 
     try std.testing.expect(restorer.allocator == std.testing.allocator);
-    const result = restorer.restore(&.{ "nonexistent.txt" });
+    const result = restorer.restore(&.{"nonexistent.txt"});
     try std.testing.expectError(error.RestoreFailed, result);
 }
 

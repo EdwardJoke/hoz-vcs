@@ -47,23 +47,13 @@ pub const BisectGoodBad = struct {
 };
 
 test "BisectGoodBad init" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     const bisect = BisectGoodBad.init(std.testing.allocator, io);
     try std.testing.expectEqualStrings(".git", bisect.path);
 }
 
 test "BisectGoodBad markGood method exists" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     var bisect = BisectGoodBad.init(std.testing.allocator, io);
     if (bisect.markGood("HEAD~1")) |_| {} else |err| {
         try std.testing.expect(err == error.NotAGitRepository);
@@ -71,12 +61,7 @@ test "BisectGoodBad markGood method exists" {
 }
 
 test "BisectGoodBad markBad method exists" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     var bisect = BisectGoodBad.init(std.testing.allocator, io);
     if (bisect.markBad("HEAD")) |_| {} else |err| {
         try std.testing.expect(err == error.NotAGitRepository);

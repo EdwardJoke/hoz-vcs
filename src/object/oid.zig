@@ -32,12 +32,11 @@ pub const OID = struct {
         var oid: OID = undefined;
         @memset(&oid.bytes, 0);
 
-        const start_offset = OID_HEX_SIZE - str.len;
         var i: usize = 0;
         while (i < str.len) : (i += 2) {
             const byte_str = str[i .. i + 2];
             const byte_val = try std.fmt.parseInt(u8, byte_str, 16);
-            const target_idx = start_offset + (i / 2);
+            const target_idx = i / 2;
             if (target_idx < OID_SIZE) {
                 oid.bytes[target_idx] = byte_val;
             }

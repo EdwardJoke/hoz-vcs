@@ -24,7 +24,6 @@ const Notes = @import("notes.zig").Notes;
 const Reset = @import("reset.zig").Reset;
 const ResetMode = @import("reset.zig").ResetMode;
 const Branch = @import("branch.zig").Branch;
-const Checkout = @import("checkout.zig").Checkout;
 const Stash = @import("stash.zig").Stash;
 const Tag = @import("tag.zig").Tag;
 const Reflog = @import("reflog.zig").Reflog;
@@ -44,7 +43,6 @@ const Describe = @import("describe.zig").Describe;
 const Fsck = @import("fsck.zig").Fsck;
 const FormatPatch = @import("format_patch.zig").FormatPatch;
 const Mv = @import("mv.zig").Mv;
-const Switch = @import("switch.zig").Switch;
 const Bisect = @import("bisect.zig").Bisect;
 const Config = @import("config.zig").Config;
 const Archive = @import("archive.zig").Archive;
@@ -126,7 +124,19 @@ pub const CommandDispatcher = struct {
         } else if (std.mem.eql(u8, cmd, "branch")) {
             try self.runBranch(args);
         } else if (std.mem.eql(u8, cmd, "checkout")) {
-            try self.runCheckout(args);
+            try self.writer.print("warning: 'checkout' is deprecated, use 'branch out' instead\n", .{});
+            var branch_args = try std.ArrayList([]const u8).initCapacity(self.allocator, args.len + 1);
+            defer branch_args.deinit(self.allocator);
+            branch_args.appendAssumeCapacity("out");
+            for (args) |arg| branch_args.appendAssumeCapacity(arg);
+            try self.runBranch(branch_args.items);
+        } else if (std.mem.eql(u8, cmd, "switch")) {
+            try self.writer.print("warning: 'switch' is deprecated, use 'branch switch' instead\n", .{});
+            var branch_args = try std.ArrayList([]const u8).initCapacity(self.allocator, args.len + 1);
+            defer branch_args.deinit(self.allocator);
+            branch_args.appendAssumeCapacity("switch");
+            for (args) |arg| branch_args.appendAssumeCapacity(arg);
+            try self.runBranch(branch_args.items);
         } else if (std.mem.eql(u8, cmd, "stash")) {
             try self.runStash(args);
         } else if (std.mem.eql(u8, cmd, "tag")) {
@@ -153,8 +163,6 @@ pub const CommandDispatcher = struct {
             try self.runLsTree(args);
         } else if (std.mem.eql(u8, cmd, "show-ref")) {
             try self.runShowRef(args);
-        } else if (std.mem.eql(u8, cmd, "switch")) {
-            try self.runSwitch(args);
         } else if (std.mem.eql(u8, cmd, "bisect")) {
             try self.runBisect(args);
         } else if (std.mem.eql(u8, cmd, "config")) {
@@ -528,60 +536,79 @@ pub const CommandDispatcher = struct {
         var branch = Branch.init(self.allocator, self.io, self.writer, self.style);
 
         var i: usize = 0;
-        while (i < args.len) : (i += 1) {
-            const arg = args[i];
-            if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--delete")) {
-                branch.action = .delete;
-            } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--move")) {
-                branch.action = .rename;
-            } else if (std.mem.eql(u8, arg, "-D")) {
-                branch.action = .delete;
-            } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--list")) {
-                branch.action = .list;
-            } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--set-upstream-to")) {
-                branch.action = .set_upstream;
-                i += 1;
-                if (i < args.len) {
-                    branch.upstream_name = args[i];
+        if (args.len > 0 and (std.mem.eql(u8, args[0], "out") or std.mem.eql(u8, args[0], "checkout"))) {
+            branch.action = .checkout;
+            i = 1;
+            while (i < args.len) : (i += 1) {
+                const arg = args[i];
+                if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--force")) {
+                    branch.checkout_options.strategy = .force;
+                    branch.checkout_options.force = true;
+                } else if (std.mem.eql(u8, arg, "-b")) {
+                    branch.checkout_options.create_branch = true;
+                } else if (std.mem.eql(u8, arg, "-B")) {
+                    branch.checkout_options.force_create_branch = true;
+                } else if (std.mem.eql(u8, arg, "--detach")) {
+                    branch.checkout_options.detach = true;
+                } else if (std.mem.eql(u8, arg, "--track")) {
+                    branch.checkout_options.track = "";
+                } else if (!std.mem.startsWith(u8, arg, "-") and branch.target == null) {
+                    branch.target = arg;
                 }
-            } else if (std.mem.eql(u8, arg, "--unset-upstream")) {
-                branch.action = .unset_upstream;
-            } else if (!std.mem.startsWith(u8, arg, "-") and branch.upstream_name != null and branch.new_branch_name == null) {
-                branch.new_branch_name = arg;
-            } else if (!std.mem.startsWith(u8, arg, "-") and branch.new_branch_name == null) {
-                branch.new_branch_name = arg;
-                if (branch.action != .set_upstream and branch.action != .unset_upstream) {
-                    branch.action = .create;
+            }
+        } else if (args.len > 0 and std.mem.eql(u8, args[0], "switch")) {
+            branch.action = .switch_branch;
+            i = 1;
+            while (i < args.len) : (i += 1) {
+                const arg = args[i];
+                if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--create")) {
+                    branch.switch_options.create_branch = true;
+                } else if (std.mem.eql(u8, arg, "-C") or std.mem.eql(u8, arg, "--force-create")) {
+                    branch.switch_options.force_create = true;
+                    branch.switch_options.create_branch = true;
+                } else if (std.mem.eql(u8, arg, "--detach")) {
+                    branch.switch_options.detach = true;
+                } else if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--force")) {
+                    branch.switch_options.force = true;
+                } else if (std.mem.eql(u8, arg, "--track")) {
+                    branch.switch_options.track = "";
+                } else if (!std.mem.startsWith(u8, arg, "-") and branch.target == null) {
+                    branch.target = arg;
                 }
-            } else if (!std.mem.startsWith(u8, arg, "-") and branch.old_branch_name == null and branch.action == .rename) {
-                branch.old_branch_name = arg;
+            }
+        } else {
+            while (i < args.len) : (i += 1) {
+                const arg = args[i];
+                if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--delete")) {
+                    branch.action = .delete;
+                } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--move")) {
+                    branch.action = .rename;
+                } else if (std.mem.eql(u8, arg, "-D")) {
+                    branch.action = .delete;
+                } else if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--list")) {
+                    branch.action = .list;
+                } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--set-upstream-to")) {
+                    branch.action = .set_upstream;
+                    i += 1;
+                    if (i < args.len) {
+                        branch.upstream_name = args[i];
+                    }
+                } else if (std.mem.eql(u8, arg, "--unset-upstream")) {
+                    branch.action = .unset_upstream;
+                } else if (!std.mem.startsWith(u8, arg, "-") and branch.upstream_name != null and branch.new_branch_name == null) {
+                    branch.new_branch_name = arg;
+                } else if (!std.mem.startsWith(u8, arg, "-") and branch.new_branch_name == null) {
+                    branch.new_branch_name = arg;
+                    if (branch.action != .set_upstream and branch.action != .unset_upstream) {
+                        branch.action = .create;
+                    }
+                } else if (!std.mem.startsWith(u8, arg, "-") and branch.old_branch_name == null and branch.action == .rename) {
+                    branch.old_branch_name = arg;
+                }
             }
         }
 
         try branch.run();
-    }
-
-    fn runCheckout(self: *CommandDispatcher, args: []const []const u8) !void {
-        var checkout = Checkout.init(self.allocator, self.io, self.writer, self.style);
-
-        for (args) |arg| {
-            if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--force")) {
-                checkout.options.strategy = .force;
-                checkout.options.force = true;
-            } else if (std.mem.eql(u8, arg, "-b")) {
-                checkout.options.create_branch = true;
-            } else if (std.mem.eql(u8, arg, "-B")) {
-                checkout.options.force_create_branch = true;
-            } else if (std.mem.eql(u8, arg, "--detach")) {
-                checkout.options.detach = true;
-            } else if (std.mem.eql(u8, arg, "--track")) {
-                checkout.options.track = "";
-            } else if (!std.mem.startsWith(u8, arg, "-") and checkout.target == null) {
-                checkout.target = arg;
-            }
-        }
-
-        try checkout.run();
     }
 
     fn runStash(self: *CommandDispatcher, args: []const []const u8) !void {
@@ -708,11 +735,6 @@ pub const CommandDispatcher = struct {
     fn runShowRef(self: *CommandDispatcher, args: []const []const u8) !void {
         var show_ref = ShowRef.init(self.allocator, self.io, self.writer, self.style);
         try show_ref.run(args);
-    }
-
-    fn runSwitch(self: *CommandDispatcher, args: []const []const u8) !void {
-        var switch_cmd = Switch.init(self.allocator, self.io, self.writer, self.style);
-        try switch_cmd.run(args);
     }
 
     fn runBisect(self: *CommandDispatcher, args: []const []const u8) !void {
@@ -862,7 +884,7 @@ pub const CommandDispatcher = struct {
 test "CommandDispatcher init" {
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     const dispatcher = CommandDispatcher.init(std.testing.allocator, w, .{});
     try std.testing.expect(dispatcher.allocator == std.testing.allocator);
@@ -871,11 +893,11 @@ test "CommandDispatcher init" {
 test "CommandDispatcher dispatch unknown command" {
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     var dispatcher = CommandDispatcher.init(std.testing.allocator, w, .{ .use_color = false });
     try dispatcher.dispatch("unknown", &.{});
 
-    const output = try w.readAll();
+    const output = try w.buffered;
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "Unknown command"));
 }

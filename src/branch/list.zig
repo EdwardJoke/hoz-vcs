@@ -402,13 +402,8 @@ test "BranchInfo structure" {
 }
 
 test "BranchLister init" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
-    const store = RefStore{
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,
         .io = io,
@@ -421,13 +416,8 @@ test "BranchLister init" {
 }
 
 test "BranchLister init with options" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
-    const store = RefStore{
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,
         .io = io,

@@ -4,6 +4,8 @@ const Io = std.Io;
 const oid_mod = @import("../object/oid.zig");
 const object_mod = @import("../object/object.zig");
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
+const head_mod = @import("../commit/head.zig");
 
 pub const DescribeOptions = struct {
     all: bool = false,
@@ -47,7 +49,8 @@ pub const Describe = struct {
             if (spec.len >= 40) {
                 target_oid = spec[0..40];
             } else if (std.mem.eql(u8, spec, "HEAD")) {
-                target_oid = try self.resolveHead(&git_dir);
+                const _head_oid = head_mod.resolveHeadOid(&git_dir, self.io, self.allocator) orelse return error.NoHead;
+                target_oid = try self.allocator.dupe(u8, &_head_oid.toHex());
                 defer self.allocator.free(target_oid);
             } else if (std.mem.startsWith(u8, spec, "refs/")) {
                 const ref_content = git_dir.readFileAlloc(self.io, spec, self.allocator, .limited(256)) catch {
@@ -58,12 +61,10 @@ pub const Describe = struct {
                 if (trimmed.len < 40) return error.InvalidOid;
                 target_oid = trimmed[0..40];
             } else {
-                target_oid = try self.resolveHead(&git_dir);
+                const _head_oid2 = head_mod.resolveHeadOid(&git_dir, self.io, self.allocator) orelse return error.NoHead;
+                target_oid = try self.allocator.dupe(u8, &_head_oid2.toHex());
                 defer self.allocator.free(target_oid);
             }
-        } else {
-            target_oid = try self.resolveHead(&git_dir);
-            defer self.allocator.free(target_oid);
         }
 
         const tags = try self.collectTags(&git_dir);
@@ -191,32 +192,6 @@ pub const Describe = struct {
         if (result.tag_name) |tn| self.allocator.free(tn);
     }
 
-    fn resolveHead(self: *Describe, git_dir: *const Io.Dir) ![]const u8 {
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch {
-            return error.NoHead;
-        };
-        defer self.allocator.free(head_content);
-        const trimmed = std.mem.trim(u8, head_content, " \n\r");
-
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const ref_path = trimmed[5..];
-            const ref_content = git_dir.readFileAlloc(self.io, ref_path, self.allocator, .limited(256)) catch {
-                return error.NoHead;
-            };
-            defer self.allocator.free(ref_content);
-            const ref_trimmed = std.mem.trim(u8, ref_content, " \n\r");
-            if (ref_trimmed.len >= 40) {
-                return self.allocator.dupe(u8, ref_trimmed[0..40]);
-            }
-            return error.InvalidOid;
-        }
-
-        if (trimmed.len >= 40) {
-            return self.allocator.dupe(u8, trimmed[0..40]);
-        }
-        return error.InvalidOid;
-    }
-
     const TagEntry = struct { name: []const u8 };
 
     fn collectTags(self: *Describe, git_dir: *const Io.Dir) ![]TagEntry {
@@ -283,7 +258,7 @@ pub const Describe = struct {
         const trimmed = std.mem.trim(u8, ref_content, " \n\r");
 
         if (trimmed.len < 40) {
-            const obj_data = self.readObject(git_dir, trimmed) orelse return null;
+            const obj_data = object_io.readObjectOpt(git_dir, self.io, self.allocator, trimmed) orelse return null;
             defer self.allocator.free(obj_data);
 
             const obj = object_mod.parse(obj_data) catch return null;
@@ -303,19 +278,6 @@ pub const Describe = struct {
         }
 
         return self.allocator.dupe(u8, trimmed[0..40]) catch null;
-    }
-
-    fn readObject(self: *Describe, git_dir: *const Io.Dir, oid_hex: []const u8) ?[]const u8 {
-        if (oid_hex.len < 40) return null;
-        const obj_path = std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{
-            oid_hex[0..2], oid_hex[2..],
-        }) catch return null;
-        defer self.allocator.free(obj_path);
-
-        const compressed = git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024)) catch return null;
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator) catch null;
     }
 
     fn countCommitsBetween(self: *Describe, git_dir: *const Io.Dir, from_oid: []const u8, to_oid: []const u8) !u32 {
@@ -342,7 +304,7 @@ pub const Describe = struct {
 
                 if (std.mem.eql(u8, current, from_oid)) break :outer;
 
-                const commit_data = self.readObject(git_dir, current) orelse continue;
+                const commit_data = object_io.readObjectOpt(git_dir, self.io, self.allocator, current) orelse continue;
                 defer self.allocator.free(commit_data);
 
                 var it = std.mem.splitScalar(u8, commit_data, '\n');
@@ -472,7 +434,7 @@ test "Describe init" {
 }
 
 test "Describe describeCommit method exists" {
-    const io = std.Io.Threaded.new(.{});
+    const io = std.Io.Threaded.global_single_threaded.io();
     const d = Describe.init(std.testing.allocator, io);
     try std.testing.expect(d.options.abbrev == 7);
     try std.testing.expect(d.options.dirty == false);

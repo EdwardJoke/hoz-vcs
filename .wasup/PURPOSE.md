@@ -1,19 +1,14 @@
-# Project Purpose
+# Project Purpose — v0.4.0
 
 ## What
-Fix all test failures (35 failing + 5 crashing + 11 leaks) and replace dummy/placeholder test code with production-ready tests across the Hoz codebase.
+Upgrade the entire hoz codebase from Zig 0.15 to Zig 0.16 API compatibility, fixing all 60 compilation errors and 11 test failures to achieve a fully-passing build on Zig 0.16.0.
 
 ## Why
-v0.3.1 introduced standardized CLI output formatting but left the test suite in a broken state:
-- **77 pass, 35 fail, 5 crash, 11 leaks** out of 117 total tests
-- Root causes: Identity.parse() whitespace handling bug, OID test data using invalid hex lengths, Object.parse() error type mismatches, Tree.parse() hardcoded allocator causing memory leaks, and stub/dummy test code that doesn't validate real behavior
-- Without passing tests, v0.3.1's output formatting changes have no safety net against regressions
+The project currently builds on Zig 0.16.0 but **60 compilation errors** and **11 test failures** remain when running the full test suite. The errors span 12 categories of breaking API changes between 0.15 → 0.16: Io system restructure (`Io.Threaded.new()` removed, `Io.init()` removed, `Io.Writer.interface` gone), std.fs reorganization (`fs.File` namespace), crypto module reshuffle (`crypto.hash.sha1` path changed), const-correctness tightening (DebugAllocator, RefStore), and OID type changes. Without this upgrade, the codebase is stuck on deprecated APIs that will only accumulate more tech debt.
 
 ## Success Criteria
-- [ ] All 117+ tests pass with zero failures, zero crashes, zero memory leaks
-- [ ] Identity.parse() correctly handles whitespace in author/committer/tagger strings (root cause of commit/tag parse failures)
-- [ ] OID tests use valid hex strings matching Zig 0.16 API contract
-- [ ] Object.parse() error types match test expectations (or tests updated to match actual behavior)
-- [ ] Tree.parse() accepts allocator parameter instead of hardcoding std.testing.allocator
-- [ ] All dummyGetCommit stubs replaced with proper mock commit objects
-- [ ] Placeholder tests (ReflogEntry format) replaced with real validation logic
+- [ ] All 60 compilation errors resolved — `zig build test` compiles with 0 errors
+- [ ] All 11 runtime test failures fixed — test suite passes at same or better rate than v0.3.5 baseline
+- [ ] Build (`zig build`) continues to pass with zero errors
+- [ ] No regressions in previously-passing 106 tests
+- [ ] All Zig 0.16 API usage follows current std library conventions (no deprecated patterns)

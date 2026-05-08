@@ -72,7 +72,7 @@ test "RemoveOptions default values" {
 }
 
 test "RemoteRemover init" {
-    const io = Io.init(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     const options = RemoveOptions{};
     const remover = RemoteRemover.init(std.testing.allocator, io, options);
     try std.testing.expect(remover.allocator == std.testing.allocator);

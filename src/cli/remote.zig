@@ -253,8 +253,8 @@ pub const RemoteInfo = struct {
 test "Remote init" {
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const io = std.Io.Threaded.new(.{}).?;
-    const remote = Remote.init(std.testing.allocator, io, &writer.interface, .{});
+    const io = std.Io.Threaded.global_single_threaded.io();
+    const remote = Remote.init(std.testing.allocator, io, &writer, .{});
     try std.testing.expect(remote.verbose == false);
 }
 

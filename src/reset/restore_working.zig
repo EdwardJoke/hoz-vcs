@@ -2,6 +2,7 @@
 const std = @import("std");
 const Io = std.Io;
 const OID = @import("../object/oid.zig").OID;
+const object_io = @import("../object/io.zig");
 
 pub const RestoreWorking = struct {
     allocator: std.mem.Allocator,
@@ -25,7 +26,7 @@ pub const RestoreWorking = struct {
     pub fn restoreFromSource(self: *RestoreWorking, paths: []const []const u8, source: []const u8) !void {
         const source_oid = OID.fromHex(source) catch return error.InvalidOid;
 
-        const tree_data = self.readObject(source_oid) catch return error.ObjectNotFound;
+        const tree_data = object_io.readObject(&self.git_dir, self.io, self.allocator, source_oid) catch return error.ObjectNotFound;
         defer self.allocator.free(tree_data);
 
         if (paths.len == 0) {
@@ -85,21 +86,6 @@ pub const RestoreWorking = struct {
         if (raw.len < 5 or !std.mem.startsWith(u8, raw, "blob ")) return error.InvalidObject;
 
         const null_idx = std.mem.indexOfScalar(u8, raw, 0) orelse return error.InvalidObject;
-        return self.allocator.dupe(u8, raw[null_idx + 1 ..]);
-    }
-
-    fn readObject(self: *RestoreWorking, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const raw = self.git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(10 * 1024 * 1024)) catch {
-            return error.ObjectNotFound;
-        };
-
-        if (raw.len < 5) return error.InvalidObject;
-
-        const null_idx = std.mem.indexOfScalar(u8, raw, 0) orelse raw.len;
         return self.allocator.dupe(u8, raw[null_idx + 1 ..]);
     }
 

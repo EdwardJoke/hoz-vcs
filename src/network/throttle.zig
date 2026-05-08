@@ -232,12 +232,7 @@ test "BandwidthThrottle setLimit" {
 }
 
 test "BandwidthThrottle concurrent setLimit/getLimit" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     var throttle = BandwidthThrottle.init(std.testing.allocator, io, .{});
     defer throttle.deinit();
 
@@ -255,12 +250,7 @@ test "BandwidthThrottle concurrent setLimit/getLimit" {
 }
 
 test "BandwidthThrottle adjust and resetStats" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     var throttle = BandwidthThrottle.init(std.testing.allocator, io, .{ .enable_auto_adjust = true });
     defer throttle.deinit();
 

@@ -216,14 +216,14 @@ pub const LargeFileDiffProcessor = struct {
 
         var old_bytes: usize = 0;
         while (old_bytes < old_buf.len) {
-            const n = old_reader.interface.read(old_buf[old_bytes..]) catch break;
+            const n = old_reader.read(old_buf[old_bytes..]) catch break;
             if (n == 0) break;
             old_bytes += n;
         }
 
         var new_bytes: usize = 0;
         while (new_bytes < new_buf.len) {
-            const n = new_reader.interface.read(new_buf[new_bytes..]) catch break;
+            const n = new_reader.read(new_buf[new_bytes..]) catch break;
             if (n == 0) break;
             new_bytes += n;
         }

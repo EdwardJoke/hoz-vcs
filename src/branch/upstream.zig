@@ -212,7 +212,7 @@ test "UpstreamResult structure" {
     };
 
     try std.testing.expectEqualStrings("feature", result.branch_name);
-    try std.testing.expectEqualStrings("origin/feature", result.upstream_name);
+    try std.testing.expectEqualStrings("origin/feature", result.upstream_name.?);
     try std.testing.expect(result.was_updated == true);
 }
 
@@ -227,13 +227,8 @@ test "UpstreamResult null upstream" {
 }
 
 test "BranchUpstream init" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
-    const store = RefStore{
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,
         .io = undefined,
@@ -246,13 +241,8 @@ test "BranchUpstream init" {
 }
 
 test "BranchUpstream init with options" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
-    const store = RefStore{
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,
         .io = undefined,

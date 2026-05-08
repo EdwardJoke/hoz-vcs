@@ -35,7 +35,7 @@ pub const LightweightTagCreator = struct {
 };
 
 test "LightweightTagCreator init" {
-    const io = Io.init(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     const creator = LightweightTagCreator.init(std.testing.allocator, io);
     try std.testing.expect(creator.allocator == std.testing.allocator);
 }

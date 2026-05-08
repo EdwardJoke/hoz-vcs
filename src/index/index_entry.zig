@@ -1,5 +1,6 @@
 //! Index Entry - represents a single file in the Git index/staging area
 const std = @import("std");
+const Io = std.Io;
 const OID = @import("../object/oid.zig").OID;
 
 pub const INDEX_ENTRY_FLAGS_NAME_MASK: u16 = 0xFFF;
@@ -27,7 +28,7 @@ pub const IndexEntry = struct {
     oid: OID,
     flags: u16,
 
-    pub fn fromStat(stat: std.fs.File.Stats, oid: OID, name: []const u8, stage_val: u8) IndexEntry {
+    pub fn fromStat(stat: Io.File.Stat, oid: OID, name: []const u8, stage_val: u8) IndexEntry {
         var name_len: u16 = @intCast(name.len);
         if (name_len >= 0xFFF) {
             name_len = 0xFFF;
@@ -37,15 +38,15 @@ pub const IndexEntry = struct {
         flags |= (@as(u16, stage_val) & 0x3) << 12;
 
         return .{
-            .ctime_sec = @intCast(stat.ctime.seconds),
-            .ctime_nsec = @intCast(stat.ctime.nanos),
-            .mtime_sec = @intCast(stat.mtime.seconds),
-            .mtime_nsec = @intCast(stat.mtime.nanos),
-            .dev = @intCast(stat.dev),
-            .ino = @intCast(stat.ino),
-            .mode = @intCast(stat.mode),
-            .uid = @intCast(stat.uid),
-            .gid = @intCast(stat.gid),
+            .ctime_sec = @intCast(@divTrunc(stat.ctime.nanoseconds, 1_000_000_000)),
+            .ctime_nsec = @intCast(@rem(stat.ctime.nanoseconds, 1_000_000_000)),
+            .mtime_sec = @intCast(@divTrunc(stat.mtime.nanoseconds, 1_000_000_000)),
+            .mtime_nsec = @intCast(@rem(stat.mtime.nanoseconds, 1_000_000_000)),
+            .dev = 0,
+            .ino = @intCast(stat.inode),
+            .mode = @intFromEnum(stat.permissions),
+            .uid = 0,
+            .gid = 0,
             .file_size = @intCast(stat.size),
             .oid = oid,
             .flags = flags,
@@ -68,22 +69,22 @@ pub const IndexEntry = struct {
         return self.stage() > 0;
     }
 
-    pub fn updateFromStat(self: *IndexEntry, stat: std.fs.File.Stats, oid: OID) void {
-        self.ctime_sec = @intCast(stat.ctime.seconds);
-        self.ctime_nsec = @intCast(stat.ctime.nanos);
-        self.mtime_sec = @intCast(stat.mtime.seconds);
-        self.mtime_nsec = @intCast(stat.mtime.nanos);
-        self.dev = @intCast(stat.dev);
-        self.ino = @intCast(stat.ino);
-        self.mode = @intCast(stat.mode);
-        self.uid = @intCast(stat.uid);
-        self.gid = @intCast(stat.gid);
+    pub fn updateFromStat(self: *IndexEntry, stat: Io.File.Stat, oid: OID) void {
+        self.ctime_sec = @intCast(@divTrunc(stat.ctime.nanoseconds, 1_000_000_000));
+        self.ctime_nsec = @intCast(@rem(stat.ctime.nanoseconds, 1_000_000_000));
+        self.mtime_sec = @intCast(@divTrunc(stat.mtime.nanoseconds, 1_000_000_000));
+        self.mtime_nsec = @intCast(@rem(stat.mtime.nanoseconds, 1_000_000_000));
+        self.dev = 0;
+        self.ino = @intCast(stat.inode);
+        self.mode = @intFromEnum(stat.permissions);
+        self.uid = 0;
+        self.gid = 0;
         self.file_size = @intCast(stat.size);
         self.oid = oid;
     }
 
     pub fn setStage(self: *IndexEntry, stage_val: u8) void {
-        self.flags = (self.flags & 0xCFFF) | ((stage_val & 0x3) << 12);
+        self.flags = (self.flags & 0xCFFF) | (@as(u16, stage_val & 0x3) << 12);
     }
 
     pub fn ceSec(self: IndexEntry) u32 {
@@ -127,47 +128,43 @@ pub const IndexEntry = struct {
     }
 };
 
-pub fn timestampMatchesCached(entry: *const IndexEntry, stat: std.fs.File.Stats) bool {
-    return entry.ctime_sec == @as(u32, @intCast(stat.ctime.seconds)) and
-        entry.mtime_sec == @as(u32, @intCast(stat.mtime.seconds)) and
-        entry.mtime_nsec == @as(u32, @intCast(stat.mtime.nanos));
+pub fn timestampMatchesCached(entry: *const IndexEntry, stat: Io.File.Stat) bool {
+    return entry.ctime_sec == @as(u32, @intCast(@divTrunc(stat.ctime.nanoseconds, 1_000_000_000))) and
+        entry.mtime_sec == @as(u32, @intCast(@divTrunc(stat.mtime.nanoseconds, 1_000_000_000))) and
+        entry.mtime_nsec == @as(u32, @intCast(@rem(stat.mtime.nanoseconds, 1_000_000_000)));
 }
 
-pub fn shouldUpdateEntry(entry: *const IndexEntry, stat: std.fs.File.Stats) bool {
+pub fn shouldUpdateEntry(entry: *const IndexEntry, stat: Io.File.Stat) bool {
     return !timestampMatchesCached(entry, stat) or
         entry.file_size != @as(u32, @intCast(stat.size)) or
-        entry.ceMode() != @as(u32, @intCast(stat.mode));
+        entry.ceMode() != @as(u32, @intFromEnum(stat.permissions));
 }
 
 // TESTS
 test "IndexEntry fromStat" {
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);
 
-    try std.testing.expectEqual(@as(u32, @intCast(stat.mtime.seconds)), entry.mtime_sec);
-    try std.testing.expectEqual(@as(u32, @intCast(stat.mtime.nanos)), entry.mtime_nsec);
-    try std.testing.expectEqual(@as(u32, @intCast(stat.mode)), entry.mode);
-    try std.testing.expectEqual(@as(u32, @intCast(stat.uid)), entry.uid);
-    try std.testing.expectEqual(@as(u32, @intCast(stat.gid)), entry.gid);
+    try std.testing.expectEqual(@as(u32, 2000), entry.mtime_sec);
+    try std.testing.expectEqual(@as(u32, 500), entry.mtime_nsec);
+    try std.testing.expectEqual(@as(u32, 0o100644), entry.mode);
+    try std.testing.expectEqual(@as(u32, 0), entry.uid);
+    try std.testing.expectEqual(@as(u32, 0), entry.gid);
     try std.testing.expectEqual(@as(u32, @intCast(stat.size)), entry.file_size);
     try std.testing.expectEqual(oid, entry.oid);
     try std.testing.expectEqual(@as(u16, @intCast(name.len)), entry.nameLength());
@@ -175,24 +172,20 @@ test "IndexEntry fromStat" {
 }
 
 test "IndexEntry stage bits" {
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     var entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -212,24 +205,20 @@ test "IndexEntry stage bits" {
 }
 
 test "IndexEntry setStage" {
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     var entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -249,24 +238,20 @@ test "IndexEntry setStage" {
 }
 
 test "timestampMatchesCached" {
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -274,29 +259,25 @@ test "timestampMatchesCached" {
     try std.testing.expect(timestampMatchesCached(&entry, stat));
 
     var modified_stat = stat;
-    modified_stat.mtime = .{ .seconds = 2000001, .nanos = 500 };
+    modified_stat.mtime = .{ .nanoseconds = 2000001000500 };
     try std.testing.expect(!timestampMatchesCached(&entry, modified_stat));
 }
 
 test "shouldUpdateEntry" {
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -304,7 +285,7 @@ test "shouldUpdateEntry" {
     try std.testing.expect(!shouldUpdateEntry(&entry, stat));
 
     var modified_stat = stat;
-    modified_stat.mtime = .{ .seconds = 2000001, .nanos = 500 };
+    modified_stat.mtime = .{ .nanoseconds = 2000001000500 };
     try std.testing.expect(shouldUpdateEntry(&entry, modified_stat));
 
     modified_stat = stat;
@@ -312,6 +293,6 @@ test "shouldUpdateEntry" {
     try std.testing.expect(shouldUpdateEntry(&entry, modified_stat));
 
     modified_stat = stat;
-    modified_stat.mode = 0o100755;
+    modified_stat.permissions = @as(Io.File.Permissions, @enumFromInt(0o100755));
     try std.testing.expect(shouldUpdateEntry(&entry, modified_stat));
 }

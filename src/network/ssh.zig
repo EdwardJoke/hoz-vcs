@@ -471,12 +471,7 @@ test "SshDiagnosis fields" {
 }
 
 test "diagnose returns struct with defaults when ssh missing" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     const diag = try diagnose(std.testing.allocator, io, "nonexistent.example.com", 22, null, null);
     defer diag.deinit(std.testing.allocator);
     try std.testing.expect(diag.ssh_available == true or diag.ssh_available == false);

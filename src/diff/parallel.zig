@@ -272,14 +272,14 @@ pub const ParallelDiffProcessor = struct {
 };
 
 test "ParallelDiffProcessor init" {
-    const io = Io.Threaded.new(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     const processor = ParallelDiffProcessor.init(std.testing.allocator, io, .{});
     try std.testing.expect(processor.config.enabled == true);
     try std.testing.expect(processor.config.num_workers == 4);
 }
 
 test "ParallelDiffProcessor identifyHunks" {
-    const io = Io.Threaded.new(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     var processor = ParallelDiffProcessor.init(std.testing.allocator, io, .{});
 
     const edits = &.{
@@ -298,7 +298,7 @@ test "ParallelDiffProcessor identifyHunks" {
 }
 
 test "ParallelDiffProcessor identifyHunks multiple" {
-    const io = Io.Threaded.new(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     var processor = ParallelDiffProcessor.init(std.testing.allocator, io, .{});
 
     const edits = &.{
@@ -317,7 +317,7 @@ test "ParallelDiffProcessor identifyHunks multiple" {
 }
 
 test "ParallelDiffProcessor identifyHunks no changes" {
-    const io = Io.Threaded.new(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     var processor = ParallelDiffProcessor.init(std.testing.allocator, io, .{});
 
     const edits = &.{
@@ -332,7 +332,7 @@ test "ParallelDiffProcessor identifyHunks no changes" {
 }
 
 test "ParallelDiffProcessor getStats" {
-    const io = Io.Threaded.new(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     var processor = ParallelDiffProcessor.init(std.testing.allocator, io, .{ .num_workers = 8 });
     const stats = processor.getStats();
 
@@ -340,7 +340,7 @@ test "ParallelDiffProcessor getStats" {
 }
 
 test "ParallelDiffProcessor setEnabled" {
-    const io = Io.Threaded.new(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     var processor = ParallelDiffProcessor.init(std.testing.allocator, io, .{});
     try std.testing.expect(processor.config.enabled == true);
 
@@ -352,7 +352,7 @@ test "ParallelDiffProcessor setEnabled" {
 }
 
 test "ParallelDiffProcessor setNumWorkers" {
-    const io = Io.Threaded.new(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     var processor = ParallelDiffProcessor.init(std.testing.allocator, io, .{});
     try std.testing.expectEqual(@as(usize, 4), processor.config.num_workers);
 

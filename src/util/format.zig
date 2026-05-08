@@ -207,7 +207,7 @@ test "Formatter.header prints with bold" {
     var fbs = std.io.FixedBufferStream.init(&buf);
     const writer = fbs.writer();
 
-    var formatter = Formatter.init(&writer.interface, true);
+    var formatter = Formatter.init(&writer, true);
     try formatter.header("Test Header");
 
     const output = fbs.getWritten();
@@ -222,7 +222,7 @@ test "Formatter.success prints with symbol" {
     var fbs = std.io.FixedBufferStream.init(&buf);
     const writer = fbs.writer();
 
-    var formatter = Formatter.init(&writer.interface, true);
+    var formatter = Formatter.init(&writer, true);
     try formatter.success("Operation completed");
 
     const output = fbs.getWritten();
@@ -237,7 +237,7 @@ test "Formatter.helpCommand aligns columns" {
     var fbs = std.io.FixedBufferStream.init(&buf);
     const writer = fbs.writer();
 
-    var formatter = Formatter.init(&writer.interface, true);
+    var formatter = Formatter.init(&writer, true);
     try formatter.helpCommand("status", "Show working tree status");
 
     const output = fbs.getWritten();

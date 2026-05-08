@@ -36,22 +36,60 @@ pub const HeadUpdate = struct {
     }
 };
 
+/// Resolve HEAD to an OID — reads HEAD file, follows symbolic refs.
+/// Returns null if HEAD cannot be resolved (detached empty repo, missing file, etc.)
+pub fn resolveHeadOid(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocator) ?OID {
+    const head_content = git_dir.readFileAlloc(io, "HEAD", allocator, .limited(256)) catch return null;
+    defer allocator.free(head_content);
+    const trimmed = std.mem.trim(u8, head_content, " \t\r\n");
+
+    if (std.mem.startsWith(u8, trimmed, "ref: ")) {
+        const ref_path = trimmed["ref: ".len..];
+        const ref_content = git_dir.readFileAlloc(io, ref_path, allocator, .limited(256)) catch return null;
+        defer allocator.free(ref_content);
+        const ref_trimmed = std.mem.trim(u8, ref_content, " \t\r\n");
+        if (ref_trimmed.len >= 40) {
+            return OID.fromHex(ref_trimmed[0..40]) catch null;
+        }
+        return null;
+    }
+
+    if (trimmed.len >= 40) {
+        return OID.fromHex(trimmed[0..40]) catch null;
+    }
+    return null;
+}
+
+/// Read HEAD's symbolic ref path (e.g., "refs/heads/main").
+/// Returns null if HEAD is detached (contains a raw OID) or unreadable.
+pub fn readHeadRef(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocator) ?[]const u8 {
+    const head_content = git_dir.readFileAlloc(io, "HEAD", allocator, .limited(256)) catch return null;
+    defer allocator.free(head_content);
+    const trimmed = std.mem.trim(u8, head_content, " \t\r\n");
+
+    if (std.mem.startsWith(u8, trimmed, "ref: ")) {
+        const ref_path = std.mem.trim(u8, trimmed["ref: ".len..], " \t\r\n");
+        return allocator.dupe(u8, ref_path) catch null;
+    }
+    return null;
+}
+
 test "HeadUpdate init" {
-    var ref_store: RefStore = std.mem.zeroes(RefStore);
+    var ref_store: RefStore = undefined;
     const updater = HeadUpdate.init(std.testing.allocator, &ref_store);
 
     try std.testing.expectEqual(std.testing.allocator, updater.allocator);
 }
 
 test "HeadUpdate init with ref_store" {
-    var ref_store: RefStore = std.mem.zeroes(RefStore);
+    var ref_store: RefStore = undefined;
     const updater = HeadUpdate.init(std.testing.allocator, &ref_store);
 
     try std.testing.expectEqual(&ref_store, updater.ref_store);
 }
 
 test "HeadUpdate allocator access" {
-    var ref_store: RefStore = std.mem.zeroes(RefStore);
+    var ref_store: RefStore = undefined;
     const updater = HeadUpdate.init(std.testing.allocator, &ref_store);
 
     try std.testing.expectEqual(std.testing.allocator, updater.allocator);

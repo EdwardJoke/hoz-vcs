@@ -4,6 +4,7 @@ const Io = std.Io;
 const OID = @import("../object/oid.zig").OID;
 const object_mod = @import("../object/object.zig");
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
 const SoftReset = @import("soft.zig").SoftReset;
 
 pub const RestoreSource = struct {
@@ -76,7 +77,7 @@ pub const RestoreSource = struct {
     fn extractTreeHex(self: *RestoreSource, commit_oid: OID) ![]const u8 {
         if (commit_oid.isZero()) return "";
 
-        const commit_data = self.readObject(commit_oid) catch return "";
+        const commit_data = object_io.readObject(&self.git_dir, self.io, self.allocator, commit_oid) catch return "";
         defer self.allocator.free(commit_data);
 
         const obj = object_mod.parse(commit_data) catch return "";
@@ -94,17 +95,6 @@ pub const RestoreSource = struct {
         }
 
         return "";
-    }
-
-    fn readObject(self: *RestoreSource, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const object_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(object_path);
-
-        const compressed = try self.git_dir.readFileAlloc(self.io, object_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
     }
 
     fn resolveCommit(_: *RestoreSource, spec: []const u8) ![]const u8 {

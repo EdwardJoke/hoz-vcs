@@ -9,6 +9,7 @@ const IndexEntry = @import("../index/index_entry.zig").IndexEntry;
 const Index = @import("../index/index.zig").Index;
 const tree_mod = @import("../object/tree.zig");
 const OID = @import("../object/oid.zig").OID;
+const oid_mod = @import("../object/oid.zig");
 
 pub const TreeBuilderError = error{
     InvalidPath,
@@ -30,6 +31,9 @@ pub const TreeBuilder = struct {
     }
 
     pub fn deinit(self: *TreeBuilder) void {
+        for (self.entries.items) |entry| {
+            self.allocator.free(entry.name);
+        }
         self.entries.deinit(self.allocator);
         var it = self.subtrees.iterator();
         while (it.next()) |entry| {
@@ -175,7 +179,7 @@ pub fn buildSubtree(
 }
 
 test "TreeBuilder initializes correctly" {
-    const gpa = std.heap.DebugAllocator(.{}).init;
+    var gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
     var builder = try TreeBuilder.init(gpa.allocator());
@@ -185,26 +189,26 @@ test "TreeBuilder initializes correctly" {
 }
 
 test "TreeBuilder adds entry correctly" {
-    const gpa = std.heap.DebugAllocator(.{}).init;
+    var gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
     var builder = try TreeBuilder.init(gpa.allocator());
     defer builder.deinit();
 
-    const oid: [20]u8 = [_]u8{0} ** 20;
+    const oid = oid_mod.OID.zero();
     try builder.addEntry(.file, oid, "test.txt");
 
     try std.testing.expectEqual(@as(usize, 1), builder.entries.items.len);
 }
 
 test "TreeBuilder build creates tree" {
-    const gpa = std.heap.DebugAllocator(.{}).init;
+    var gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
     var builder = try TreeBuilder.init(gpa.allocator());
     defer builder.deinit();
 
-    const oid: [20]u8 = [_]u8{0} ** 20;
+    const oid = oid_mod.OID.zero();
     try builder.addEntry(.file, oid, "a.txt");
     try builder.addEntry(.file, oid, "b.txt");
 
@@ -213,7 +217,7 @@ test "TreeBuilder build creates tree" {
 }
 
 test "TreeBuilder addIndexEntry works" {
-    const gpa = std.heap.DebugAllocator(.{}).init;
+    var gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
     var builder = try TreeBuilder.init(gpa.allocator());
@@ -230,7 +234,7 @@ test "TreeBuilder addIndexEntry works" {
         .uid = 0,
         .gid = 0,
         .file_size = 10,
-        .oid = [_]u8{0} ** 20,
+        .oid = oid_mod.OID.zero(),
         .flags = 0,
     };
 
@@ -242,12 +246,12 @@ test "TreeBuilder addIndexEntry works" {
 test "compareTreeEntries sorts by name then mode" {
     const a = tree_mod.TreeEntry{
         .mode = .file,
-        .oid = [_]u8{0} ** 20,
+        .oid = oid_mod.OID.zero(),
         .name = "a.txt",
     };
     const b = tree_mod.TreeEntry{
         .mode = .file,
-        .oid = [_]u8{0} ** 20,
+        .oid = oid_mod.OID.zero(),
         .name = "b.txt",
     };
 
@@ -255,13 +259,13 @@ test "compareTreeEntries sorts by name then mode" {
 }
 
 test "buildTreeFromIndex creates tree from index" {
-    const gpa = std.heap.DebugAllocator(.{}).init;
+    var gpa = std.heap.DebugAllocator(.{}).init;
     defer _ = gpa.deinit();
 
     var index = Index.init(gpa.allocator());
     defer index.deinit();
 
-    const oid: [20]u8 = [_]u8{1} ** 20;
+    const oid = oid_mod.OID.fromBytes(&[_]u8{1} ** 20);
     try index.entries.append(gpa.allocator(), .{
         .ctime_sec = 0,
         .ctime_nsec = 0,

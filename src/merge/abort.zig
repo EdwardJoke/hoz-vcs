@@ -207,7 +207,7 @@ test "AbortResult structure" {
 }
 
 test "MergeAborter init" {
-    const io = std.Io.Threaded.new(.{});
+    const io = std.Io.Threaded.global_single_threaded.io();
     var git_dir = io.cwd().openDir(.git, .{}) catch return;
     defer git_dir.close();
     const options = AbortOptions{};
@@ -216,7 +216,7 @@ test "MergeAborter init" {
 }
 
 test "MergeAborter init with options" {
-    const io = std.Io.Threaded.new(.{});
+    const io = std.Io.Threaded.global_single_threaded.io();
     var git_dir = io.cwd().openDir(.git, .{}) catch return;
     defer git_dir.close();
     var options = AbortOptions{};
@@ -226,7 +226,7 @@ test "MergeAborter init with options" {
 }
 
 test "MergeAborter abort method exists" {
-    const io = std.Io.Threaded.new(.{});
+    const io = std.Io.Threaded.global_single_threaded.io();
     var git_dir = io.cwd().openDir(.git, .{}) catch return;
     defer git_dir.close();
     var aborter = MergeAborter.init(std.testing.allocator, io, git_dir, .{});
@@ -235,7 +235,7 @@ test "MergeAborter abort method exists" {
 }
 
 test "MergeAborter canAbort method exists" {
-    const io = std.Io.Threaded.new(.{});
+    const io = std.Io.Threaded.global_single_threaded.io();
     var git_dir = io.cwd().openDir(.git, .{}) catch return;
     defer git_dir.close();
     var aborter = MergeAborter.init(std.testing.allocator, io, git_dir, .{});

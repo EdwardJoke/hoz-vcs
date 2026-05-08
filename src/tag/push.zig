@@ -79,7 +79,7 @@ pub const TagPusher = struct {
 };
 
 test "TagPusher init" {
-    const io = Io.init(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     const pusher = TagPusher.init(std.testing.allocator, io);
     try std.testing.expect(pusher.allocator == std.testing.allocator);
 }

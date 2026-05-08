@@ -7,6 +7,7 @@ const oidFromBytes = @import("../object/oid.zig").oidFromBytes;
 const object_mod = @import("../object/object.zig");
 const tree_mod = @import("../object/tree.zig");
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
 const modeToStr = @import("../object/tree.zig").modeToStr;
 
 pub const LsTreeOptions = struct {
@@ -111,7 +112,7 @@ pub const LsTree = struct {
         const oid_str = std.mem.trim(u8, content, "\r\n");
         const commit_oid = try OID.fromHex(oid_str);
 
-        const obj_data = self.readObject(git_dir, commit_oid) catch {
+        const obj_data = object_io.readObject(&git_dir, self.io, self.allocator, commit_oid) catch {
             return error.ObjectNotFound;
         };
         defer self.allocator.free(obj_data);
@@ -132,7 +133,7 @@ pub const LsTree = struct {
     }
 
     fn listTree(self: *LsTree, git_dir: Io.Dir, tree_oid: OID, prefix: []const u8) !void {
-        const obj_data = self.readObject(git_dir, tree_oid) catch {
+        const obj_data = object_io.readObject(&git_dir, self.io, self.allocator, tree_oid) catch {
             try self.output.errorMessage("Failed to read tree object", .{});
             return;
         };
@@ -176,16 +177,5 @@ pub const LsTree = struct {
                 try self.listTree(git_dir, entry_oid, full_name);
             }
         }
-    }
-
-    fn readObject(self: *LsTree, git_dir: Io.Dir, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = try git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
     }
 };

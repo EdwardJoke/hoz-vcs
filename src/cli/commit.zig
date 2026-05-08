@@ -9,6 +9,8 @@ const Identity = @import("../object/commit.zig").Identity;
 const Index = @import("../index/index.zig").Index;
 const tree_builder = @import("../tree/builder.zig");
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
+const head_mod = @import("../commit/head.zig");
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 
@@ -62,7 +64,7 @@ pub const Commit = struct {
 
         const commit_oid = try self.createCommit(&git_dir);
         const hex = commit_oid.toHex();
-        const is_root = (self.resolveHead(&git_dir) catch null) == null;
+        const is_root = head_mod.resolveHeadOid(&git_dir, self.io, self.allocator) == null;
         try self.output.successMessage("--→ [{s} {s}] {s}", .{
             if (self.amend) "amended" else if (is_root) "root" else "commit",
             hex[0..7],
@@ -107,14 +109,14 @@ pub const Commit = struct {
         defer parents.deinit(self.allocator);
 
         if (!self.amend) {
-            const head_oid = self.resolveHead(git_dir) catch null;
+            const head_oid = head_mod.resolveHeadOid(git_dir, self.io, self.allocator);
             if (head_oid) |oid| {
                 if (!oid.isZero()) {
                     try parents.append(self.allocator, oid);
                 }
             }
         } else {
-            const head_oid = (self.resolveHead(git_dir) catch null) orelse OID{ .bytes = .{0} ** 20 };
+            const head_oid = head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse OID{ .bytes = .{0} ** 20 };
             if (!head_oid.isZero()) {
                 try parents.append(self.allocator, head_oid);
                 const it = self.readCommitParents(git_dir, head_oid) catch &.{};
@@ -134,7 +136,7 @@ pub const Commit = struct {
 
         const commit_oid = oid_mod.oidFromContent(serialized);
 
-        try self.writeLooseObject(git_dir, serialized);
+        _ = try object_io.writeLooseObject(git_dir, self.io, self.allocator, serialized);
 
         try self.updateHead(git_dir, commit_oid);
 
@@ -143,73 +145,40 @@ pub const Commit = struct {
 
     fn writeTree(self: *Commit, git_dir: *const Io.Dir) !OID {
         const index_data = git_dir.readFileAlloc(self.io, "index", self.allocator, .limited(16 * 1024 * 1024)) catch {
-            const empty_tree = try std.fmt.allocPrint(self.allocator, "tree 0\x00", .{});
-            defer self.allocator.free(empty_tree);
-            const empty_oid = oid_mod.oidFromContent(empty_tree);
-            try self.writeLooseObject(git_dir, empty_tree);
-            return empty_oid;
+            return self.writeEmptyTree(git_dir);
         };
         defer self.allocator.free(index_data);
 
         var index = Index.parse(index_data, self.allocator) catch {
-            const empty_tree = try std.fmt.allocPrint(self.allocator, "tree 0\x00", .{});
-            defer self.allocator.free(empty_tree);
-            const empty_oid = oid_mod.oidFromContent(empty_tree);
-            try self.writeLooseObject(git_dir, empty_tree);
-            return empty_oid;
+            return self.writeEmptyTree(git_dir);
         };
         defer index.deinit();
 
         if (index.entries.items.len == 0) {
-            const empty_tree = try std.fmt.allocPrint(self.allocator, "tree 0\x00", .{});
-            defer self.allocator.free(empty_tree);
-            const empty_oid = oid_mod.oidFromContent(empty_tree);
-            try self.writeLooseObject(git_dir, empty_tree);
-            return empty_oid;
+            return self.writeEmptyTree(git_dir);
         }
 
         const tree = tree_builder.buildTreeFromIndex(self.allocator, index) catch {
-            const empty_tree = try std.fmt.allocPrint(self.allocator, "tree 0\x00", .{});
-            defer self.allocator.free(empty_tree);
-            const empty_oid = oid_mod.oidFromContent(empty_tree);
-            try self.writeLooseObject(git_dir, empty_tree);
-            return empty_oid;
+            return self.writeEmptyTree(git_dir);
         };
 
         const serialized = try tree.serialize(self.allocator);
         defer self.allocator.free(serialized);
 
         const tree_oid = oid_mod.oidFromContent(serialized);
-        try self.writeLooseObject(git_dir, serialized);
+        _ = try object_io.writeLooseObject(git_dir, self.io, self.allocator, serialized);
         return tree_oid;
     }
 
-    fn resolveHead(self: *Commit, git_dir: *const Io.Dir) !?OID {
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch return null;
-        defer self.allocator.free(head_content);
-
-        const trimmed = std.mem.trim(u8, head_content, " \n\r");
-
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const ref_path = std.mem.trim(u8, trimmed["ref: ".len..], " \n\r");
-            const ref_content = git_dir.readFileAlloc(self.io, ref_path, self.allocator, .limited(256)) catch return null;
-            defer self.allocator.free(ref_content);
-            const ref_trimmed = std.mem.trim(u8, ref_content, " \n\r");
-            if (ref_trimmed.len >= 40) {
-                return OID.fromHex(ref_trimmed[0..40]) catch return null;
-            }
-            return null;
-        }
-
-        if (trimmed.len >= 40) {
-            return OID.fromHex(trimmed[0..40]) catch return null;
-        }
-
-        return null;
+    fn writeEmptyTree(self: *Commit, git_dir: *const Io.Dir) !OID {
+        const empty_tree = "tree 0\x00";
+        const empty_oid = oid_mod.oidFromContent(empty_tree);
+        _ = try object_io.writeLooseObject(git_dir, self.io, self.allocator, empty_tree);
+        return empty_oid;
     }
 
     fn readCommitParents(self: *Commit, git_dir: *const Io.Dir, commit_oid: OID) ![]const OID {
-        const obj_data = self.readObject(git_dir, commit_oid) catch return &.{};
+        const obj_data = object_io.readObject(git_dir, self.io, self.allocator, commit_oid) catch return &.{};
         defer self.allocator.free(obj_data);
 
         var parents = std.ArrayList(OID).empty;
@@ -251,41 +220,6 @@ pub const Commit = struct {
         }
     }
 
-    fn writeLooseObject(self: *Commit, git_dir: *const Io.Dir, data: []const u8) !void {
-        const hash = @import("../crypto/sha1.zig").sha1(data);
-        var oid_bytes: [20]u8 = undefined;
-        @memcpy(&oid_bytes, &hash);
-        const oid = OID{ .bytes = oid_bytes };
-
-        const hex = oid.toHex();
-        const obj_dir = try std.fmt.allocPrint(self.allocator, "objects/{s}", .{hex[0..2]});
-        defer self.allocator.free(obj_dir);
-        git_dir.createDirPath(self.io, obj_dir) catch return error.CreateObjectDirFailed;
-
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = compress_mod.Zlib.compress(data, self.allocator) catch return;
-        defer self.allocator.free(compressed);
-
-        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch return error.WriteObjectFailed;
-    }
-
-    fn readObject(self: *Commit, git_dir: *const Io.Dir, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024)) catch {
-            return error.ObjectNotFound;
-        };
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator) catch {
-            return error.CorruptObject;
-        };
-    }
-
     fn timezoneOffset(_: *Commit) i32 {
         if (!have_localtime) return 0;
         var tm: c_tm = undefined;
@@ -297,7 +231,7 @@ pub const Commit = struct {
 };
 
 test "Commit init" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     const commit = Commit.init(std.testing.allocator, io, undefined, .{});
     try std.testing.expect(commit.message == null);
 }

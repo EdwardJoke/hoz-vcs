@@ -695,12 +695,7 @@ test "GitModulesParser single submodule no optional fields" {
 }
 
 test "ModuleManager init creates structure" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     const mgr = ModuleManager.init(std.testing.allocator, io);
     try std.testing.expect(mgr.allocator == std.testing.allocator);
 }

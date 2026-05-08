@@ -2,6 +2,7 @@
 const std = @import("std");
 const Io = std.Io;
 const compress_mod = @import("../compress/zlib.zig");
+const head_mod = @import("../commit/head.zig");
 
 pub const BlameLine = struct {
     commit_oid: []const u8,
@@ -36,9 +37,8 @@ pub const Blame = struct {
         };
         defer git_dir.close(self.io);
 
-        const head_commit_hex = self.resolveHead(&git_dir) catch {
-            return error.NoHead;
-        };
+        const _bh_oid = head_mod.resolveHeadOid(&git_dir, self.io, self.allocator) orelse return error.NoHead;
+        const head_commit_hex = try self.allocator.dupe(u8, &_bh_oid.toHex());
         defer self.allocator.free(head_commit_hex);
 
         const head_content = self.readBlobAtCommit(&git_dir, head_commit_hex, path) orelse {
@@ -317,32 +317,6 @@ pub const Blame = struct {
         return list.toOwnedSlice(self.allocator) catch &.{};
     }
 
-    fn resolveHead(self: *Blame, git_dir: *const Io.Dir) ![]const u8 {
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch {
-            return error.NoHead;
-        };
-        defer self.allocator.free(head_content);
-        const trimmed = std.mem.trim(u8, head_content, " \n\r");
-
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const ref_path = trimmed[5..];
-            const ref_content = git_dir.readFileAlloc(self.io, ref_path, self.allocator, .limited(256)) catch {
-                return error.NoHead;
-            };
-            defer self.allocator.free(ref_content);
-            const ref_trimmed = std.mem.trim(u8, ref_content, " \n\r");
-            if (ref_trimmed.len >= 40) {
-                return self.allocator.dupe(u8, ref_trimmed[0..40]);
-            }
-            return error.InvalidOid;
-        }
-
-        if (trimmed.len >= 40) {
-            return self.allocator.dupe(u8, trimmed[0..40]);
-        }
-        return error.InvalidOid;
-    }
-
     fn readCommitObject(self: *Blame, git_dir: *const Io.Dir, oid_hex: []const u8) ?[]const u8 {
         const obj_path = std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] }) catch return null;
         defer self.allocator.free(obj_path);
@@ -473,12 +447,7 @@ test "Blame init" {
 }
 
 test "Blame blameFile method exists" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     var blame = Blame.init(std.testing.allocator, io);
     if (blame.blameFile("nonexistent.txt")) |_| {} else |err| {
         try std.testing.expect(err == error.NotAGitRepository or err == error.FileNotFound);

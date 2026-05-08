@@ -146,8 +146,8 @@ pub const CloneFlags = struct {
 test "Clone init" {
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const io = std.Io.Threaded.new(.{}).?;
-    const clone = Clone.init(std.testing.allocator, io, &writer.interface, .{});
+    const io = std.Io.Threaded.global_single_threaded.io();
+    const clone = Clone.init(std.testing.allocator, io, &writer, .{});
     try std.testing.expect(clone.bare == false);
     try std.testing.expect(clone.mirror == false);
     try std.testing.expect(clone.depth == 0);

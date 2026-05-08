@@ -78,7 +78,7 @@ test "CreateResult structure" {
 }
 
 test "BranchCreator init" {
-    const store = RefStore{
+    var store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,
         .io = undefined,
@@ -90,7 +90,7 @@ test "BranchCreator init" {
 }
 
 test "BranchCreator init with options" {
-    const store = RefStore{
+    var store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,
         .io = undefined,

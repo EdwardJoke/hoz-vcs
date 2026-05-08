@@ -9,7 +9,10 @@ extern fn getgid() c_uint;
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 const oid_mod = @import("../object/oid.zig");
+const OID = oid_mod.OID;
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
+const head_mod = @import("../commit/head.zig");
 
 pub const ArchiveFormat = enum {
     tar,
@@ -55,10 +58,8 @@ pub const Archive = struct {
             return;
         };
 
-        const tree_data = self.readObject(&git_dir, &tree_oid.toHex()) catch {
-            try self.output.errorMessage("Cannot read tree object", .{});
-            return;
-        };
+        const toid = OID.fromHex(tree_oid.toHex()[0..]) catch return error.ObjectNotFound;
+        const tree_data = object_io.readObject(&git_dir, self.io, self.allocator, toid) catch return error.ObjectNotFound;
         defer self.allocator.free(tree_data);
 
         var archive_data = try std.ArrayList(u8).initCapacity(self.allocator, 4096);
@@ -110,23 +111,11 @@ pub const Archive = struct {
         return oid_mod.OID.fromHex(trimmed[0..40]) catch error.InvalidOid;
     }
 
-    fn resolveHeadOid(self: *Archive, git_dir: *const Io.Dir) !oid_mod.OID {
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch
-            return error.NoHead;
-        defer self.allocator.free(head_content);
-        const trimmed = std.mem.trim(u8, head_content, " \n\r");
-
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            return self.resolveRef(git_dir, trimmed[5..]);
-        }
-        return oid_mod.OID.fromHex(trimmed[0..40]) catch error.InvalidOid;
-    }
-
     fn resolveToTree(self: *Archive, git_dir: *const Io.Dir, spec: []const u8) !oid_mod.OID {
         var buf: [64]u8 = undefined;
 
         if (std.mem.eql(u8, spec, "HEAD") or std.mem.eql(u8, spec, "@")) {
-            const commit_oid = try self.resolveHeadOid(git_dir);
+            const commit_oid = head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
             return self.extractTreeFromCommit(git_dir, commit_oid);
         }
 
@@ -148,7 +137,8 @@ pub const Archive = struct {
                 hex_buf[(40 - spec.len) + j] = c;
             }
             const oid = oid_mod.OID.fromHex(&hex_buf) catch return error.InvalidSpec;
-            const obj_data = self.readObject(git_dir, &hex_buf) catch return error.ObjectNotFound;
+            const aoid = OID.fromHex(hex_buf[0..]) catch return error.ObjectNotFound;
+            const obj_data = object_io.readObject(git_dir, self.io, self.allocator, aoid) catch return error.ObjectNotFound;
 
             if (obj_data.len > 5 and std.mem.eql(u8, obj_data[0..5], "tree ")) {
                 return oid;
@@ -164,7 +154,8 @@ pub const Archive = struct {
 
     fn extractTreeFromCommit(self: *Archive, git_dir: *const Io.Dir, commit_oid: oid_mod.OID) !oid_mod.OID {
         const hex = commit_oid.toHex();
-        const data = self.readObject(git_dir, &hex) catch return error.CommitReadFailed;
+        const did = OID.fromHex(hex[0..]) catch return error.CommitReadFailed;
+        const data = object_io.readObject(git_dir, self.io, self.allocator, did) catch return error.CommitReadFailed;
         defer self.allocator.free(data);
 
         var iter = std.mem.tokenizeAny(u8, data, "\n");
@@ -174,15 +165,6 @@ pub const Archive = struct {
             }
         }
         return error.NoTreeInCommit;
-    }
-
-    fn readObject(self: *Archive, git_dir: *const Io.Dir, oid_hex: *const [40]u8) ![]u8 {
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = try git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
     }
 
     fn buildTar(self: *Archive, git_dir: *const Io.Dir, tree_data: []const u8, out: *std.ArrayList(u8)) !void {
@@ -246,7 +228,8 @@ pub const Archive = struct {
                 entry.name;
             defer if (prefix.len > 0) self.allocator.free(full_name);
 
-            const blob_data = self.readObject(git_dir, &entry.oid_hex) catch continue;
+            const boid = OID.fromHex(&entry.oid_hex) catch continue;
+            const blob_data = object_io.readObject(git_dir, self.io, self.allocator, boid) catch continue;
             defer self.allocator.free(blob_data);
 
             const content_start = std.mem.indexOfScalar(u8, blob_data, 0x00) orelse 0;
@@ -401,7 +384,8 @@ pub const Archive = struct {
                 entry.name;
             defer if (prefix.len > 0) self.allocator.free(full_name);
 
-            const blob_data = self.readObject(git_dir, &entry.oid_hex) catch continue;
+            const boid2 = OID.fromHex(&entry.oid_hex) catch continue;
+            const blob_data = object_io.readObject(git_dir, self.io, self.allocator, boid2) catch continue;
             defer self.allocator.free(blob_data);
 
             const content_start = std.mem.indexOfScalar(u8, blob_data, 0x00) orelse 0;

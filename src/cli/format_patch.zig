@@ -4,7 +4,10 @@ const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 const object_mod = @import("../object/object.zig");
 const oid_mod = @import("../object/oid.zig");
+const OID = oid_mod.OID;
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
+const head_mod = @import("../commit/head.zig");
 
 pub const FormatPatchOptions = struct {
     output_directory: ?[]const u8 = null,
@@ -87,11 +90,10 @@ pub const FormatPatch = struct {
     }
 
     pub fn generatePatch(self: *FormatPatch, git_dir: *const Io.Dir) ![]const u8 {
-        const head_oid = try self.resolveHead(git_dir);
+        const head_oid = head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
         const hex = head_oid.toHex();
-        const commit_data = self.readObjectByHex(git_dir, &hex) catch {
-            return error.ObjectNotFound;
-        };
+        const parsed_oid = OID.fromHex(hex[0..]) catch return error.ObjectNotFound;
+        const commit_data = object_io.readObject(git_dir, self.io, self.allocator, parsed_oid) catch return error.ObjectNotFound;
         defer self.allocator.free(commit_data);
 
         const obj = object_mod.parse(commit_data) catch {
@@ -123,8 +125,9 @@ pub const FormatPatch = struct {
         try body.appendSlice(self.allocator, "\n\n---\n");
 
         if (parent_oid_hex) |parent_hex| {
-            const parent_data = self.readObjectByHex(git_dir, parent_hex) catch null;
-            defer if (parent_data) |pd| self.allocator.free(pd);
+            const poid = OID.fromHex(parent_hex[0..]) catch return error.ObjectNotFound;
+            const parent_data = object_io.readObject(git_dir, self.io, self.allocator, poid) catch return error.ObjectNotFound;
+            defer self.allocator.free(parent_data);
 
             const diff = try self.generateDiff(git_dir, parent_data, &hex);
             try body.appendSlice(self.allocator, diff);
@@ -134,43 +137,6 @@ pub const FormatPatch = struct {
         }
 
         return body.toOwnedSlice(self.allocator);
-    }
-
-    fn resolveHead(self: *FormatPatch, git_dir: *const Io.Dir) !oid_mod.OID {
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch {
-            return error.NoHead;
-        };
-        defer self.allocator.free(head_content);
-        const trimmed = std.mem.trim(u8, head_content, " \n\r");
-
-        if (std.mem.startsWith(u8, trimmed, "ref: ")) {
-            const ref_path = trimmed[5..];
-            const ref_content = git_dir.readFileAlloc(self.io, ref_path, self.allocator, .limited(256)) catch {
-                return error.NoHead;
-            };
-            defer self.allocator.free(ref_content);
-            const ref_trimmed = std.mem.trim(u8, ref_content, " \n\r");
-            return oid_mod.OID.fromHex(ref_trimmed[0..40]) catch error.InvalidOid;
-        }
-        return oid_mod.OID.fromHex(trimmed[0..40]) catch error.InvalidOid;
-    }
-
-    fn readObject(self: *FormatPatch, git_dir: *const Io.Dir, oid: *const [40]u8) ![]const u8 {
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ oid[0..2], oid[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = try git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
-    }
-
-    fn readObjectByHex(self: *FormatPatch, git_dir: *const Io.Dir, hex: []const u8) ![]const u8 {
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = try git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
     }
 
     fn extractField(data: []const u8, field: []const u8) ?[]const u8 {
@@ -223,7 +189,8 @@ pub const FormatPatch = struct {
         var buf = std.ArrayListUnmanaged(u8).empty;
         errdefer buf.deinit(self.allocator);
 
-        const head_obj = self.readObjectByHex(git_dir, head_hex) catch return buf.toOwnedSlice(self.allocator);
+        const hoid = OID.fromHex(head_hex) catch return buf.toOwnedSlice(self.allocator);
+        const head_obj = object_io.readObject(git_dir, self.io, self.allocator, hoid) catch return buf.toOwnedSlice(self.allocator);
         defer self.allocator.free(head_obj);
 
         const head_parsed = object_mod.parse(head_obj) catch return buf.toOwnedSlice(self.allocator);
@@ -239,7 +206,8 @@ pub const FormatPatch = struct {
             }
         }
 
-        const head_tree_data = self.readObjectByHex(git_dir, head_tree_hex) catch return buf.toOwnedSlice(self.allocator);
+        const htoid = OID.fromHex(head_tree_hex) catch return buf.toOwnedSlice(self.allocator);
+        const head_tree_data = object_io.readObject(git_dir, self.io, self.allocator, htoid) catch return buf.toOwnedSlice(self.allocator);
         defer self.allocator.free(head_tree_data);
 
         var head_entries = std.ArrayListUnmanaged([]const u8).empty;
@@ -256,7 +224,10 @@ pub const FormatPatch = struct {
         defer parent_entry_set.deinit(self.allocator);
 
         if (parent_tree_hex) |pth| {
-            const pt_data = self.readObjectByHex(git_dir, pth) catch null;
+            const pt_data = blk: {
+                const ptoid = OID.fromHex(pth) catch break :blk null;
+                break :blk object_io.readObject(git_dir, self.io, self.allocator, ptoid) catch null;
+            };
             defer if (pt_data) |ptd| self.allocator.free(ptd);
             if (pt_data) |ptd| {
                 var pe_it = std.mem.splitScalar(u8, ptd, '\n');
@@ -273,7 +244,10 @@ pub const FormatPatch = struct {
         defer parent_entry_oids.deinit(self.allocator);
 
         if (parent_tree_hex) |pth| {
-            const pt_data = self.readObjectByHex(git_dir, pth) catch null;
+            const pt_data = blk: {
+                const ptoid = OID.fromHex(pth) catch break :blk null;
+                break :blk object_io.readObject(git_dir, self.io, self.allocator, ptoid) catch null;
+            };
             defer if (pt_data) |ptd| self.allocator.free(ptd);
             if (pt_data) |ptd| {
                 var pe_it = std.mem.splitScalar(u8, ptd, '\n');

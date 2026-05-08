@@ -127,8 +127,8 @@ pub fn parseLsRemoteArgs(args: []const []const u8) struct { remote: ?[]const u8,
 test "LsRemote init" {
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const io = std.Io.Threaded.new(.{}).?;
-    const ls = LsRemote.init(std.testing.allocator, io, &writer.interface, .{});
+    const io = std.Io.Threaded.global_single_threaded.io();
+    const ls = LsRemote.init(std.testing.allocator, io, &writer, .{});
     try std.testing.expect(ls.heads == false);
     try std.testing.expect(ls.tags == false);
 }

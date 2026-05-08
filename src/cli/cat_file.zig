@@ -6,6 +6,7 @@ const OutputStyle = @import("output.zig").OutputStyle;
 const OID = @import("../object/oid.zig").OID;
 const object_mod = @import("../object/object.zig");
 const compress_mod = @import("../compress/zlib.zig");
+const object_io = @import("../object/io.zig");
 
 pub const CatFileAction = enum {
     type,
@@ -53,7 +54,7 @@ pub const CatFile = struct {
             return;
         };
 
-        const obj_data = self.readObject(git_dir, oid) catch {
+        const obj_data = object_io.readObject(&git_dir, self.io, self.allocator, oid) catch {
             try self.output.errorMessage("Object not found: {s}", .{self.object_ref.?});
             return;
         };
@@ -157,23 +158,6 @@ pub const CatFile = struct {
 
     fn printTag(self: *CatFile, data: []const u8) !void {
         try self.output.writer.print("{s}", .{data});
-    }
-
-    fn readObject(self: *CatFile, git_dir: Io.Dir, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024)) catch |err| {
-            return err;
-        };
-        defer self.allocator.free(compressed);
-
-        const decompressed = compress_mod.Zlib.decompress(compressed, self.allocator) catch |err| {
-            return err;
-        };
-
-        return decompressed;
     }
 
     fn printBatch(self: *CatFile, obj: object_mod.Object) !void {

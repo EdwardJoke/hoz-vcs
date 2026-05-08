@@ -175,11 +175,11 @@ pub const Benchmark = struct {
 
     fn printSummary(self: *Benchmark) !void {
         const stdout = std.Io.File.stdout().writer(&.{});
-        try stdout.interface.print("\n=== Benchmark Summary vs GNU Git ===\n", .{});
-        try stdout.interface.print("{:<12} {:>10} {:>10} {:>10}\n", .{ "Operation", "Hoz(ms)", "Git(ms)", "Speedup" });
-        try stdout.interface.print("{:<12} {:>10} {:>10} {:>10}\n", .{ "---------", "-------", "-------", "-------" });
+        try stdout.print("\n=== Benchmark Summary vs GNU Git ===\n", .{});
+        try stdout.print("{:<12} {:>10} {:>10} {:>10}\n", .{ "Operation", "Hoz(ms)", "Git(ms)", "Speedup" });
+        try stdout.print("{:<12} {:>10} {:>10} {:>10}\n", .{ "---------", "-------", "-------", "-------" });
         for (self.results.items) |result| {
-            try stdout.interface.print("{:<12} {:>10} {:>10} {:>10.2}x\n", .{
+            try stdout.print("{:<12} {:>10} {:>10} {:>10.2}x\n", .{
                 result.name,
                 result.hoz_time_ms,
                 result.git_time_ms,

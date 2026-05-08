@@ -27,11 +27,11 @@ pub const CleanInteractive = struct {
 
     pub fn prompt(_: *CleanInteractive, path: []const u8) !bool {
         const stdout = Io.File.stdout().writer(&.{});
-        try stdout.interface.print("Remove {s}? [y/N] ", .{path});
+        try stdout.print("Remove {s}? [y/N] ", .{path});
 
         var buf: [64]u8 = undefined;
         const stdin = Io.File.stdin().reader(&.{});
-        const line = (stdin.interface.readUntilDelimiterOrEof(&buf, '\n') catch return false) orelse return false;
+        const line = (stdin.readUntilDelimiterOrEof(&buf, '\n') catch return false) orelse return false;
         const trimmed = std.mem.trim(u8, line, " \r\n");
         return trimmed.len == 1 and (trimmed[0] == 'y' or trimmed[0] == 'Y');
     }
@@ -39,7 +39,7 @@ pub const CleanInteractive = struct {
     pub fn showMenu(self: *CleanInteractive) !void {
         _ = self;
         const stdout = Io.File.stdout().writer(&.{});
-        try stdout.interface.print(
+        try stdout.print(
             \\*** Commands ***
             \\   select - select items to clean
             \\   quit   - stop cleaning

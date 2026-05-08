@@ -180,14 +180,9 @@ test "DeleteResult structure" {
 }
 
 test "BranchDeleter init" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     const options = DeleteOptions{};
-    const store = RefStore{
+    var store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,
         .io = io,
@@ -199,15 +194,10 @@ test "BranchDeleter init" {
 }
 
 test "BranchDeleter init with options" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     var opts = DeleteOptions{};
     opts.force = true;
-    const store = RefStore{
+    var store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,
         .io = io,
