@@ -435,7 +435,7 @@ pub const FilterBranch = struct {
             try visited.put(hex_str, {});
             try order_list.append(self.allocator, current);
 
-            const obj_data = self.readObjectRaw(&git_dir, current) catch continue;
+            const obj_data = object_io.readObject(&git_dir, self.io, self.allocator, current) catch continue;
             defer self.allocator.free(obj_data);
 
             const commit = CommitObj.parse(self.allocator, obj_data) catch continue;
@@ -450,7 +450,7 @@ pub const FilterBranch = struct {
             const old_hex = oid.toHex();
             const old_hex_str = (&old_hex)[0..];
 
-            const obj_data = self.readObjectRaw(&git_dir, oid) catch continue;
+            const obj_data = object_io.readObject(&git_dir, self.io, self.allocator, oid) catch continue;
             defer self.allocator.free(obj_data);
 
             const commit = CommitObj.parse(self.allocator, obj_data) catch continue;
@@ -526,7 +526,7 @@ pub const FilterBranch = struct {
             return OID.fromHex(cached) catch return error.TreeRewriteFailed;
         }
 
-        const obj_data = self.readObjectRaw(git_dir, tree_oid.*) catch return error.TreeRewriteFailed;
+        const obj_data = object_io.readObject(git_dir, self.io, self.allocator, tree_oid.*) catch return error.TreeRewriteFailed;
         defer self.allocator.free(obj_data);
 
         const tree = parseTreeEntries(self.allocator, obj_data) catch return error.TreeRewriteFailed;
@@ -620,10 +620,6 @@ pub const FilterBranch = struct {
                 self.branch = arg;
             }
         }
-    }
-
-    fn readObjectRaw(self: *FilterBranch, git_dir: *const Io.Dir, oid: OID) ![]u8 {
-        return object_io.readObject(git_dir, self.io, self.allocator, oid);
     }
 
     fn resolveHeadRef(self: *FilterBranch, git_dir: *const Io.Dir) ![]u8 {

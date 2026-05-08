@@ -39,7 +39,7 @@ pub const Show = struct {
             return;
         };
 
-        const obj_data = self.readObject(git_dir, oid) catch {
+        const obj_data = object_io.readObject(&git_dir, self.io, self.allocator, oid) catch {
             try self.output.errorMessage("Object not found: {s}", .{obj_ref});
             return;
         };
@@ -116,10 +116,6 @@ pub const Show = struct {
             try self.output.writer.print("{s} {s}\t{s}\n", .{ mode_str, hex_buf, name });
             offset = oid_start + 20;
         }
-    }
-
-    fn readObject(self: *Show, git_dir: Io.Dir, oid: OID) ![]u8 {
-        return object_io.readObject(&git_dir, self.io, self.allocator, oid);
     }
 };
 

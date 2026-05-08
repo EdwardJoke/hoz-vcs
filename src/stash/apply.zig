@@ -72,7 +72,7 @@ pub const StashApplier = struct {
         }
 
         const entry = target_entry.?;
-        const object_data = self.readObject(entry.oid) catch {
+        const object_data = object_io.readObject(&self.git_dir, self.io, self.allocator, entry.oid) catch {
             return ApplyResult{
                 .success = false,
                 .conflict = false,
@@ -130,10 +130,6 @@ pub const StashApplier = struct {
         };
     }
 
-    fn readObject(self: *StashApplier, oid: OID) ![]u8 {
-        return object_io.readObject(&self.git_dir, self.io, self.allocator, oid);
-    }
-
     fn parseTreeFromCommit(_: *StashApplier, commit_data: []const u8) !OID {
         var lines = std.mem.splitScalar(u8, commit_data, '\n');
         while (lines.next()) |line| {
@@ -149,7 +145,7 @@ pub const StashApplier = struct {
     }
 
     fn applyTree(self: *StashApplier, tree_oid: OID) anyerror!bool {
-        const tree_data = try self.readObject(tree_oid);
+        const tree_data = try object_io.readObject(&self.git_dir, self.io, self.allocator, tree_oid);
         defer self.allocator.free(tree_data);
 
         const obj = try object_mod.parse(tree_data);
@@ -189,7 +185,7 @@ pub const StashApplier = struct {
 
         if (mode == 0o040000) {
             cwd.createDirPath(self.io, name) catch {};
-            const subtree_data = self.readObject(oid) catch return;
+            const subtree_data = object_io.readObject(&self.git_dir, self.io, self.allocator, oid) catch return;
             defer self.allocator.free(subtree_data);
             const obj = object_mod.parse(subtree_data) catch return;
             if (obj.obj_type == .tree) {
@@ -201,7 +197,7 @@ pub const StashApplier = struct {
                 self.git_dir = old_cwd;
             }
         } else if (mode == 0o100644 or mode == 0o100755) {
-            const blob_data = self.readObject(oid) catch return;
+            const blob_data = object_io.readObject(&self.git_dir, self.io, self.allocator, oid) catch return;
             defer self.allocator.free(blob_data);
             const obj = object_mod.parse(blob_data) catch return;
             if (obj.obj_type == .blob) {

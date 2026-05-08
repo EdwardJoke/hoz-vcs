@@ -77,7 +77,7 @@ pub const Log = struct {
         if (visited.contains(hex_str)) return;
         try visited.put(hex_str, {});
 
-        const obj_data = self.readObject(git_dir, oid) catch {
+        const obj_data = object_io.readObject(git_dir, self.io, self.allocator, oid) catch {
             return;
         };
         defer self.allocator.free(obj_data);
@@ -218,10 +218,6 @@ pub const Log = struct {
         }
 
         return OID{ .bytes = .{0} ** 20 };
-    }
-
-    fn readObject(self: *Log, git_dir: *const Io.Dir, oid: OID) ![]u8 {
-        return object_io.readObject(git_dir, self.io, self.allocator, oid);
     }
 
     fn formatDate(self: *Log, timestamp: i64) []const u8 {

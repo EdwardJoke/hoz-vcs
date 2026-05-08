@@ -54,7 +54,7 @@ pub const CatFile = struct {
             return;
         };
 
-        const obj_data = self.readObject(git_dir, oid) catch {
+        const obj_data = object_io.readObject(&git_dir, self.io, self.allocator, oid) catch {
             try self.output.errorMessage("Object not found: {s}", .{self.object_ref.?});
             return;
         };
@@ -158,10 +158,6 @@ pub const CatFile = struct {
 
     fn printTag(self: *CatFile, data: []const u8) !void {
         try self.output.writer.print("{s}", .{data});
-    }
-
-    fn readObject(self: *CatFile, git_dir: Io.Dir, oid: OID) ![]u8 {
-        return object_io.readObject(&git_dir, self.io, self.allocator, oid);
     }
 
     fn printBatch(self: *CatFile, obj: object_mod.Object) !void {

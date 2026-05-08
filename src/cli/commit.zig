@@ -182,7 +182,7 @@ pub const Commit = struct {
     }
 
     fn readCommitParents(self: *Commit, git_dir: *const Io.Dir, commit_oid: OID) ![]const OID {
-        const obj_data = self.readObject(git_dir, commit_oid) catch return &.{};
+        const obj_data = object_io.readObject(git_dir, self.io, self.allocator, commit_oid) catch return &.{};
         defer self.allocator.free(obj_data);
 
         var parents = std.ArrayList(OID).empty;
@@ -226,10 +226,6 @@ pub const Commit = struct {
 
     fn writeLooseObject(self: *Commit, git_dir: *const Io.Dir, data: []const u8) !void {
         _ = try object_io.writeLooseObject(git_dir, self.io, self.allocator, data);
-    }
-
-    fn readObject(self: *Commit, git_dir: *const Io.Dir, oid: OID) ![]u8 {
-        return object_io.readObject(git_dir, self.io, self.allocator, oid);
     }
 
     fn timezoneOffset(_: *Commit) i32 {

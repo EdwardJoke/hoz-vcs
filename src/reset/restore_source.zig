@@ -77,7 +77,7 @@ pub const RestoreSource = struct {
     fn extractTreeHex(self: *RestoreSource, commit_oid: OID) ![]const u8 {
         if (commit_oid.isZero()) return "";
 
-        const commit_data = self.readObject(commit_oid) catch return "";
+        const commit_data = object_io.readObject(&self.git_dir, self.io, self.allocator, commit_oid) catch return "";
         defer self.allocator.free(commit_data);
 
         const obj = object_mod.parse(commit_data) catch return "";
@@ -95,10 +95,6 @@ pub const RestoreSource = struct {
         }
 
         return "";
-    }
-
-    fn readObject(self: *RestoreSource, oid: OID) ![]u8 {
-        return object_io.readObject(&self.git_dir, self.io, self.allocator, oid);
     }
 
     fn resolveCommit(_: *RestoreSource, spec: []const u8) ![]const u8 {

@@ -92,9 +92,8 @@ pub const FormatPatch = struct {
     pub fn generatePatch(self: *FormatPatch, git_dir: *const Io.Dir) ![]const u8 {
         const head_oid = try self.resolveHead(git_dir);
         const hex = head_oid.toHex();
-        const commit_data = self.readObjectByHex(git_dir, &hex) catch {
-            return error.ObjectNotFound;
-        };
+        const parsed_oid = OID.fromHex(hex[0..]) catch return error.ObjectNotFound;
+        const commit_data = object_io.readObject(git_dir, self.io, self.allocator, parsed_oid) catch return error.ObjectNotFound;
         defer self.allocator.free(commit_data);
 
         const obj = object_mod.parse(commit_data) catch {
@@ -126,8 +125,9 @@ pub const FormatPatch = struct {
         try body.appendSlice(self.allocator, "\n\n---\n");
 
         if (parent_oid_hex) |parent_hex| {
-            const parent_data = self.readObjectByHex(git_dir, parent_hex) catch null;
-            defer if (parent_data) |pd| self.allocator.free(pd);
+            const poid = OID.fromHex(parent_hex[0..]) catch return error.ObjectNotFound;
+            const parent_data = object_io.readObject(git_dir, self.io, self.allocator, poid) catch return error.ObjectNotFound;
+            defer self.allocator.free(parent_data);
 
             const diff = try self.generateDiff(git_dir, parent_data, &hex);
             try body.appendSlice(self.allocator, diff);
@@ -141,16 +141,6 @@ pub const FormatPatch = struct {
 
     fn resolveHead(self: *FormatPatch, git_dir: *const Io.Dir) !oid_mod.OID {
         return head_mod.resolveHeadOid(git_dir, self.io, self.allocator) orelse return error.NoHead;
-    }
-
-    fn readObject(self: *FormatPatch, git_dir: *const Io.Dir, oid: *const [40]u8) ![]const u8 {
-        const parsed_oid = OID.fromHex(oid.*) catch return error.ObjectNotFound;
-        return object_io.readObject(git_dir, self.io, self.allocator, parsed_oid);
-    }
-
-    fn readObjectByHex(self: *FormatPatch, git_dir: *const Io.Dir, hex: []const u8) ![]const u8 {
-        const parsed_oid = OID.fromHex(hex) catch return error.ObjectNotFound;
-        return object_io.readObject(git_dir, self.io, self.allocator, parsed_oid);
     }
 
     fn extractField(data: []const u8, field: []const u8) ?[]const u8 {
@@ -203,7 +193,8 @@ pub const FormatPatch = struct {
         var buf = std.ArrayListUnmanaged(u8).empty;
         errdefer buf.deinit(self.allocator);
 
-        const head_obj = self.readObjectByHex(git_dir, head_hex) catch return buf.toOwnedSlice(self.allocator);
+        const hoid = OID.fromHex(head_hex) catch return buf.toOwnedSlice(self.allocator);
+        const head_obj = object_io.readObject(git_dir, self.io, self.allocator, hoid) catch return buf.toOwnedSlice(self.allocator);
         defer self.allocator.free(head_obj);
 
         const head_parsed = object_mod.parse(head_obj) catch return buf.toOwnedSlice(self.allocator);
@@ -219,7 +210,8 @@ pub const FormatPatch = struct {
             }
         }
 
-        const head_tree_data = self.readObjectByHex(git_dir, head_tree_hex) catch return buf.toOwnedSlice(self.allocator);
+        const htoid = OID.fromHex(head_tree_hex) catch return buf.toOwnedSlice(self.allocator);
+        const head_tree_data = object_io.readObject(git_dir, self.io, self.allocator, htoid) catch return buf.toOwnedSlice(self.allocator);
         defer self.allocator.free(head_tree_data);
 
         var head_entries = std.ArrayListUnmanaged([]const u8).empty;
@@ -236,7 +228,10 @@ pub const FormatPatch = struct {
         defer parent_entry_set.deinit(self.allocator);
 
         if (parent_tree_hex) |pth| {
-            const pt_data = self.readObjectByHex(git_dir, pth) catch null;
+            const pt_data = blk: {
+                const ptoid = OID.fromHex(pth) catch break :blk null;
+                break :blk object_io.readObject(git_dir, self.io, self.allocator, ptoid) catch null;
+            };
             defer if (pt_data) |ptd| self.allocator.free(ptd);
             if (pt_data) |ptd| {
                 var pe_it = std.mem.splitScalar(u8, ptd, '\n');
@@ -253,7 +248,10 @@ pub const FormatPatch = struct {
         defer parent_entry_oids.deinit(self.allocator);
 
         if (parent_tree_hex) |pth| {
-            const pt_data = self.readObjectByHex(git_dir, pth) catch null;
+            const pt_data = blk: {
+                const ptoid = OID.fromHex(pth) catch break :blk null;
+                break :blk object_io.readObject(git_dir, self.io, self.allocator, ptoid) catch null;
+            };
             defer if (pt_data) |ptd| self.allocator.free(ptd);
             if (pt_data) |ptd| {
                 var pe_it = std.mem.splitScalar(u8, ptd, '\n');

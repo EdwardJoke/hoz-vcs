@@ -26,6 +26,7 @@ const Tree = @import("../object/tree.zig").Tree;
 const Blob = @import("../object/blob.zig").Blob;
 const compress_mod = @import("../compress/zlib.zig");
 const object_mod = @import("../object/object.zig");
+const object_io = @import("../object/io.zig");
 
 pub const BranchAction = enum {
     list,
@@ -338,7 +339,7 @@ pub const Branch = struct {
     }
 
     fn checkoutTreeToWorkdir(self: *Branch, git_dir: Io.Dir, tree_oid: OID) !void {
-        const tree_data = self.readObjectData(git_dir, tree_oid) catch {
+        const tree_data = object_io.readObject(&git_dir, self.io, self.allocator, tree_oid) catch {
             try self.output.errorMessage("Failed to read tree object", .{});
             return;
         };
@@ -384,7 +385,7 @@ pub const Branch = struct {
             switch (mode_val) {
                 0o040000 => {
                     Io.Dir.cwd().createDirPath(self.io, full_path) catch {};
-                    const subtree_data = self.readObjectData(git_dir, entry_oid) catch continue;
+                    const subtree_data = object_io.readObject(&git_dir, self.io, self.allocator, entry_oid) catch continue;
                     defer self.allocator.free(subtree_data);
                     const sub_obj = object_mod.parse(subtree_data) catch continue;
                     if (sub_obj.obj_type == .tree) {
@@ -392,7 +393,7 @@ pub const Branch = struct {
                     }
                 },
                 0o100644, 0o100755 => {
-                    const blob_data = self.readObjectData(git_dir, entry_oid) catch continue;
+                    const blob_data = object_io.readObject(&git_dir, self.io, self.allocator, entry_oid) catch continue;
                     defer self.allocator.free(blob_data);
                     const blob_obj = object_mod.parse(blob_data) catch continue;
                     if (blob_obj.obj_type == .blob) {
@@ -403,17 +404,6 @@ pub const Branch = struct {
                 else => {},
             }
         }
-    }
-
-    fn readObjectData(self: *Branch, git_dir: Io.Dir, oid: OID) ![]u8 {
-        const hex = oid.toHex();
-        const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
-        defer self.allocator.free(obj_path);
-
-        const compressed = try git_dir.readFileAlloc(self.io, obj_path, self.allocator, .limited(16 * 1024 * 1024));
-        defer self.allocator.free(compressed);
-
-        return compress_mod.Zlib.decompress(compressed, self.allocator);
     }
 };
 

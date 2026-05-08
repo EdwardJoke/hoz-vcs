@@ -112,7 +112,7 @@ pub const LsTree = struct {
         const oid_str = std.mem.trim(u8, content, "\r\n");
         const commit_oid = try OID.fromHex(oid_str);
 
-        const obj_data = self.readObject(git_dir, commit_oid) catch {
+        const obj_data = object_io.readObject(&git_dir, self.io, self.allocator, commit_oid) catch {
             return error.ObjectNotFound;
         };
         defer self.allocator.free(obj_data);
@@ -133,7 +133,7 @@ pub const LsTree = struct {
     }
 
     fn listTree(self: *LsTree, git_dir: Io.Dir, tree_oid: OID, prefix: []const u8) !void {
-        const obj_data = self.readObject(git_dir, tree_oid) catch {
+        const obj_data = object_io.readObject(&git_dir, self.io, self.allocator, tree_oid) catch {
             try self.output.errorMessage("Failed to read tree object", .{});
             return;
         };
@@ -177,9 +177,5 @@ pub const LsTree = struct {
                 try self.listTree(git_dir, entry_oid, full_name);
             }
         }
-    }
-
-    fn readObject(self: *LsTree, git_dir: Io.Dir, oid: OID) ![]u8 {
-        return object_io.readObject(&git_dir, self.io, self.allocator, oid);
     }
 };

@@ -217,7 +217,7 @@ pub const GarbageCollector = struct {
             var oid_bytes: [OID.hex_length]u8 = undefined;
             @memcpy(&oid_bytes, oid_hex);
 
-            const raw = self.readObject(OID{ .bytes = oid_bytes }) catch continue;
+            const raw = object_io.readObject(&self.git_dir, self.io, self.allocator, OID{ .bytes = oid_bytes }) catch continue;
             defer self.allocator.free(raw);
 
             if (std.mem.startsWith(u8, raw, "commit ")) {
@@ -368,7 +368,7 @@ pub const GarbageCollector = struct {
         try pack_data.append(self.allocator, @truncate(num_objects & 0xff));
 
         for (oids) |oid| {
-            const obj_data = self.readObject(oid) catch continue;
+            const obj_data = object_io.readObject(&self.git_dir, self.io, self.allocator, oid) catch continue;
             defer self.allocator.free(obj_data);
 
             const obj_type = objectTypeFromRaw(obj_data);
@@ -445,10 +445,6 @@ pub const GarbageCollector = struct {
         if (std.mem.startsWith(u8, raw, "commit ")) return 1;
         if (std.mem.startsWith(u8, raw, "tag ")) return 4;
         return 1;
-    }
-
-    fn readObject(self: *GarbageCollector, oid: OID) ![]u8 {
-        return object_io.readObject(&self.git_dir, self.io, self.allocator, oid);
     }
 
     fn zlibCompress(self: *GarbageCollector, data: []const u8) ![]u8 {

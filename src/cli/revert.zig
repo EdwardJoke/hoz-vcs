@@ -41,7 +41,7 @@ pub const Revert = struct {
         for (commits, 0..) |commit_str, i| {
             const commit_oid = try self.resolveCommitOid(commit_str);
 
-            const commit_data = self.readObject(commit_oid) catch {
+            const commit_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, commit_oid) catch {
                 try self.output.errorMessage("Could not read commit {s}", .{commit_str});
                 return;
             };
@@ -59,7 +59,7 @@ pub const Revert = struct {
 
             const parent_oid = try extractParent(obj.data);
             if (!parent_oid.isZero()) {
-                const parent_data = self.readObject(parent_oid) catch {
+                const parent_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, parent_oid) catch {
                     try self.output.errorMessage("Could not read parent commit for revert", .{});
                     return;
                 };
@@ -177,7 +177,7 @@ pub const Revert = struct {
         const tree_oid = try OID.fromHex(tree_hex);
         if (tree_oid.isZero()) return;
 
-        const tree_data = self.readObject(tree_oid) catch return;
+        const tree_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, tree_oid) catch return;
         defer self.allocator.free(tree_data);
 
         const parsed_obj = object_mod.parse(tree_data) catch return;
@@ -219,14 +219,14 @@ pub const Revert = struct {
 
         if (mode == 0o040000) {
             cwd.createDirPath(self.io.*, path) catch {};
-            const subtree_data = self.readObject(oid) catch return;
+            const subtree_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid) catch return;
             defer self.allocator.free(subtree_data);
             const sub_obj = object_mod.parse(subtree_data) catch return;
             if (sub_obj.obj_type == .tree) {
                 try self.applyTreeEntries(sub_obj.data, path);
             }
         } else if (mode == 0o100644 or mode == 0o100755) {
-            const blob_data = self.readObject(oid) catch return;
+            const blob_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid) catch return;
             defer self.allocator.free(blob_data);
             const blob_obj = object_mod.parse(blob_data) catch return;
             if (blob_obj.obj_type == .blob) {
@@ -240,10 +240,6 @@ pub const Revert = struct {
         const content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{&hex});
         defer self.allocator.free(content);
         try self.git_dir.writeFile(self.io.*, .{ .sub_path = "REVERT_HEAD", .data = content });
-    }
-
-    fn readObject(self: *Revert, oid: OID) ![]u8 {
-        return object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid);
     }
 };
 

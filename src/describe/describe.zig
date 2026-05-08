@@ -264,7 +264,7 @@ pub const Describe = struct {
         const trimmed = std.mem.trim(u8, ref_content, " \n\r");
 
         if (trimmed.len < 40) {
-            const obj_data = self.readObject(git_dir, trimmed) orelse return null;
+            const obj_data = object_io.readObjectOpt(git_dir, self.io, self.allocator, trimmed) orelse return null;
             defer self.allocator.free(obj_data);
 
             const obj = object_mod.parse(obj_data) catch return null;
@@ -284,10 +284,6 @@ pub const Describe = struct {
         }
 
         return self.allocator.dupe(u8, trimmed[0..40]) catch null;
-    }
-
-    fn readObject(self: *Describe, git_dir: *const Io.Dir, oid_hex: []const u8) ?[]u8 {
-        return object_io.readObjectOpt(git_dir, self.io, self.allocator, oid_hex);
     }
 
     fn countCommitsBetween(self: *Describe, git_dir: *const Io.Dir, from_oid: []const u8, to_oid: []const u8) !u32 {
@@ -314,7 +310,7 @@ pub const Describe = struct {
 
                 if (std.mem.eql(u8, current, from_oid)) break :outer;
 
-                const commit_data = self.readObject(git_dir, current) orelse continue;
+                const commit_data = object_io.readObjectOpt(git_dir, self.io, self.allocator, current) orelse continue;
                 defer self.allocator.free(commit_data);
 
                 var it = std.mem.splitScalar(u8, commit_data, '\n');
