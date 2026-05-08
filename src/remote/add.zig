@@ -45,7 +45,7 @@ pub const RemoteAdder = struct {
 };
 
 test "RemoteAdder init" {
-    const io = Io.init(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     const adder = RemoteAdder.init(std.testing.allocator, io);
     try std.testing.expect(adder.allocator == std.testing.allocator);
 }

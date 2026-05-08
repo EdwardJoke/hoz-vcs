@@ -113,26 +113,26 @@ test "ServiceType enum values" {
 }
 
 test "ServiceHandler init" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     const handler = ServiceHandler.init(std.testing.allocator, io, .upload_pack);
     try std.testing.expect(handler.allocator == std.testing.allocator);
 }
 
 test "ServiceHandler init with receive_pack" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     const handler = ServiceHandler.init(std.testing.allocator, io, .receive_pack);
     try std.testing.expect(handler.service_type == .receive_pack);
 }
 
 test "ServiceHandler stop method exists" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     var handler = ServiceHandler.init(std.testing.allocator, io, .upload_pack);
     handler.stop();
     try std.testing.expect(true);
 }
 
 test "ServiceHandler isRunning method exists" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     var handler = ServiceHandler.init(std.testing.allocator, io, .upload_pack);
     const running = handler.isRunning();
     try std.testing.expect(running == false);

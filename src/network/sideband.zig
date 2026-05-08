@@ -137,7 +137,7 @@ pub const SidebandDemux = struct {
         defer all_data.deinit(self.allocator);
 
         while (true) {
-            const bytes_read = reader.interface.read(&buf) catch |err| switch (err) {
+            const bytes_read = reader.read(&buf) catch |err| switch (err) {
                 error.EndOfStream => break,
                 else => return err,
             };

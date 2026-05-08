@@ -463,7 +463,7 @@ test "EditorLoop renderTodo outputs content" {
     var buf: [2048]u8 = undefined;
     const writer = Io.Writer.fixed(&buf);
 
-    loop.renderTodo(&writer.writer.interface) catch {};
+    loop.renderTodo(&writer.writer) catch {};
     const output = Io.Writer.buffered(&writer);
     try std.testing.expect(output.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, output, "pick abc1234 First") != null);

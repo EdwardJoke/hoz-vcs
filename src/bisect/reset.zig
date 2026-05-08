@@ -50,34 +50,19 @@ pub const BisectReset = struct {
 };
 
 test "BisectReset init" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     const bisect = BisectReset.init(std.testing.allocator, io);
     try std.testing.expectEqualStrings(".git", bisect.path);
 }
 
 test "BisectReset isBisecting returns false outside git repo" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     const bisect = BisectReset.init(std.testing.allocator, io);
     try std.testing.expect(bisect.isBisecting() == false);
 }
 
 test "BisectReset reset method exists" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     var bisect = BisectReset.init(std.testing.allocator, io);
     if (bisect.reset()) |_| {} else |err| {
         try std.testing.expect(err == error.NotAGitRepository);

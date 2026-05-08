@@ -215,7 +215,7 @@ fn parseModeU32(mode_str: []const u8) !u32 {
 }
 
 test "Checkout init" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     const checkout = Checkout.init(std.testing.allocator, io, undefined, .{});
     try std.testing.expect(checkout.target == null);
 }

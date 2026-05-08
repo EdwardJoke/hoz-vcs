@@ -557,14 +557,14 @@ pub const GitCompatTester = struct {
 };
 
 test "GitCompatTester init" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     const tester = GitCompatTester.init(std.testing.allocator, io);
     try std.testing.expect(tester.passed == 0);
     try std.testing.expect(tester.failed == 0);
 }
 
 test "GitCompatTester runFullSuite smoke" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     var tester = GitCompatTester.init(std.testing.allocator, io);
     tester.temp_dir = "_compat_smoke_test";
     defer Io.Dir.cwd().removeTree(std.Io.get(), "_compat_smoke_test", .{}) catch {};

@@ -39,7 +39,8 @@ const INDEX_ENTRY_FIXED_SIZE: usize = 62;
 
 /// Index entry path name is null-padded to 8-byte alignment
 fn entryPathSize(name_len: u16) usize {
-    const aligned = (name_len + 8) & ~@as(u16, 7);
+    const aligned = (name_len + 7) & ~@as(u16, 7);
+    if (aligned == 0) return 8;
     return aligned;
 }
 
@@ -522,7 +523,8 @@ pub const Index = struct {
     /// Add or update an entry in the index
     pub fn addEntry(self: *Index, entry: IndexEntry, name: []const u8) !void {
         try self.entries.append(self.allocator, entry);
-        try self.entry_names.append(self.allocator, name);
+        const name_copy = try self.allocator.dupe(u8, name);
+        try self.entry_names.append(self.allocator, name_copy);
     }
 
     /// Remove an entry by name
@@ -795,14 +797,14 @@ pub fn verifyChecksum(data: []const u8) bool {
     if (data.len < 20) return false;
 
     const stored = data[data.len - 20 .. data.len];
-    const computed = crypto.hash.sha1.Sha1.hash(data[0 .. data.len - 20], .{});
+    const computed = sha1.sha1(data[0 .. data.len - 20]);
 
     return std.mem.eql(u8, stored, &computed);
 }
 
 /// Calculate checksum of index data
 pub fn calculateChecksum(data: []const u8) [20]u8 {
-    return crypto.hash.sha1.Sha1.hash(data, .{});
+    return sha1.sha1(data);
 }
 
 test "index entry path size alignment" {
@@ -831,24 +833,20 @@ test "index add and find entry" {
     var index = Index.init(std.testing.allocator);
     defer index.deinit();
 
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -870,24 +868,20 @@ test "index remove entry" {
     var index = Index.init(std.testing.allocator);
     defer index.deinit();
 
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -905,24 +899,20 @@ test "index serialize and checksum" {
     var index = Index.init(std.testing.allocator);
     defer index.deinit();
 
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
     const name = "test.txt";
 
     const entry = IndexEntry.fromStat(stat, oid, name, 0);
@@ -943,24 +933,20 @@ test "index entry stage bits" {
     var index = Index.init(std.testing.allocator);
     defer index.deinit();
 
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
 
     const entry0 = IndexEntry.fromStat(stat, oid, "file0.txt", 0);
     try index.addEntry(entry0, "file0.txt");
@@ -991,24 +977,20 @@ test "index getEntryName" {
     var index = Index.init(std.testing.allocator);
     defer index.deinit();
 
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
 
     try std.testing.expect(index.getEntryName(0) == null);
 
@@ -1029,24 +1011,20 @@ test "index count" {
 
     try std.testing.expectEqual(@as(usize, 0), index.count());
 
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
 
     const entry = IndexEntry.fromStat(stat, oid, "file.txt", 0);
     try index.addEntry(entry, "file.txt");
@@ -1061,24 +1039,20 @@ test "index clear" {
     var index = Index.init(std.testing.allocator);
     defer index.deinit();
 
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
 
     const entry1 = IndexEntry.fromStat(stat, oid, "file1.txt", 0);
     try index.addEntry(entry1, "file1.txt");
@@ -1099,24 +1073,20 @@ test "index verifyChecksum" {
     var index = Index.init(std.testing.allocator);
     defer index.deinit();
 
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
 
     const entry = IndexEntry.fromStat(stat, oid, "test.txt", 0);
     try index.addEntry(entry, "test.txt");
@@ -1169,24 +1139,20 @@ test "index multiple entries with different stages" {
     var index = Index.init(std.testing.allocator);
     defer index.deinit();
 
-    const stat = std.fs.File.Stats{
-        .dev = 1,
-        .ino = 2,
-        .mode = 0o100644,
+    const stat = Io.File.Stat{
+        .inode = 2,
         .nlink = 1,
-        .uid = 1000,
-        .gid = 1000,
-        .rdev = 0,
         .size = 100,
-        .blksize = 4096,
-        .blocks = 0,
-        .atime = .{ .seconds = 1000000, .nanos = 0 },
-        .mtime = .{ .seconds = 2000000, .nanos = 500 },
-        .ctime = .{ .seconds = 1500000, .nanos = 250 },
+        .permissions = @as(Io.File.Permissions, @enumFromInt(0o100644)),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 2000000000500 },
+        .ctime = .{ .nanoseconds = 1500000000250 },
+        .block_size = 4096,
     };
 
     const oid_hex = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
-    const oid = OID.oidFromHex(oid_hex) catch unreachable;
+    const oid = OID.fromHex(oid_hex) catch unreachable;
 
     const entry0 = IndexEntry.fromStat(stat, oid, "file.txt", 0);
     try index.addEntry(entry0, "file.txt");

@@ -125,7 +125,7 @@ test "Show init" {
     const io = io_instance.io();
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const show = Show.init(std.testing.allocator, io, &writer.interface, .{});
+    const show = Show.init(std.testing.allocator, io, &writer, .{});
     _ = show;
     try std.testing.expect(true);
 }

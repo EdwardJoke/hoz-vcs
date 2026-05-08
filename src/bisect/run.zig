@@ -397,23 +397,13 @@ pub const BisectRun = struct {
 };
 
 test "BisectRun init" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     const bisect = BisectRun.init(std.testing.allocator, io);
     try std.testing.expect(bisect.exit_code == 0);
 }
 
 test "BisectRun setExitCode" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     var bisect = BisectRun.init(std.testing.allocator, io);
     bisect.setExitCode(1);
     try std.testing.expect(bisect.exit_code == 1);
@@ -494,12 +484,7 @@ pub const BisectState = struct {
 };
 
 test "BisectState init" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     var state = BisectState.init(std.testing.allocator, io);
     defer state.deinit();
     try std.testing.expectEqual(@as(usize, 0), state.total_commits);
@@ -517,17 +502,12 @@ test "BisectRun visualize handles missing repo gracefully" {
 
     var bisect = BisectRun.init(std.testing.allocator, io);
     var writer: Io.Writer = .fixed(&buf);
-    bisect.visualize(&writer.interface) catch {};
-    try std.testing.expect(writer.interface.getWritten().len == 0);
+    bisect.visualize(&writer) catch {};
+    try std.testing.expect(writer.getWritten().len == 0);
 }
 
 test "BisectRun checkAutoTerm returns null when not done" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     var bisect = BisectRun.init(std.testing.allocator, io);
     const result = bisect.checkAutoTerm() catch null;
     try std.testing.expect(result == null);

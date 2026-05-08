@@ -460,7 +460,7 @@ test "Notes init" {
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
 
-    const notes = Notes.init(std.testing.allocator, io_instance.io(), &writer.interface, .{});
+    const notes = Notes.init(std.testing.allocator, io_instance.io(), &writer, .{});
     _ = notes;
 }
 
@@ -471,7 +471,7 @@ test "Notes parse actions" {
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
 
-    var notes = Notes.init(std.testing.allocator, io_instance.io(), &writer.interface, .{});
+    var notes = Notes.init(std.testing.allocator, io_instance.io(), &writer, .{});
 
     try std.testing.expect(notes.parseAction("add") == .add);
     try std.testing.expect(notes.parseAction("show") == .show);

@@ -79,7 +79,7 @@ const PackedRefsManager = struct {
         // Write each ref
         var writer = temp_file.writer();
         for (refs_to_write) |ref| {
-            try writer.print("{s} {s}\n", .{ ref.getTargetString(), ref.name });
+            try writer.interface.print("{s} {s}\n", .{ ref.getTargetString(), ref.name });
         }
 
         // Sync to ensure data is written
@@ -350,6 +350,8 @@ test "RefStore refPath" {
     const store = RefStore{
         .git_dir = undefined,
         .allocator = undefined,
+        .io = undefined,
+        .odb = null,
     };
 
     const path = store.refPath("refs/heads/main");
@@ -360,9 +362,11 @@ test "RefStore parseRef direct" {
     const store = RefStore{
         .git_dir = undefined,
         .allocator = undefined,
+        .io = undefined,
+        .odb = null,
     };
 
-    const oid_str = "abc123def4567890123456789012345678901";
+    const oid_str = "abc123def4567890123456789012345678901234";
     const ref = try store.parseRef("refs/heads/main", oid_str, 0);
 
     try std.testing.expect(ref.isDirect());
@@ -374,6 +378,8 @@ test "RefStore parseRef symbolic" {
     const store = RefStore{
         .git_dir = undefined,
         .allocator = undefined,
+        .io = undefined,
+        .odb = null,
     };
 
     const ref = try store.parseRef("HEAD", "ref: refs/heads/main", 0);
@@ -388,6 +394,8 @@ test "RefStore isValidName integration" {
     const store = RefStore{
         .git_dir = undefined,
         .allocator = undefined,
+        .io = undefined,
+        .odb = null,
     };
 
     const invalid_ref = Ref.symbolicRef(".hidden", "refs/heads/main");

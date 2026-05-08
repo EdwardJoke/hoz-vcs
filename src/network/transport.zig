@@ -935,8 +935,8 @@ pub const HttpTransport = struct {
 
         var req_buf: [2048]u8 = undefined;
         var writer = std.Io.Writer.fixed(&req_buf);
-        try writer.interface.print("GET {s} HTTP/1.1\r\nHost: {s}\r\nConnection: close\r\n\r\n", .{ full_url, host_str });
-        const req_len = writer.interface.bytesWritten();
+        try writer.print("GET {s} HTTP/1.1\r\nHost: {s}\r\nConnection: close\r\n\r\n", .{ full_url, host_str });
+        const req_len = writer.bytesWritten();
         try socket.writeAll(io, req_buf[0..req_len]);
 
         var resp_buf: [65536]u8 = undefined;
@@ -1096,7 +1096,7 @@ pub fn detectTransportType(url: []const u8) !TransportType {
 }
 
 test "Transport init" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     const transport = Transport.init(std.testing.allocator, io, .{ .url = "https://github.com/user/repo" });
     try std.testing.expect(transport.connected == false);
 }

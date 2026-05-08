@@ -884,7 +884,7 @@ pub const CommandDispatcher = struct {
 test "CommandDispatcher init" {
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     const dispatcher = CommandDispatcher.init(std.testing.allocator, w, .{});
     try std.testing.expect(dispatcher.allocator == std.testing.allocator);
@@ -893,11 +893,11 @@ test "CommandDispatcher init" {
 test "CommandDispatcher dispatch unknown command" {
     var buf: [256]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     var dispatcher = CommandDispatcher.init(std.testing.allocator, w, .{ .use_color = false });
     try dispatcher.dispatch("unknown", &.{});
 
-    const output = try w.readAll();
+    const output = try w.buffered;
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "Unknown command"));
 }

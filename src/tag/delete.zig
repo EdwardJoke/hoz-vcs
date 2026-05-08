@@ -27,7 +27,7 @@ pub const TagDeleter = struct {
 };
 
 test "TagDeleter init" {
-    const io = Io.init(.{});
+    const io = Io.Threaded.global_single_threaded.io();
     const deleter = TagDeleter.init(std.testing.allocator, io);
     try std.testing.expect(deleter.allocator == std.testing.allocator);
 }

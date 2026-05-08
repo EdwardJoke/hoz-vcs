@@ -75,21 +75,21 @@ pub fn readHeadRef(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Allocator)
 }
 
 test "HeadUpdate init" {
-    var ref_store: RefStore = std.mem.zeroes(RefStore);
+    var ref_store: RefStore = undefined;
     const updater = HeadUpdate.init(std.testing.allocator, &ref_store);
 
     try std.testing.expectEqual(std.testing.allocator, updater.allocator);
 }
 
 test "HeadUpdate init with ref_store" {
-    var ref_store: RefStore = std.mem.zeroes(RefStore);
+    var ref_store: RefStore = undefined;
     const updater = HeadUpdate.init(std.testing.allocator, &ref_store);
 
     try std.testing.expectEqual(&ref_store, updater.ref_store);
 }
 
 test "HeadUpdate allocator access" {
-    var ref_store: RefStore = std.mem.zeroes(RefStore);
+    var ref_store: RefStore = undefined;
     const updater = HeadUpdate.init(std.testing.allocator, &ref_store);
 
     try std.testing.expectEqual(std.testing.allocator, updater.allocator);

@@ -300,12 +300,7 @@ test "VerboseResult structure" {
 }
 
 test "BranchVerbose init" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     const store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,
@@ -319,12 +314,7 @@ test "BranchVerbose init" {
 }
 
 test "BranchVerbose init with options" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     const store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,

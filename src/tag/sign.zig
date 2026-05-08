@@ -21,7 +21,7 @@ pub const TagSigner = struct {
         const sig_file = cwd.createFile(self.io, sig_path, .{ .exclusive = true }) catch return;
         defer sig_file.close();
 
-        _ = try sig_file.writer(&.{}).interface.write(sig_content);
+        _ = try sig_file.writer(&.{}).write(sig_content);
     }
 
     pub fn signWithMessage(self: *TagSigner, name: []const u8, key_id: []const u8, message: []const u8) !void {
@@ -35,7 +35,7 @@ pub const TagSigner = struct {
         const sig_file = cwd.createFile(self.io, sig_path, .{ .exclusive = true }) catch return;
         defer sig_file.close();
 
-        _ = try sig_file.writer(&.{}).interface.write(sig_content);
+        _ = try sig_file.writer(&.{}).write(sig_content);
     }
 };
 

@@ -1,24 +1,14 @@
-# Project Purpose
+# Project Purpose — v0.4.0
 
 ## What
-Refactor duplicate code across the Hoz codebase by extracting repeated patterns into shared reusable components, reducing maintenance burden and eliminating copy-paste drift risk.
+Upgrade the entire hoz codebase from Zig 0.15 to Zig 0.16 API compatibility, fixing all 60 compilation errors and 11 test failures to achieve a fully-passing build on Zig 0.16.0.
 
 ## Why
-v0.3.2 fixed all test failures but left significant structural debt: **7 categories of duplicated code** totaling ~1140+ redundant lines spread across 50+ files. The most critical issues:
-- **`readObject()` copied 25+ times** — same OID→path→read→decompress logic in CLI commands, reset, stash, blame, describe, checkout, clean modules. A bug fix here requires touching 25+ files.
-- **`resolveHead()` copied 8+ times** — `commit/head.zig` already has a proper implementation but nobody imports it; each copy has slightly different error handling.
-- **`makeMockCommit()` duplicated** in both merge test files (fast_forward.zig + analyze.zig) with identical ~15-line function bodies.
-- **GitCompatTester's 16 `run*()` methods** in compat.zig are nearly identical boilerplate (~400+ lines) differing only in which git/hoz commands they run.
-- **Empty tree pattern repeated 4x** inside commit.zig's single `writeTree()` function.
-- **`writeLooseObject()` duplicated** between commit.zig and filter_repo.zig.
-- Without shared components, every bug fix or behavior change risks inconsistent fixes across copies.
+The project currently builds on Zig 0.16.0 but **60 compilation errors** and **11 test failures** remain when running the full test suite. The errors span 12 categories of breaking API changes between 0.15 → 0.16: Io system restructure (`Io.Threaded.new()` removed, `Io.init()` removed, `Io.Writer.interface` gone), std.fs reorganization (`fs.File` namespace), crypto module reshuffle (`crypto.hash.sha1` path changed), const-correctness tightening (DebugAllocator, RefStore), and OID type changes. Without this upgrade, the codebase is stuck on deprecated APIs that will only accumulate more tech debt.
 
 ## Success Criteria
-- [ ] `readObject()` consolidated into a single shared location (e.g., `object/io.zig` or enhanced `object/reader.zig`), all 25+ call sites updated to use it
-- [ ] `resolveHead()` consolidated via reusing existing `commit/head.zig`, all 8+ inline copies replaced with import
-- [ ] `makeMockCommit()` extracted to shared test helper (e.g., `src/testing/mock.zig`), both merge test files updated to import it
-- [ ] GitCompatTester refactored with generic `runPairTest()` helper eliminating ~300+ lines of boilerplate from 16 run* methods
-- [ ] Empty tree creation extracted as a helper method inside commit.zig, removing 4 duplicate blocks
-- [ ] `writeLooseObject()` unified into one shared implementation, filter_repo.zig and commit.zig both delegate to it
-- [ ] All existing tests still pass after refactoring (zero regressions)
-- [ ] Net reduction of at least 600 lines of redundant code
+- [ ] All 60 compilation errors resolved — `zig build test` compiles with 0 errors
+- [ ] All 11 runtime test failures fixed — test suite passes at same or better rate than v0.3.5 baseline
+- [ ] Build (`zig build`) continues to pass with zero errors
+- [ ] No regressions in previously-passing 106 tests
+- [ ] All Zig 0.16 API usage follows current std library conventions (no deprecated patterns)

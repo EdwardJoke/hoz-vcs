@@ -231,7 +231,7 @@ pub const Commit = struct {
 };
 
 test "Commit init" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     const commit = Commit.init(std.testing.allocator, io, undefined, .{});
     try std.testing.expect(commit.message == null);
 }

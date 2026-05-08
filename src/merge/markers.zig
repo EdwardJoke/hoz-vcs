@@ -58,7 +58,7 @@ pub const MarkerGenerator = struct {
     pub fn formatBinaryConflict(self: *MarkerGenerator, path: []const u8, oid_ours: ?[]const u8, oid_theirs: ?[]const u8, size_ours: usize, size_theirs: usize) ![]const u8 {
         var result = std.ArrayList(u8).initCapacity(self.allocator, 512);
         errdefer result.deinit(self.allocator);
-        try self.generateBinaryConflict(path, oid_ours, oid_theirs, size_ours, size_theirs, &result.writer().interface);
+        try self.generateBinaryConflict(path, oid_ours, oid_theirs, size_ours, size_theirs, &result.writer());
         return result.toOwnedSlice(self.allocator);
     }
 

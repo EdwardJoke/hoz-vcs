@@ -28,7 +28,7 @@ const compress_mod = @import("../compress/zlib.zig");
 const object_mod = @import("../object/object.zig");
 const object_io = @import("../object/io.zig");
 
-pub const BranchAction = enum {
+pub const BranchAction = enum(u3) {
     list,
     create,
     delete,
@@ -417,21 +417,21 @@ fn parseModeU32(mode_str: []const u8) !u32 {
 }
 
 test "Branch init" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     const branch = Branch.init(std.testing.allocator, io, undefined, .{});
     try std.testing.expect(branch.action == .list);
 }
 
 test "BranchAction enum values" {
-    try std.testing.expectEqual(@as(u2, 0), @intFromEnum(BranchAction.list));
-    try std.testing.expectEqual(@as(u2, 1), @intFromEnum(BranchAction.create));
-    try std.testing.expectEqual(@as(u2, 2), @intFromEnum(BranchAction.delete));
-    try std.testing.expectEqual(@as(u2, 3), @intFromEnum(BranchAction.rename));
-    try std.testing.expectEqual(@as(u2, 6), @intFromEnum(BranchAction.checkout));
+    try std.testing.expectEqual(@as(u3, 0), @intFromEnum(BranchAction.list));
+    try std.testing.expectEqual(@as(u3, 1), @intFromEnum(BranchAction.create));
+    try std.testing.expectEqual(@as(u3, 2), @intFromEnum(BranchAction.delete));
+    try std.testing.expectEqual(@as(u3, 3), @intFromEnum(BranchAction.rename));
+    try std.testing.expectEqual(@as(u3, 6), @intFromEnum(BranchAction.checkout));
 }
 
 test "Branch has checkout fields" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     const branch = Branch.init(std.testing.allocator, io, undefined, .{});
     try std.testing.expect(branch.target == null);
     try std.testing.expect(branch.checkout_options.force == false);

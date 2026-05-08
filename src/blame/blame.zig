@@ -447,12 +447,7 @@ test "Blame init" {
 }
 
 test "Blame blameFile method exists" {
-    var buf: [1]u8 = undefined;
-    const io: Io = .init(.{
-        .stdin = .empty,
-        .stdout = .buffered(&buf),
-        .stderr = .buffered(&buf),
-    });
+    const io = std.Io.Threaded.global_single_threaded.io();
     var blame = Blame.init(std.testing.allocator, io);
     if (blame.blameFile("nonexistent.txt")) |_| {} else |err| {
         try std.testing.expect(err == error.NotAGitRepository or err == error.FileNotFound);

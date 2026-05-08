@@ -553,48 +553,48 @@ const Color = struct {
 test "Output human format" {
     var buf: [1024]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
     try out.result(.{ .success = true, .code = 0, .message = "Done" });
 
-    const output = try w.readAll();
+    const output = w.buffer[0..w.end];
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "Done"));
 }
 
 test "Output JSON format" {
     var buf: [1024]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     var out = Output.init(w, .{ .format = .json }, std.testing.allocator);
     try out.result(.{ .success = true, .code = 0, .message = "Done" });
 
-    const output = try w.readAll();
+    const output = w.buffer[0..w.end];
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"success\":true"));
 }
 
 test "Output porcelain format" {
     var buf: [1024]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     var out = Output.init(w, .{ .format = .porcelain }, std.testing.allocator);
     try out.result(.{ .success = true, .code = 0, .message = "Done" });
 
-    const output = try w.readAll();
+    const output = w.buffer[0..w.end];
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "0\tDone"));
 }
 
 test "Output quiet mode suppresses output" {
     var buf: [1024]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .quiet = true }, std.testing.allocator);
     try out.result(.{ .success = true, .code = 0, .message = "Done" });
 
-    const output = try w.readAll();
+    const output = w.buffer[0..w.end];
     try std.testing.expectEqual(@as(usize, 0), output.len);
 }
 
@@ -606,13 +606,13 @@ test "Progress bar calculation" {
 test "Tree node rendering with unicode" {
     var buf: [1024]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
     try out.treeNode(.branch, 0, "{s}", .{"src/main.zig"});
     try out.treeNode(.last, 0, "{s}", .{"src/root.zig"});
 
-    const output = try w.readAll();
+    const output = w.buffer[0..w.end];
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "├──"));
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "└──"));
 }
@@ -620,13 +620,13 @@ test "Tree node rendering with unicode" {
 test "Tree node rendering with ASCII fallback" {
     var buf: [1024]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false, .use_unicode = false }, std.testing.allocator);
     try out.treeNode(.branch, 0, "{s}", .{"src/main.zig"});
     try out.treeNode(.last, 0, "{s}", .{"src/root.zig"});
 
-    const output = try w.readAll();
+    const output = w.buffer[0..w.end];
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "+--"));
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "`--"));
 }
@@ -643,24 +643,24 @@ test "Status icon rendering" {
 test "Section divider renders" {
     var buf: [1024]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
     try out.sectionDivider();
 
-    const output = try w.readAll();
+    const output = w.buffer[0..w.end];
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "─"));
 }
 
 test "Status item with staging info" {
     var buf: [1024]u8 = undefined;
     var writer: Io.Writer = .fixed(&buf);
-    const w = &writer.interface;
+    const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
     try out.statusItem(.modified, true, "src/main.zig");
     try out.statusItem(.added, false, "README.md");
 
-    const output = try w.readAll();
+    const output = w.buffer[0..w.end];
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "~"));
 }

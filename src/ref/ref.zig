@@ -97,7 +97,7 @@ pub const Ref = struct {
     /// Get the target as a string (OID hex for direct, ref name for symbolic)
     pub fn getTargetString(self: Ref) []const u8 {
         switch (self.target) {
-            .direct => |oid| return oid.hex(),
+            .direct => |oid| return &oid.toHex(),
             .symbolic => |name| return name,
         }
     }
@@ -162,7 +162,7 @@ pub fn symref(name: []const u8, target: []const u8) Ref {
 
 // TESTS
 test "Ref direct ref" {
-    const oid_str = "abc123def4567890123456789012345678901";
+    const oid_str = "abc123def4567890123456789012345678901234";
     const oid = try OID.fromHex(oid_str);
     const r = Ref.directRef("refs/heads/main", oid);
 
@@ -199,7 +199,7 @@ test "Ref isValidName invalid names" {
 }
 
 test "Ref getOid direct" {
-    const oid_str = "abc123def4567890123456789012345678901";
+    const oid_str = "abc123def4567890123456789012345678901234";
     const oid = try OID.fromHex(oid_str);
     const r = Ref.directRef("refs/heads/main", oid);
 

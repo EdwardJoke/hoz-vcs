@@ -100,7 +100,7 @@ test "RenameResult structure" {
 
 test "BranchRenamer init" {
     const options = RenameOptions{};
-    const store = RefStore{
+    var store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,
         .io = undefined,
@@ -114,7 +114,7 @@ test "BranchRenamer init" {
 test "BranchRenamer init with options" {
     var opts = RenameOptions{};
     opts.force = true;
-    const store = RefStore{
+    var store = RefStore{
         .git_dir = undefined,
         .allocator = std.testing.allocator,
         .io = undefined,

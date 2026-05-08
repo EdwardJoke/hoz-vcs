@@ -434,7 +434,7 @@ test "Describe init" {
 }
 
 test "Describe describeCommit method exists" {
-    const io = std.Io.Threaded.new(.{});
+    const io = std.Io.Threaded.global_single_threaded.io();
     const d = Describe.init(std.testing.allocator, io);
     try std.testing.expect(d.options.abbrev == 7);
     try std.testing.expect(d.options.dirty == false);

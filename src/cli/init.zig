@@ -79,7 +79,7 @@ pub const Init = struct {
 };
 
 test "Init init" {
-    const io = std.Io.Threaded.new(.{}).?;
+    const io = std.Io.Threaded.global_single_threaded.io();
     const init = Init.init(std.testing.allocator, io, undefined, .{});
     try std.testing.expect(init.bare == false);
 }

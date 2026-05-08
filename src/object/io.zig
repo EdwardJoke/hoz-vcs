@@ -74,14 +74,14 @@ pub fn writeLooseObject(git_dir: *const Io.Dir, io: Io, allocator: std.mem.Alloc
 }
 
 test "readObject roundtrip via writeLooseObject" {
-    const test_io = Io.Threaded.new(.{}) orelse return error.SkipZigTest;
+    const test_io = Io.Threaded.global_single_threaded.io();
     const allocator = std.testing.allocator;
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
     const cwd = Io.Dir.cwd();
-    cwd.makePath(test_io, ".git/objects", .{}) catch {};
+    cwd.createDirPath(test_io, ".git/objects") catch {};
 
     const git_dir = cwd.openDir(test_io, ".git", .{}) catch |err| std.debug.panic("open .git: {}", .{err});
     defer git_dir.close(test_io);
@@ -97,13 +97,13 @@ test "readObject roundtrip via writeLooseObject" {
 }
 
 test "readObject returns ObjectNotFound for missing object" {
-    const test_io = Io.Threaded.new(.{}) orelse return error.SkipZigTest;
+    const test_io = Io.Threaded.global_single_threaded.io();
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
     const cwd = Io.Dir.cwd();
-    cwd.makePath(test_io, ".git/objects", .{}) catch {};
+    cwd.createDirPath(test_io, ".git/objects") catch {};
 
     const git_dir = cwd.openDir(test_io, ".git", .{}) catch |err| std.debug.panic("open .git: {}", .{err});
     defer git_dir.close(test_io);
@@ -114,14 +114,14 @@ test "readObject returns ObjectNotFound for missing object" {
 }
 
 test "writeLooseObject creates correct path structure" {
-    const test_io = Io.Threaded.new(.{}) orelse return error.SkipZigTest;
+    const test_io = Io.Threaded.global_single_threaded.io();
     const allocator = std.testing.allocator;
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
     const cwd = Io.Dir.cwd();
-    cwd.makePath(test_io, ".git/objects", .{}) catch {};
+    cwd.createDirPath(test_io, ".git/objects") catch {};
 
     const git_dir = cwd.openDir(test_io, ".git", .{}) catch |err| std.debug.panic("open .git: {}", .{err});
     defer git_dir.close(test_io);
@@ -130,12 +130,12 @@ test "writeLooseObject creates correct path structure" {
 
     const prefix_dir = git_dir.openDir(test_io, "objects", .{}) catch return;
     defer prefix_dir.close(test_io);
-    var iter = prefix_dir.iterate(test_io);
+    var iter = prefix_dir.iterate();
     var found_subdir = false;
     while (try iter.next(test_io)) |entry| {
         if (entry.kind == .directory and entry.name.len == 2) {
             found_subdir = true;
         }
     }
-    try std.testing.expect(found_subdir, "should create 2-char hex subdirectory in objects/");
+    try std.testing.expect(found_subdir);
 }
