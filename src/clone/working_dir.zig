@@ -3,6 +3,7 @@ const std = @import("std");
 const Io = std.Io;
 const CloneOptions = @import("options.zig").CloneOptions;
 const CloneResult = @import("options.zig").CloneResult;
+const shallow_mod = @import("shallow.zig");
 const network = @import("../network/network.zig");
 const protocol = @import("../network/protocol.zig");
 const transport = @import("../network/transport.zig");
@@ -50,8 +51,10 @@ pub const WorkingDirCloner = struct {
         self.clone_path = try self.allocator.dupe(u8, resolved_path);
         errdefer self.allocator.free(self.clone_path);
 
+        try shallow_mod.validateDepth(options.depth);
+
         try self.initWorkingDirectory(self.clone_path);
-        try self.fetchAndSetupRemote(url);
+        try self.fetchAndSetupRemote(url, options);
         if (!options.no_checkout) {
             try self.checkoutBranch("main");
         }
@@ -95,12 +98,37 @@ pub const WorkingDirCloner = struct {
         try cwd.writeFile(self.io, .{ .sub_path = config_path, .data = config_content });
     }
 
-    fn fetchAndSetupRemote(self: *WorkingDirCloner, url: []const u8) !void {
+    fn fetchAndSetupRemote(self: *WorkingDirCloner, url: []const u8, options: CloneOptions) !void {
         var t = transport.Transport.init(self.allocator, self.io, .{ .url = url });
         try t.connect();
         defer t.disconnect();
         const remote_refs = try t.fetchRefs();
         defer self.allocator.free(remote_refs);
+
+        if (options.depth > 0) {
+            // Shallow clone: mark as shallow and limit history
+            const git_dir_path = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{self.clone_path});
+            defer self.allocator.free(git_dir_path);
+
+            const cwd = std.Io.Dir.cwd();
+            const git_dir = cwd.openDir(self.io, git_dir_path, .{}) catch return;
+
+            var boundary_oids = std.ArrayList(@import("../object/oid.zig").OID).init(self.allocator);
+            defer boundary_oids.deinit(self.allocator);
+
+            for (remote_refs) |ref| {
+                if (std.mem.indexOf(u8, ref.name, "heads/") != null or
+                    std.mem.indexOf(u8, ref.name, "tags/") != null)
+                {
+                    const oid = @import("../object/oid.zig").OID.fromHex(ref.oid) catch continue;
+                    try boundary_oids.append(oid);
+                }
+            }
+
+            if (boundary_oids.items.len > 0) {
+                shallow_mod.writeShallowFile(git_dir, self.io, boundary_oids.items) catch {};
+            }
+        }
         for (remote_refs) |ref| {
             try self.createLocalRef(ref.name, ref.oid);
         }
