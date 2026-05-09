@@ -20,6 +20,7 @@ pub const ShallowInfo = struct {
     is_shallow: bool,
 
     pub fn init(allocator: std.mem.Allocator, depth: u32) ShallowInfo {
+        _ = allocator;
         return .{
             .depth = depth,
             .oids = &[_]OID{},
@@ -62,7 +63,7 @@ pub fn readShallowFile(allocator: std.mem.Allocator, git_dir: Io.Dir, io: Io) ![
 
         if (trimmed.len >= 40) {
             const oid = OID.fromHex(trimmed[0..40]) catch continue;
-            try oids.append(oid);
+            try oids.append(allocator, oid);
         }
     }
 
@@ -71,13 +72,13 @@ pub fn readShallowFile(allocator: std.mem.Allocator, git_dir: Io.Dir, io: Io) ![
 
 /// Write shallow file with boundary commit OIDs
 pub fn writeShallowFile(git_dir: Io.Dir, io: Io, oids: []const OID) !void {
-    var buf = std.ArrayList(u8).init(std.heap.page_allocator);
-    defer buf.deinit();
+    var buf = std.ArrayList(u8).empty;
+    defer buf.deinit(std.heap.page_allocator);
 
     for (oids) |oid| {
         const hex = oid.toHex();
-        try buf.appendSlice(&hex);
-        try buf.append('\n');
+        try buf.appendSlice(std.heap.page_allocator, &hex);
+        try buf.append(std.heap.page_allocator, '\n');
     }
 
     if (buf.items.len > 0) {
@@ -95,7 +96,7 @@ pub fn calculateShallowFetch(
     allocator: std.mem.Allocator,
     tip_oid: OID,
     depth: u32,
-    getAllParents: fn ([]const u8) ![]OID,
+    getAllParents: fn ([]const u8) anyerror![]OID,
 ) ![]OID {
     var commits = std.ArrayList(OID).init(allocator);
     errdefer {
@@ -103,7 +104,7 @@ pub fn calculateShallowFetch(
         commits.deinit(allocator);
     }
 
-    try commits.append(tip_oid);
+    try commits.append(allocator, tip_oid);
 
     if (depth == 0) return commits.toOwnedSlice(allocator);
 
@@ -115,11 +116,11 @@ pub fn calculateShallowFetch(
         errdefer {
             for (next_oids.items) |*n| n.* = OID{};
             next_oids.deinit(allocator);
-        };
+        }
 
         for (current_oids) |oid| {
             const hex = oid.toHex();
-            var hex_copy = try allocator.dupe(u8, &hex);
+            const hex_copy = try allocator.dupe(u8, &hex);
             defer allocator.free(hex_copy);
 
             const parents = getAllParents(hex_copy) catch continue;
@@ -134,8 +135,8 @@ pub fn calculateShallowFetch(
                 }
 
                 if (!already_has) {
-                    try commits.append(parent);
-                    try next_oids.append(parent);
+                    try commits.append(allocator, parent);
+                    try next_oids.append(allocator, parent);
                 }
             }
 
@@ -184,8 +185,6 @@ pub fn unshallow(
     // 1. Fetch all ancestors of shallow boundary commits
     // 2. Remove .git/shallow file
     // 3. Update reflogs and pack files
-
-    _ = shallow_oids;
 }
 
 /// Validate that shallow depth is reasonable

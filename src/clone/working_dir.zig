@@ -113,7 +113,7 @@ pub const WorkingDirCloner = struct {
             const cwd = std.Io.Dir.cwd();
             const git_dir = cwd.openDir(self.io, git_dir_path, .{}) catch return;
 
-            var boundary_oids = std.ArrayList(@import("../object/oid.zig").OID).init(self.allocator);
+            var boundary_oids = std.ArrayList(@import("../object/oid.zig").OID).empty;
             defer boundary_oids.deinit(self.allocator);
 
             for (remote_refs) |ref| {
@@ -121,7 +121,7 @@ pub const WorkingDirCloner = struct {
                     std.mem.indexOf(u8, ref.name, "tags/") != null)
                 {
                     const oid = @import("../object/oid.zig").OID.fromHex(ref.oid) catch continue;
-                    try boundary_oids.append(oid);
+                    try boundary_oids.append(self.allocator, oid);
                 }
             }
 

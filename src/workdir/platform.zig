@@ -33,17 +33,17 @@ pub const path_sep: u8 = if (Platform.isWindows()) '\\' else '/';
 pub fn joinPath(allocator: std.mem.Allocator, parts: []const []const u8) ![]u8 {
     if (parts.len == 0) return "";
 
-    var result = std.ArrayList(u8).init(allocator);
-    errdefer result.deinit();
+    var result = std.ArrayList(u8).empty;
+    errdefer result.deinit(allocator);
 
     for (parts, 0..) |part, i| {
         if (i > 0) {
-            try result.append(path_sep);
+            try result.append(allocator, path_sep);
         }
-        try result.appendSlice(part);
+        try result.appendSlice(allocator, part);
     }
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(allocator);
 }
 
 /// Normalize path separators to current platform

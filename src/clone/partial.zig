@@ -63,41 +63,41 @@ pub fn writePartialCloneConfig(
 ) !void {
     if (config.filter == .none) return;
 
-    var config_path = std.ArrayList(u8).init(std.heap.page_allocator);
-    defer config_path.deinit();
+    var config_path = std.ArrayList(u8).empty;
+    defer config_path.deinit(std.heap.page_allocator);
 
-    try config_path.appendSlice("config");
+    try config_path.appendSlice(std.heap.page_allocator, "config");
 
     // Read existing config or start fresh
     const existing = git_dir.readFileAlloc(io, "config", std.heap.page_allocator, .limited(65536)) catch "";
     defer if (existing.len > 0) std.heap.page_allocator.free(existing);
 
-    var new_config = std.ArrayList(u8).init(std.heap.page_allocator);
-    defer new_config.deinit();
+    var new_config = std.ArrayList(u8).empty;
+    defer new_config.deinit(std.heap.page_allocator);
 
     // Add partial clone section
-    try new_config.appendSlice("\n[remote \"");
+    try new_config.appendSlice(std.heap.page_allocator, "\n[remote \"");
 
     // Sanitize remote name
     for (remote_name) |char| {
         if (char != '"' and char != '\\') {
-            try new_config.append(char);
+            try new_config.append(std.heap.page_allocator, char);
         }
     }
 
-    try new_config.appendSlice("\"]\n");
-    try new_config.appendSlice("\tpartialclonefilter = ");
+    try new_config.appendSlice(std.heap.page_allocator, "\"]\n");
+    try new_config.appendSlice(std.heap.page_allocator, "\tpartialclonefilter = ");
 
     const filter_str = FilterSpec{
         .mode = config.filter,
         .value = config.blob_limit,
     };
 
-    try new_config.appendSlice(filter_str.toString());
-    try new_config.appendSlice("\n");
+    try new_config.appendSlice(std.heap.page_allocator, filter_str.toString());
+    try new_config.appendSlice(std.heap.page_allocator, "\n");
 
     // Append to existing config
-    try new_config.appendSlice(existing);
+    try new_config.appendSlice(std.heap.page_allocator, existing);
 
     git_dir.writeFile(io, .{ .sub_path = config_path.items, .data = new_config.items }) catch {
         return error.WriteFailed;
@@ -106,8 +106,6 @@ pub fn writePartialCloneConfig(
 
 /// Check if repository is a partial clone
 pub fn isPartialClone(git_dir: Io.Dir, io: Io) bool {
-    _ = io;
-
     const config_content = git_dir.readFileAlloc(io, "config", std.heap.page_allocator, .limited(65536)) catch {
         return false;
     };
