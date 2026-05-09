@@ -13,6 +13,8 @@
 *built for type safety and performance.* <br/>
 Hoz is the next generation of Git-compatible version control with a clean, modern codebase.
 
+---
+
 </div>
 
 ## Why Hoz?
@@ -22,10 +24,20 @@ Hoz is the next generation of Git-compatible version control with a clean, moder
 - **Fast** - Optimized object database and efficient diff engine
 - **Portable** - Runs anywhere Zig 0.16.0 is available
 
+---
+
 ## Quick Start
 
 > [!WARNING]  
 > This project is in active development and now just a toy, please do not use it in production.
+
+### Installation
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/EdwardJoke/hoz-vcs/main/install.sh | bash
+```
+
+### Basic Usage
 
 Initialize a new repository:
 
@@ -40,6 +52,8 @@ Stage and commit changes:
 hoz add .
 hoz commit -m "Initial commit"
 ```
+
+---
 
 ## Common Commands
 
@@ -88,6 +102,8 @@ hoz push          # Upload objects to remote
 hoz pull          # Fetch and merge remote changes
 ```
 
+---
+
 ## Project Status
 
 Hoz is in active development. Core Git functionality is implemented including:
@@ -97,9 +113,13 @@ Hoz is in active development. Core Git functionality is implemented including:
 - Working directory operations
 - Diff and merge algorithms
 
+---
+
 ## Contributing
 
 Contributions welcome. Please ensure `just asset` passes before submitting changes.
+
+---
 
 ## License
 
