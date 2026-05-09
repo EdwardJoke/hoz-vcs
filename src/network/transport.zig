@@ -1,6 +1,9 @@
 //! Transport Layer - Abstraction for Git network transports
 const std = @import("std");
 const Io = std.Io;
+const sha1_mod = @import("../crypto/sha1.zig");
+const compress = @import("std").compress;
+const resilience = @import("resilience.zig");
 const protocol = @import("protocol.zig");
 const packet = @import("packet.zig");
 const refs = @import("refs.zig");
