@@ -108,53 +108,62 @@ const ALL_COMMANDS = [_]CommandInfo{
 };
 
 fn findCommand(name: []const u8) ?Command {
+    for (ALL_COMMANDS) |cmd| {
+        if (std.mem.eql(u8, name, cmd.name)) {
+            return nameToEnum(cmd.name);
+        }
+        for (cmd.aliases) |alias| {
+            if (std.mem.eql(u8, name, alias)) {
+                return nameToEnum(cmd.name);
+            }
+        }
+    }
+    return null;
+}
+
+fn nameToEnum(name: []const u8) Command {
     if (std.mem.eql(u8, name, "init")) return .init;
     if (std.mem.eql(u8, name, "add")) return .add;
     if (std.mem.eql(u8, name, "commit")) return .commit;
-    if (std.mem.eql(u8, name, "ci")) return .commit;
     if (std.mem.eql(u8, name, "status")) return .status;
-    if (std.mem.eql(u8, name, "st")) return .status;
     if (std.mem.eql(u8, name, "log")) return .log;
     if (std.mem.eql(u8, name, "diff")) return .diff;
     if (std.mem.eql(u8, name, "branch")) return .branch;
-    if (std.mem.eql(u8, name, "br")) return .branch;
     if (std.mem.eql(u8, name, "checkout")) return .checkout;
-    if (std.mem.eql(u8, name, "co")) return .checkout;
-    if (std.mem.eql(u8, name, "clone")) return .clone;
-    if (std.mem.eql(u8, name, "fetch")) return .fetch;
-    if (std.mem.eql(u8, name, "push")) return .push;
-    if (std.mem.eql(u8, name, "pull")) return .pull;
-    if (std.mem.eql(u8, name, "remote")) return .remote;
-    if (std.mem.eql(u8, name, "stash")) return .stash;
-    if (std.mem.eql(u8, name, "tag")) return .tag;
-    if (std.mem.eql(u8, name, "rebase")) return .rebase;
     if (std.mem.eql(u8, name, "merge")) return .merge;
     if (std.mem.eql(u8, name, "reset")) return .reset;
     if (std.mem.eql(u8, name, "clean")) return .clean;
+    if (std.mem.eql(u8, name, "cat_file")) return .cat_file;
+    if (std.mem.eql(u8, name, "hash_object")) return .hash_object;
+    if (std.mem.eql(u8, name, "clone")) return .clone;
+    if (std.mem.eql(u8, name, "remote")) return .remote;
+    if (std.mem.eql(u8, name, "fetch")) return .fetch;
+    if (std.mem.eql(u8, name, "push")) return .push;
+    if (std.mem.eql(u8, name, "pull")) return .pull;
+    if (std.mem.eql(u8, name, "stash")) return .stash;
+    if (std.mem.eql(u8, name, "tag")) return .tag;
+    if (std.mem.eql(u8, name, "rebase")) return .rebase;
     if (std.mem.eql(u8, name, "reflog")) return .reflog;
-    if (std.mem.eql(u8, name, "ls-tree")) return .ls_tree;
     if (std.mem.eql(u8, name, "ls_tree")) return .ls_tree;
     if (std.mem.eql(u8, name, "show")) return .show;
-    if (std.mem.eql(u8, name, "cat-file")) return .cat_file;
-    if (std.mem.eql(u8, name, "cat_file")) return .cat_file;
-    if (std.mem.eql(u8, name, "hash-object")) return .hash_object;
-    if (std.mem.eql(u8, name, "hash_object")) return .hash_object;
-    if (std.mem.eql(u8, name, "switch")) return .switch_cmd;
+    if (std.mem.eql(u8, name, "help")) return .help;
+    if (std.mem.eql(u8, name, "version")) return .version;
+    if (std.mem.eql(u8, name, "switch_cmd")) return .switch_cmd;
     if (std.mem.eql(u8, name, "bisect")) return .bisect;
     if (std.mem.eql(u8, name, "config")) return .config;
     if (std.mem.eql(u8, name, "blame")) return .blame;
-    if (std.mem.eql(u8, name, "grep")) return .grep_cmd;
+    if (std.mem.eql(u8, name, "grep_cmd")) return .grep_cmd;
     if (std.mem.eql(u8, name, "describe")) return .describe;
     if (std.mem.eql(u8, name, "fsck")) return .fsck;
-    if (std.mem.eql(u8, name, "format-patch") or std.mem.eql(u8, name, "format_patch")) return .format_patch;
+    if (std.mem.eql(u8, name, "format_patch")) return .format_patch;
     if (std.mem.eql(u8, name, "mv")) return .mv;
     if (std.mem.eql(u8, name, "archive")) return .archive;
-    if (std.mem.eql(u8, name, "rev-parse") or std.mem.eql(u8, name, "rev_parse")) return .rev_parse;
-    if (std.mem.eql(u8, name, "write-tree") or std.mem.eql(u8, name, "write_tree")) return .write_tree;
-    if (std.mem.eql(u8, name, "cherry-pick")) return .cherry_pick;
+    if (std.mem.eql(u8, name, "rev_parse")) return .rev_parse;
+    if (std.mem.eql(u8, name, "write_tree")) return .write_tree;
+    if (std.mem.eql(u8, name, "cherry_pick")) return .cherry_pick;
     if (std.mem.eql(u8, name, "revert")) return .revert;
     if (std.mem.eql(u8, name, "notes")) return .notes;
-    return null;
+    unreachable;
 }
 
 fn editDistanceSimple(a: []const u8, b: []const u8) usize {
