@@ -97,8 +97,6 @@ if [ "$ARCH" = "unsupported" ]; then
     exit 1
 fi
 
-BINARY_NAME="hoz-${OS}-${ARCH}"
-
 if [ -n "$HOZ_VERSION" ]; then
     RELEASE_TAG="v${HOZ_VERSION#v}"
 else
@@ -112,6 +110,9 @@ if [ -z "$RELEASE_TAG" ]; then
     exit 1
 fi
 
+BINARY_NAME="hoz-${RELEASE_TAG}-${OS}-${ARCH}"
+
+# e.g. https://github.com/EdwardJoke/hoz-vcs/releases/download/v0.5.0/hoz-v0.5.0-linux-aarch64.tar.gz
 DOWNLOAD_URL="https://github.com/${HOZ_REPO}/releases/download/${RELEASE_TAG}/${BINARY_NAME}.tar.gz"
 
 echo ""
@@ -148,7 +149,7 @@ fi
 chmod +x "${PREFIX}/hoz.tmp"
 mv -f "${PREFIX}/hoz.tmp" "${PREFIX}/hoz"
 
-INSTALLED=$("${PREFIX}/hoz" --version 2>/dev/null || echo "(version unknown)")
+INSTALLED=$(""${PREFIX}/hoz" --version 2>/dev/null || echo "(version unknown)"")
 
 echo ""
 echo "✓  hoz installed successfully!"
