@@ -290,7 +290,7 @@ test "tag serialize and parse roundtrip" {
     const serialized = try tag.serialize(std.testing.allocator);
     defer std.testing.allocator.free(serialized);
 
-    const parsed = try Tag.parse(serialized);
+    const parsed = try Tag.parse(serialized, std.testing.allocator);
 
     try std.testing.expectEqualSlices(u8, "v1.0.0", parsed.name);
     try std.testing.expectEqualSlices(u8, "Test tag message", parsed.message);
@@ -299,7 +299,7 @@ test "tag serialize and parse roundtrip" {
 
 test "tag parse rejects non-tag" {
     const blob_data = "blob 5\x00hello";
-    try std.testing.expectError(error.NotATag, Tag.parse(blob_data));
+    try std.testing.expectError(error.NotATag, Tag.parse(blob_data, std.testing.allocator));
 }
 
 test "tag without tagger" {
@@ -311,7 +311,7 @@ test "tag without tagger" {
     const serialized = try tag.serialize(std.testing.allocator);
     defer std.testing.allocator.free(serialized);
 
-    const parsed = try Tag.parse(serialized);
+    const parsed = try Tag.parse(serialized, std.testing.allocator);
     try std.testing.expect(parsed.tagger == null);
 }
 

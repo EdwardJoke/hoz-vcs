@@ -129,7 +129,7 @@ test "fuzz: object parse tag valid" {
 test "fuzz: blob parse single byte" {
     const raw = try makeRaw("blob", "X");
     defer std.testing.allocator.free(raw);
-    const blob = try blob_mod.Blob.parse(raw);
+    const blob = try blob_mod.Blob.parse(raw, std.testing.allocator);
     try std.testing.expectEqualSlices(u8, "X", blob.data);
 }
 
@@ -137,7 +137,7 @@ test "fuzz: blob parse all null bytes" {
     const content = [_]u8{0x00} ** 256;
     const raw = try makeRaw("blob", &content);
     defer std.testing.allocator.free(raw);
-    const blob = try blob_mod.Blob.parse(raw);
+    const blob = try blob_mod.Blob.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(256, blob.data.len);
     try std.testing.expect(blob.data[0] == 0x00);
 }
@@ -146,7 +146,7 @@ test "fuzz: blob parse high bytes" {
     const content = [_]u8{0xff} ** 128;
     const raw = try makeRaw("blob", &content);
     defer std.testing.allocator.free(raw);
-    const blob = try blob_mod.Blob.parse(raw);
+    const blob = try blob_mod.Blob.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(128, blob.data.len);
 }
 
@@ -154,7 +154,7 @@ test "fuzz: blob parse utf8 multi-byte" {
     const content = "日本語テスト 🎉";
     const raw = try makeRaw("blob", content);
     defer std.testing.allocator.free(raw);
-    const blob = try blob_mod.Blob.parse(raw);
+    const blob = try blob_mod.Blob.parse(raw, std.testing.allocator);
     try std.testing.expectEqualSlices(u8, content, blob.data);
 }
 
@@ -179,7 +179,7 @@ test "fuzz: blob serialize roundtrip various sizes" {
         const blob = blob_mod.Blob.create(buf);
         const serialized = try blob.serialize(std.testing.allocator);
         defer std.testing.allocator.free(serialized);
-        const parsed = try blob_mod.Blob.parse(serialized);
+        const parsed = try blob_mod.Blob.parse(serialized, std.testing.allocator);
         try std.testing.expectEqual(sz, parsed.data.len);
     }
 }
@@ -321,7 +321,7 @@ test "fuzz: commit parse mergetag line" {
 test "fuzz: tree parse empty entries" {
     const raw = try makeRaw("tree", "");
     defer std.testing.allocator.free(raw);
-    const tree = try tree_mod.Tree.parse(std.testing.allocator, raw);
+    const tree = try tree_mod.Tree.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(0, tree.entries.len);
 }
 
@@ -332,7 +332,7 @@ test "fuzz: tree parse single entry" {
     try entry_data.appendSlice(std.testing.allocator, &[_]u8{0xaa} ** 20);
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    const tree = try tree_mod.Tree.parse(std.testing.allocator, raw);
+    const tree = try tree_mod.Tree.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(1, tree.entries.len);
     try std.testing.expectEqualSlices(u8, "file.txt", tree.entries[0].name);
 }
@@ -349,7 +349,7 @@ test "fuzz: tree parse multiple entries sorted" {
     }
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    const tree = try tree_mod.Tree.parse(std.testing.allocator, raw);
+    const tree = try tree_mod.Tree.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(3, tree.entries.len);
 }
 
@@ -360,7 +360,7 @@ test "fuzz: tree parse executable mode" {
     try entry_data.appendSlice(std.testing.allocator, &[_]u8{0xcc} ** 20);
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    const tree = try tree_mod.Tree.parse(std.testing.allocator, raw);
+    const tree = try tree_mod.Tree.parse(raw, std.testing.allocator);
     try std.testing.expect(tree_mod.Mode.executable == tree.entries[0].mode);
 }
 
@@ -371,7 +371,7 @@ test "fuzz: tree parse symlink mode" {
     try entry_data.appendSlice(std.testing.allocator, &[_]u8{0xdd} ** 20);
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    const tree = try tree_mod.Tree.parse(std.testing.allocator, raw);
+    const tree = try tree_mod.Tree.parse(raw, std.testing.allocator);
     try std.testing.expect(tree_mod.Mode.symlink == tree.entries[0].mode);
 }
 
@@ -382,7 +382,7 @@ test "fuzz: tree parse gitlink mode" {
     try entry_data.appendSlice(std.testing.allocator, &[_]u8{0xee} ** 20);
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    const tree = try tree_mod.Tree.parse(std.testing.allocator, raw);
+    const tree = try tree_mod.Tree.parse(raw, std.testing.allocator);
     try std.testing.expect(tree_mod.Mode.gitlink == tree.entries[0].mode);
 }
 
@@ -393,7 +393,7 @@ test "fuzz: tree parse directory mode" {
     try entry_data.appendSlice(std.testing.allocator, &[_]u8{0xff} ** 20);
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    const tree = try tree_mod.Tree.parse(std.testing.allocator, raw);
+    const tree = try tree_mod.Tree.parse(raw, std.testing.allocator);
     try std.testing.expect(tree_mod.Mode.directory == tree.entries[0].mode);
 }
 
@@ -404,7 +404,7 @@ test "fuzz: tree parse truncated entry" {
     try entry_data.appendSlice(std.testing.allocator, &[_]u8{0x11} ** 10);
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    try std.testing.expectError(error.NotATree, tree_mod.Tree.parse(std.testing.allocator, raw));
+    try std.testing.expectError(error.NotATree, tree_mod.Tree.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: tree parse bad mode" {
@@ -414,7 +414,7 @@ test "fuzz: tree parse bad mode" {
     try entry_data.appendSlice(std.testing.allocator, &[_]u8{0x11} ** 20);
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    try std.testing.expectError(error.UnsupportedMode, tree_mod.Tree.parse(std.testing.allocator, raw));
+    try std.testing.expectError(error.UnsupportedMode, tree_mod.Tree.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: tree parse mode too short" {
@@ -424,7 +424,7 @@ test "fuzz: tree parse mode too short" {
     try entry_data.appendSlice(std.testing.allocator, &[_]u8{0x11} ** 20);
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    try std.testing.expectError(error.InvalidModeFormat, tree_mod.Tree.parse(std.testing.allocator, raw));
+    try std.testing.expectError(error.InvalidModeFormat, tree_mod.Tree.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: tree parse empty name" {
@@ -434,7 +434,7 @@ test "fuzz: tree parse empty name" {
     try entry_data.appendSlice(std.testing.allocator, &[_]u8{0x11} ** 20);
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    const tree = try tree_mod.Tree.parse(std.testing.allocator, raw);
+    const tree = try tree_mod.Tree.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(0, tree.entries[0].name.len);
 }
 
@@ -445,7 +445,7 @@ test "fuzz: tree parse name with slash" {
     try entry_data.appendSlice(std.testing.allocator, &[_]u8{0x11} ** 20);
     const raw = try makeRaw("tree", entry_data.items);
     defer std.testing.allocator.free(raw);
-    _ = try tree_mod.Tree.parse(std.testing.allocator, raw);
+    _ = try tree_mod.Tree.parse(raw, std.testing.allocator);
 }
 
 test "fuzz: tree parse name with unicode" {
@@ -458,7 +458,7 @@ test "fuzz: tree parse name with unicode" {
     try full.appendSlice(std.testing.allocator, &[_]u8{0x22} ** 20);
     const raw = try makeRaw("tree", full.items);
     defer std.testing.allocator.free(raw);
-    const tree = try tree_mod.Tree.parse(std.testing.allocator, raw);
+    const tree = try tree_mod.Tree.parse(raw, std.testing.allocator);
     try std.testing.expectEqualSlices(u8, name, tree.entries[0].name);
 }
 
@@ -473,7 +473,7 @@ test "fuzz: tag parse minimal annotated" {
     ;
     const raw = try makeRaw("tag", data);
     defer std.testing.allocator.free(raw);
-    const tag = try tag_mod.Tag.parse(raw);
+    const tag = try tag_mod.Tag.parse(raw, std.testing.allocator);
     try std.testing.expectEqualSlices(u8, "v1.0.0", tag.name);
     try std.testing.expect(tag.tagger != null);
 }
@@ -488,7 +488,7 @@ test "fuzz: tag parse lightweight equivalent (no tagger)" {
     ;
     const raw = try makeRaw("tag", data);
     defer std.testing.allocator.free(raw);
-    const tag = try tag_mod.Tag.parse(raw);
+    const tag = try tag_mod.Tag.parse(raw, std.testing.allocator);
     try std.testing.expect(tag.tagger == null);
 }
 
@@ -512,7 +512,7 @@ test "fuzz: tag parse all target types" {
 
         const raw = try makeRaw("tag", data);
         defer std.testing.allocator.free(raw);
-        const tag = try tag_mod.Tag.parse(raw);
+        const tag = try tag_mod.Tag.parse(raw, std.testing.allocator);
         try std.testing.expectEqual(t[1], tag.target_type);
     }
 }
@@ -527,7 +527,7 @@ test "fuzz: tag parse empty message" {
     ;
     const raw = try makeRaw("tag", data);
     defer std.testing.allocator.free(raw);
-    const tag = try tag_mod.Tag.parse(raw);
+    const tag = try tag_mod.Tag.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(0, tag.message.len);
 }
 
@@ -545,7 +545,7 @@ test "fuzz: tag parse large message" {
 
     const raw = try makeRaw("tag", data);
     defer std.testing.allocator.free(raw);
-    const tag = try tag_mod.Tag.parse(raw);
+    const tag = try tag_mod.Tag.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(4000, tag.message.len);
 }
 
@@ -558,7 +558,7 @@ test "fuzz: tag parse missing object line" {
     ;
     const raw = try makeRaw("tag", data);
     defer std.testing.allocator.free(raw);
-    try std.testing.expectError(error.InvalidTag, tag_mod.Tag.parse(raw));
+    try std.testing.expectError(error.InvalidTag, tag_mod.Tag.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: tag parse missing type line" {
@@ -570,7 +570,7 @@ test "fuzz: tag parse missing type line" {
     ;
     const raw = try makeRaw("tag", data);
     defer std.testing.allocator.free(raw);
-    try std.testing.expectError(error.InvalidTag, tag_mod.Tag.parse(raw));
+    try std.testing.expectError(error.InvalidTag, tag_mod.Tag.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: tag parse invalid type value" {
@@ -583,7 +583,7 @@ test "fuzz: tag parse invalid type value" {
     ;
     const raw = try makeRaw("tag", data);
     defer std.testing.allocator.free(raw);
-    try std.testing.expectError(error.InvalidObjectType, tag_mod.Tag.parse(raw));
+    try std.testing.expectError(error.InvalidObjectType, tag_mod.Tag.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: tag parse gpgsig block" {
@@ -600,7 +600,7 @@ test "fuzz: tag parse gpgsig block" {
     ;
     const raw = try makeRaw("tag", data);
     defer std.testing.allocator.free(raw);
-    const tag = try tag_mod.Tag.parse(raw);
+    const tag = try tag_mod.Tag.parse(raw, std.testing.allocator);
     try std.testing.expect(tag.gpg_signature != null);
 }
 
