@@ -112,7 +112,7 @@ if [ -z "$RELEASE_TAG" ]; then
     exit 1
 fi
 
-DOWNLOAD_URL="https://github.com/${HOZ_REPO}/releases/download/${RELEASE_TAG}/${BINARY_NAME}"
+DOWNLOAD_URL="https://github.com/${HOZ_REPO}/releases/download/${RELEASE_TAG}/${BINARY_NAME}.tar.gz"
 
 echo ""
 echo "  Version : ${RELEASE_TAG}"
