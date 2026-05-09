@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-HOZ_REPO="edwardxie/hoz"
+HOZ_REPO="edwardjoke/hoz"
 HOZ_VERSION="${HOZ_VERSION:-}"
 PREFIX="${HOME}/.hoz/bin"
 

@@ -1,26 +1,14 @@
-# Oh-My-Opencode
-.sisyphus/
-
 # Zig
 .zig-cache/
 zig-out/
-
-# Roadmap
-roadmaps/
-roadmaps/TODO.md
 
 # Develop Remains
 test
 tests/
 .idea/
-.trae/
 
 # Mac
 .DS_Store
-
-# AI
-CLAUDE.md
-AGENTS.md
 
 # asset 
 asset/
