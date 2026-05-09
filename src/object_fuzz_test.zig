@@ -13,29 +13,29 @@ fn makeRaw(obj_type: []const u8, content: []const u8) ![]u8 {
 }
 
 test "fuzz: object parse empty input" {
-    try std.testing.expectError(error.InvalidObjectFormat, object_mod.parse(""));
+    try std.testing.expectError(error.InvalidObjectFormat, object_mod.parse("", std.testing.allocator));
 }
 
 test "fuzz: object parse null only" {
-    try std.testing.expectError(error.InvalidObjectFormat, object_mod.parse("\x00"));
+    try std.testing.expectError(error.InvalidObjectFormat, object_mod.parse("\x00", std.testing.allocator));
 }
 
 test "fuzz: object parse type only no space" {
-    try std.testing.expectError(error.InvalidObjectFormat, object_mod.parse("blob\x00data"));
+    try std.testing.expectError(error.InvalidObjectFormat, object_mod.parse("blob\x00data", std.testing.allocator));
 }
 
 test "fuzz: object parse space only header" {
-    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(" \x00data"));
+    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(" \x00data", std.testing.allocator));
 }
 
 test "fuzz: object parse negative size" {
-    try std.testing.expectError(error.Overflow, object_mod.parse("blob -1\x00data"));
+    try std.testing.expectError(error.Overflow, object_mod.parse("blob -1\x00data", std.testing.allocator));
 }
 
 test "fuzz: object parse size zero with content" {
     const raw = try makeRaw("blob", "oops");
     defer std.testing.allocator.free(raw);
-    const obj = try object_mod.parse(raw);
+    const obj = try object_mod.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(.blob, obj.obj_type);
     try std.testing.expectEqualSlices(u8, "oops", obj.data);
 }
@@ -43,86 +43,86 @@ test "fuzz: object parse size zero with content" {
 test "fuzz: object parse size zero empty content" {
     const raw = try makeRaw("blob", "");
     defer std.testing.allocator.free(raw);
-    const obj = try object_mod.parse(raw);
+    const obj = try object_mod.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(.blob, obj.obj_type);
     try std.testing.expectEqual(0, obj.data.len);
 }
 
 test "fuzz: object parse huge size small content" {
     const raw = "blob 9999999999\x00hi";
-    try std.testing.expectError(error.InvalidObjectSize, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidObjectSize, object_mod.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: object parse extra null bytes in header" {
     const raw = "blob 5\x00\x00hello";
-    try std.testing.expectError(error.InvalidObjectSize, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidObjectSize, object_mod.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: object parse type with trailing spaces" {
     const raw = "blob   3\x00abc";
-    try std.testing.expectError(error.InvalidCharacter, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidCharacter, object_mod.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: object parse tab delimiter" {
     const raw = "blob\t3\x00abc";
-    try std.testing.expectError(error.InvalidObjectFormat, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidObjectFormat, object_mod.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: object parse unknown type" {
     const raw = "unknown_type 0\x00";
-    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: object parse numeric type string" {
     const raw = "12345 0\x00";
-    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: object parse uppercase BLOB" {
     const raw = "BLOB 0\x00";
-    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: object parse mixed case Blob" {
     const raw = "Blob 0\x00";
-    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidObjectType, object_mod.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: object parse size as float" {
     const raw = "blob 3.14\x00data";
-    try std.testing.expectError(error.InvalidCharacter, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidCharacter, object_mod.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: object parse size as hex" {
     const raw = "blob 0xff\x00data";
-    try std.testing.expectError(error.InvalidCharacter, object_mod.parse(raw));
+    try std.testing.expectError(error.InvalidCharacter, object_mod.parse(raw, std.testing.allocator));
 }
 
 test "fuzz: object parse size with leading zeros" {
     const raw = try makeRaw("blob", "ab");
     defer std.testing.allocator.free(raw);
-    const obj = try object_mod.parse(raw);
+    const obj = try object_mod.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(2, obj.data.len);
 }
 
 test "fuzz: object parse tree valid" {
     const raw = try makeRaw("tree", "");
     defer std.testing.allocator.free(raw);
-    const obj = try object_mod.parse(raw);
+    const obj = try object_mod.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(.tree, obj.obj_type);
 }
 
 test "fuzz: object parse commit valid" {
     const raw = try makeRaw("commit", "tree abc\n\nmessage\n");
     defer std.testing.allocator.free(raw);
-    const obj = try object_mod.parse(raw);
+    const obj = try object_mod.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(.commit, obj.obj_type);
 }
 
 test "fuzz: object parse tag valid" {
     const raw = try makeRaw("tag", "object abc\ntype commit\ntag v1\n\ntagger <a@b> 0 +0000\n\nmsg\n");
     defer std.testing.allocator.free(raw);
-    const obj = try object_mod.parse(raw);
+    const obj = try object_mod.parse(raw, std.testing.allocator);
     try std.testing.expectEqual(.tag, obj.obj_type);
 }
 
@@ -616,11 +616,11 @@ test "fuzz: roundtrip all types via object module" {
         const raw = try makeRaw(tc[0], tc[1]);
         defer std.testing.allocator.free(raw);
 
-        const parsed = try object_mod.parse(raw);
+        const parsed = try object_mod.parse(raw, std.testing.allocator);
         const serialized = try object_mod.serialize(parsed, std.testing.allocator);
         defer std.testing.allocator.free(serialized);
 
-        const reparsed = try object_mod.parse(serialized);
+        const reparsed = try object_mod.parse(serialized, std.testing.allocator);
         try std.testing.expectEqual(tc[0], @tagName(reparsed.obj_type));
         try std.testing.expectEqualSlices(u8, tc[1], reparsed.data);
     }
