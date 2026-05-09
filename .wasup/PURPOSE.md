@@ -1,18 +1,25 @@
-# Project Purpose — v0.4.2
+# Project Purpose — v0.5.0
 
 ## What
-Build the hoz installer (`install.sh`) that auto-detects system architecture, downloads the correct binary from GitHub Release assets to `~/.hoz/bin/`, and displays PATH setup instructions — plus make `final.zig` and `main.zig` read their version from `build.zig.zon` instead of hardcoding it.
+Fix all 8 issues identified in `zig-out/hoz-vcs-audit-report.md` to eliminate fake/demo code, broken tooling, placeholder artifacts, and code quality problems that undermine project credibility and maintainability.
 
 ## Why
-The project currently has two problems:
-1. **Version is duplicated** across 3 locations ([`final.zig:16`](src/final/final.zig#L16), [`main.zig:244`](src/main.zig#L244), [`build.zig.zon:17`](build.zig.zon#L17)) — every release requires manual sync, risking drift where `hoz --version` reports a stale string.
-2. **No installation story** — users must manually build from source or guess how to get a binary. The [`install.sh`](install.sh) exists but only contains ASCII art; it doesn't actually install anything.
+The v0.4.2 audit revealed critical credibility issues:
+1. **Fake/demo code** — [`src/root.zig`](src/root.zig) contains Zig template scaffold (`printAnotherMessage`, `add()`) unrelated to VCS functionality
+2. **Broken installation** — [`install.sh`](install.sh) references wrong repo (`edwardxie/hoz` instead of `EdwardJoke/hoz-vcs`), making it completely non-functional
+3. **Opaque binary** — [`network/libservice.a`](src/network/libservice.a) is a precompiled 2,264-byte static library with no source or build documentation, violating open-source transparency
+4. **False test coverage** — 7 modules have `expect(true)` placeholder tests that validate nothing (cli, network, stash, perf, ci, history, reset)
+5. **Stale configuration** — [`wasup.toml`](.wasup/wasup.toml) shows v0.4.1 while actual version is v0.4.2; [`build.zig.zon`](build.zig.zon) has commented-out dependency residue
+6. **Code duplication** — `findCommand()` and `dispatch()` use 40+ if-else chains instead of iterating over existing `ALL_COMMANDS` array
 
-A proper installer lowers the barrier to adoption and makes distribution via GitHub Releases practical.
+These issues damage trust with contributors and users. A clean codebase is essential before adding new features.
 
 ## Success Criteria
-- [ ] `hoz --version` outputs the version from `build.zig.zon`, not a hardcoded constant
-- [ ] `./install.sh` detects OS (macOS/Linux) and CPU architecture (x86_64/aarch64) automatically
-- [ ] `./install.sh` downloads the matching binary from GitHub Release assets into `~/.hoz/bin/`
-- [ ] `./install.sh` prints clear instructions for adding `~/.hoz/bin` to `$PATH` (without auto-modifying shell config)
-- [ ] `./install.sh` displays the existing ASCII art banner on startup
+- [ ] All template scaffold code removed from [`root.zig`](src/root.zig) — no more `printAnotherMessage()`, `add()`, or arithmetic tests
+- [ ] [`install.sh`](install.sh) correctly references `EdwardJoke/hoz-vcs` repository
+- [ ] [`network/libservice.a`](src/network/libservice.a) either removed or accompanied by source + build instructions
+- [ ] All 7 modules have real unit tests replacing `expect(true)` placeholders
+- [ ] [`build.zig.zon`](build.zig.zon) cleaned of commented dependency residue
+- [ ] [`.wasup/wasup.toml`](.wasup/wasup.toml) synchronized to current version
+- [ ] `findCommand()` in [`main.zig`](src/main.zig) and `dispatch()` in [`dispatcher.zig`](src/cli/dispatcher.zig) refactored to use `ALL_COMMANDS` iteration
+- [ ] Project passes audit re-check with zero P0/P1/P2 findings
