@@ -33,6 +33,8 @@ pub const BlobFilter = enum {
     blob_type,
 };
 
+pub const PartialCloneFilter = @import("partial.zig").FilterMode;
+
 pub const CloneResult = struct {
     success: bool,
     path: []const u8,
