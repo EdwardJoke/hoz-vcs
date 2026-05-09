@@ -12,6 +12,9 @@ pub usingnamespace @import("restore_staged.zig");
 pub usingnamespace @import("restore_working.zig");
 pub usingnamespace @import("restore_source.zig");
 
-test "reset module loads" {
-    try std.testing.expect(true);
+test "reset module re-exports modes" {
+    _ = @import("soft.zig");
+    _ = @import("mixed.zig");
+    _ = @import("hard.zig");
+    _ = @import("merge.zig");
 }

@@ -17,6 +17,11 @@ pub const protocol = @import("protocol.zig");
 pub const transport = @import("transport.zig");
 pub const refs = @import("refs.zig");
 
-test "network module loads" {
-    try std.testing.expect(true);
+test "network module re-exports protocol types" {
+    _ = service;
+    _ = packet;
+    _ = negotiate;
+    _ = exchange;
+    _ = protocol;
+    _ = transport;
 }

@@ -12,6 +12,9 @@ pub usingnamespace @import("drop.zig");
 pub usingnamespace @import("branch.zig");
 pub usingnamespace @import("show.zig");
 
-test "stash module loads" {
-    try std.testing.expect(true);
+test "stash module re-exports operations" {
+    _ = @import("save.zig");
+    _ = @import("list.zig");
+    _ = @import("pop.zig");
+    _ = @import("apply.zig");
 }

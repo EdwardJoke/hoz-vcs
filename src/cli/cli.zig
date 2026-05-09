@@ -19,6 +19,10 @@ pub const CherryPick = @import("cherry_pick.zig").CherryPick;
 pub const Bundle = @import("bundle.zig").Bundle;
 pub const Notes = @import("notes.zig").Notes;
 
-test "cli module loads" {
-    try std.testing.expect(true);
+test "cli module re-exports key types" {
+    _ = Output;
+    _ = OutputStyle;
+    _ = CommandDispatcher;
+    _ = Init;
+    _ = Status;
 }
