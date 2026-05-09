@@ -554,8 +554,14 @@ pub fn generatePackIndex(allocator: std.mem.Allocator, io: Io, git_dir: []const 
     defer pack_file.close(io);
 
     const pack_stat = try pack_file.stat(io);
-    const pack_data = try allocator.alloc(u8, @as(usize, @intCast(pack_stat.size)));
-    defer allocator.free(pack_data);
+    const pack_size: usize = @intCast(pack_stat.size);
+
+    if (pack_size > 2 * 1024 * 1024 * 1024) {
+        return error.PackFileTooLarge;
+    }
+
+    const pack_data = try allocator.alloc(u8, pack_size);
+    errdefer allocator.free(pack_data);
 
     _ = try pack_file.preadAll(io, pack_data, 0);
 

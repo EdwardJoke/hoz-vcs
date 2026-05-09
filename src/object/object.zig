@@ -95,35 +95,70 @@ pub const Object = struct {
     data: []const u8,
 };
 
-/// Parse object from raw data (Git loose object format)
+/// Parse object from loose object format (combined header+data)
 pub fn parse(data: []const u8, allocator: std.mem.Allocator) !Object {
-    // Git loose format: "<type> <size>\0<content>"
-    // Find null byte separating header from content
-    const null_idx = std.mem.indexOf(u8, data, "\x00") orelse return error.InvalidObjectFormat;
+    const null_idx = std.mem.indexOfScalar(u8, data, 0) orelse return error.InvalidObjectFormat;
 
     const header = data[0..null_idx];
     const content = data[null_idx + 1 ..];
-
-    // Parse header: "<type> <size>"
     var iter = std.mem.splitScalar(u8, header, ' ');
+
     const type_str = iter.next() orelse return error.InvalidObjectFormat;
     const size_str = iter.next() orelse return error.InvalidObjectFormat;
 
     const obj_type = try typeFromStr(type_str);
     const size = try std.fmt.parseInt(usize, size_str, 10);
 
-    // Verify size matches
     if (content.len != size) {
         return error.InvalidObjectSize;
     }
 
-    // Compute OID: SHA1("<type> <size>\0<content>")
     const full_content = data[0 .. null_idx + 1 + content.len];
     const computed_oid = oid.oidFromContent(full_content);
 
-    // Duplicate content so Object owns its data
     const owned_data = try allocator.alloc(u8, content.len);
+    errdefer allocator.free(owned_data);
     @memcpy(owned_data, content);
+
+    return Object{
+        .oid = computed_oid,
+        .obj_type = obj_type,
+        .data = owned_data,
+    };
+}
+
+/// Parse object from pre-split header and data parts
+pub fn parseFromParts(allocator: std.mem.Allocator, header: []const u8, data: []const u8) !Object {
+    var iter = std.mem.splitScalar(u8, header, ' ');
+    const type_str = iter.next() orelse return error.InvalidObjectFormat;
+
+    const space_idx = std.mem.indexOfScalar(u8, header, ' ') orelse return error.InvalidObjectFormat;
+    const size_str = header[space_idx + 1 ..];
+
+    const obj_type = try typeFromStr(type_str);
+    const size = try std.fmt.parseInt(usize, size_str, 10);
+
+    if (data.len != size) {
+        return error.InvalidObjectSize;
+    }
+
+    const full_header = try allocator.alloc(u8, header.len + 1);
+    errdefer allocator.free(full_header);
+    @memcpy(full_header[0..header.len], header);
+    full_header[header.len] = 0;
+
+    const full_content = try allocator.alloc(u8, full_header.len + data.len);
+    errdefer allocator.free(full_content);
+    @memcpy(full_content[0..full_header.len], full_header);
+    @memcpy(full_content[full_header.len..], data);
+
+    const computed_oid = oid.oidFromContent(full_content);
+    allocator.free(full_header);
+    allocator.free(full_content);
+
+    const owned_data = try allocator.alloc(u8, data.len);
+    errdefer allocator.free(owned_data);
+    @memcpy(owned_data, data);
 
     return Object{
         .oid = computed_oid,
