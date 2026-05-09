@@ -1,14 +1,13 @@
-# Project Purpose — v0.4.0
+# Project Purpose — v0.4.1
 
 ## What
-Upgrade the entire hoz codebase from Zig 0.15 to Zig 0.16 API compatibility, fixing all 60 compilation errors and 11 test failures to achieve a fully-passing build on Zig 0.16.0.
+Fix all remaining runtime crashes and critical bugs in the hoz codebase following the Zig 0.16.0 migration, achieving zero test crashes and improved code quality.
 
 ## Why
-The project currently builds on Zig 0.16.0 but **60 compilation errors** and **11 test failures** remain when running the full test suite. The errors span 12 categories of breaking API changes between 0.15 → 0.16: Io system restructure (`Io.Threaded.new()` removed, `Io.init()` removed, `Io.Writer.interface` gone), std.fs reorganization (`fs.File` namespace), crypto module reshuffle (`crypto.hash.sha1` path changed), const-correctness tightening (DebugAllocator, RefStore), and OID type changes. Without this upgrade, the codebase is stuck on deprecated APIs that will only accumulate more tech debt.
+The v0.4.0 migration resolved 60+ compilation errors but left **6 test crashes** and **38 failing tests** (87.7% pass rate). These remaining issues represent technical debt that undermines code quality, developer confidence in the test suite, and the reliability of the Zig 0.16.0 upgrade. Without addressing these crashes, the codebase remains fragile and difficult to maintain.
 
 ## Success Criteria
-- [ ] All 60 compilation errors resolved — `zig build test` compiles with 0 errors
-- [ ] All 11 runtime test failures fixed — test suite passes at same or better rate than v0.3.5 baseline
-- [ ] Build (`zig build`) continues to pass with zero errors
-- [ ] No regressions in previously-passing 106 tests
-- [ ] All Zig 0.16 API usage follows current std library conventions (no deprecated patterns)
+- [ ] All 6 test crashes eliminated — `zig build test` completes with zero panics/segfaults
+- [ ] Test crash count reduced from 6 → 0 (100% reduction)
+- [ ] No new regressions introduced — previously passing tests continue to pass
+- [ ] Code quality improvements from fixing root causes (memory safety, type correctness)
