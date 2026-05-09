@@ -182,7 +182,7 @@ pub const Rebase = struct {
         const commit_data = compress_mod.Zlib.decompress(compressed, self.allocator) catch return false;
         defer self.allocator.free(commit_data);
 
-        const obj = object_mod.parse(commit_data) catch return false;
+        const obj = object_mod.parse(commit_data, self.allocator) catch return false;
         if (obj.obj_type != .commit) return false;
 
         var parent_hex: ?[]const u8 = null;
@@ -215,7 +215,7 @@ pub const Rebase = struct {
         if (parent_hex) |p_hex| {
             const parent_data = self.readObjectRaw(git_dir, OID.fromHex(p_hex) catch return false) catch return false;
             defer self.allocator.free(parent_data);
-            const parent_obj = object_mod.parse(parent_data) catch return false;
+            const parent_obj = object_mod.parse(parent_data, self.allocator) catch return false;
             if (parent_obj.obj_type != .commit) return false;
 
             var parent_lines = std.mem.splitScalar(u8, parent_obj.data, '\n');
@@ -301,7 +301,7 @@ pub const Rebase = struct {
         const tree_oid = OID.fromHex(tree_hex) catch return;
         const tree_data = try self.readObjectRaw(git_dir, tree_oid);
         defer self.allocator.free(tree_data);
-        const obj = object_mod.parse(tree_data) catch return;
+        const obj = object_mod.parse(tree_data, self.allocator) catch return;
         if (obj.obj_type != .tree) return;
         try self.applyTreeEntriesNative(obj.data, "", git_dir);
     }
@@ -318,7 +318,7 @@ pub const Rebase = struct {
 
         const data = try self.readObjectRaw(git_dir, tree_oid);
         defer self.allocator.free(data);
-        const obj = object_mod.parse(data) catch return result;
+        const obj = object_mod.parse(data, self.allocator) catch return result;
         if (obj.obj_type != .tree) return result;
 
         var pos: usize = 0;
@@ -360,14 +360,14 @@ pub const Rebase = struct {
                 @memcpy(&entry_oid.bytes, oid_bytes);
                 const sub = self.readObjectRaw(git_dir, entry_oid) catch continue;
                 defer self.allocator.free(sub);
-                const sobj = object_mod.parse(sub) catch continue;
+                const sobj = object_mod.parse(sub, self.allocator) catch continue;
                 if (sobj.obj_type == .tree) try self.applyTreeEntriesNative(sobj.data, full, git_dir);
             } else if (mode == 0o100644 or mode == 0o100755) {
                 var entry_oid: OID = undefined;
                 @memcpy(&entry_oid.bytes, oid_bytes);
                 const blob = self.readObjectRaw(git_dir, entry_oid) catch continue;
                 defer self.allocator.free(blob);
-                const bobj = object_mod.parse(blob) catch continue;
+                const bobj = object_mod.parse(blob, self.allocator) catch continue;
                 if (bobj.obj_type == .blob) Io.Dir.cwd().writeFile(self.io, .{ .sub_path = full, .data = bobj.data }) catch {};
             }
         }
@@ -380,14 +380,14 @@ pub const Rebase = struct {
             @memcpy(&entry_oid.bytes, &oid_bytes);
             const sub = self.readObjectRaw(git_dir, entry_oid) catch return;
             defer self.allocator.free(sub);
-            const sobj = object_mod.parse(sub) catch return;
+            const sobj = object_mod.parse(sub, self.allocator) catch return;
             if (sobj.obj_type == .tree) try self.applyTreeEntriesNative(sobj.data, name, git_dir);
         } else if (mode == 0o100644 or mode == 0o100755) {
             var entry_oid: OID = undefined;
             @memcpy(&entry_oid.bytes, &oid_bytes);
             const blob = self.readObjectRaw(git_dir, entry_oid) catch return;
             defer self.allocator.free(blob);
-            const bobj = object_mod.parse(blob) catch return;
+            const bobj = object_mod.parse(blob, self.allocator) catch return;
             if (bobj.obj_type == .blob) Io.Dir.cwd().writeFile(self.io, .{ .sub_path = name, .data = bobj.data }) catch {};
         }
     }

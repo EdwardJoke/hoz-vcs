@@ -96,7 +96,7 @@ pub const Object = struct {
 };
 
 /// Parse object from raw data (Git loose object format)
-pub fn parse(data: []const u8) !Object {
+pub fn parse(data: []const u8, allocator: std.mem.Allocator) !Object {
     // Git loose format: "<type> <size>\0<content>"
     // Find null byte separating header from content
     const null_idx = std.mem.indexOf(u8, data, "\x00") orelse return error.InvalidObjectFormat;
@@ -121,10 +121,14 @@ pub fn parse(data: []const u8) !Object {
     const full_content = data[0 .. null_idx + 1 + content.len];
     const computed_oid = oid.oidFromContent(full_content);
 
+    // Duplicate content so Object owns its data
+    const owned_data = try allocator.alloc(u8, content.len);
+    @memcpy(owned_data, content);
+
     return Object{
         .oid = computed_oid,
         .obj_type = obj_type,
-        .data = content,
+        .data = owned_data,
     };
 }
 
@@ -166,7 +170,7 @@ test "object parse and serialize roundtrip" {
     const raw = try std.mem.concat(std.testing.allocator, u8, &.{ "blob ", size_str, "\x00", original_data });
     defer std.testing.allocator.free(raw);
 
-    const obj = try parse(raw);
+    const obj = try parse(raw, std.testing.allocator);
     defer std.testing.allocator.free(obj.data);
 
     try std.testing.expectEqual(.blob, obj.obj_type);
@@ -175,17 +179,17 @@ test "object parse and serialize roundtrip" {
 
 test "object parse invalid type" {
     const invalid_data = "invalid 5\x00hello";
-    try std.testing.expectError(error.InvalidObjectType, parse(invalid_data));
+    try std.testing.expectError(error.InvalidObjectType, parse(invalid_data, std.testing.allocator));
 }
 
 test "object parse missing null" {
     const no_null = "blob 5hello";
-    try std.testing.expectError(error.InvalidObjectFormat, parse(no_null));
+    try std.testing.expectError(error.InvalidObjectFormat, parse(no_null, std.testing.allocator));
 }
 
 test "object parse size mismatch" {
     const wrong_size = "blob 100\x00hello";
-    try std.testing.expectError(error.InvalidObjectSize, parse(wrong_size));
+    try std.testing.expectError(error.InvalidObjectSize, parse(wrong_size, std.testing.allocator));
 }
 
 test "object compute header size" {

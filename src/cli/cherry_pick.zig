@@ -48,7 +48,7 @@ pub const CherryPick = struct {
             };
             defer self.allocator.free(commit_data);
 
-            const obj = object_mod.parse(commit_data) catch {
+            const obj = object_mod.parse(commit_data, self.allocator) catch {
                 try self.output.errorMessage("Invalid commit object {s}", .{commit_str});
                 return;
             };
@@ -66,7 +66,7 @@ pub const CherryPick = struct {
                 };
                 defer self.allocator.free(parent_data);
 
-                const parent_obj = object_mod.parse(parent_data) catch continue;
+                const parent_obj = object_mod.parse(parent_data, self.allocator) catch continue;
 
                 const parent_tree = try self.extractTreeHex(parent_obj.data);
                 defer self.allocator.free(parent_tree);
@@ -239,7 +239,7 @@ pub const CherryPick = struct {
         const tree_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, tree_oid) catch return result;
         defer self.allocator.free(tree_data);
 
-        const obj = object_mod.parse(tree_data) catch return result;
+        const obj = object_mod.parse(tree_data, self.allocator) catch return result;
         if (obj.obj_type != .tree) return result;
 
         var pos: usize = 0;
@@ -274,7 +274,7 @@ pub const CherryPick = struct {
         const tree_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, tree_oid) catch return;
         defer self.allocator.free(tree_data);
 
-        const obj = object_mod.parse(tree_data) catch return;
+        const obj = object_mod.parse(tree_data, self.allocator) catch return;
         if (obj.obj_type != .tree) return;
 
         try self.applyTreeEntries(obj.data, "");
@@ -315,14 +315,14 @@ pub const CherryPick = struct {
             cwd.createDirPath(self.io.*, path) catch {};
             const tree_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid) catch return;
             defer self.allocator.free(tree_data);
-            const obj = object_mod.parse(tree_data) catch return;
+            const obj = object_mod.parse(tree_data, self.allocator) catch return;
             if (obj.obj_type == .tree) {
                 try self.applyTreeEntries(obj.data, path);
             }
         } else if (mode == 0o100644 or mode == 0o100755) {
             const blob_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid) catch return;
             defer self.allocator.free(blob_data);
-            const obj = object_mod.parse(blob_data) catch return;
+            const obj = object_mod.parse(blob_data, self.allocator) catch return;
             if (obj.obj_type == .blob) {
                 try cwd.writeFile(self.io.*, .{ .sub_path = path, .data = obj.data });
             }

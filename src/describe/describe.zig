@@ -261,7 +261,7 @@ pub const Describe = struct {
             const obj_data = object_io.readObjectOpt(git_dir, self.io, self.allocator, trimmed) orelse return null;
             defer self.allocator.free(obj_data);
 
-            const obj = object_mod.parse(obj_data) catch return null;
+            const obj = object_mod.parse(obj_data, self.allocator) catch return null;
             if (obj.obj_type == .tag) {
                 var it = std.mem.splitScalar(u8, obj.data, '\n');
                 while (it.next()) |line| {

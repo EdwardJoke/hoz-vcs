@@ -104,7 +104,7 @@ pub const StashPopper = struct {
         };
         defer self.allocator.free(decompressed);
 
-        const obj = object_mod.parse(decompressed) catch {
+        const obj = object_mod.parse(decompressed, self.allocator) catch {
             return ApplyResult{
                 .success = false,
                 .conflict = false,
@@ -166,7 +166,7 @@ pub const StashPopper = struct {
         const decompressed = compress_mod.Zlib.decompress(compressed, self.allocator) catch return;
         defer self.allocator.free(decompressed);
 
-        const obj = object_mod.parse(decompressed) catch return;
+        const obj = object_mod.parse(decompressed, self.allocator) catch return;
         if (obj.obj_type != .tree) return;
 
         const cwd = Io.Dir.cwd();
@@ -221,7 +221,7 @@ pub const StashPopper = struct {
         const decompressed = compress_mod.Zlib.decompress(compressed, self.allocator) catch return;
         defer self.allocator.free(decompressed);
 
-        const obj = object_mod.parse(decompressed) catch return;
+        const obj = object_mod.parse(decompressed, self.allocator) catch return;
         if (obj.obj_type != .tree) return;
 
         const subdir = parent_cwd.openDir(self.io, sub_path, .{}) catch return;
@@ -240,7 +240,7 @@ pub const StashPopper = struct {
         const decompressed = compress_mod.Zlib.decompress(compressed, self.allocator) catch return;
         defer self.allocator.free(decompressed);
 
-        const obj = object_mod.parse(decompressed) catch return;
+        const obj = object_mod.parse(decompressed, self.allocator) catch return;
         if (obj.obj_type != .blob) return;
 
         const cwd = Io.Dir.cwd();
