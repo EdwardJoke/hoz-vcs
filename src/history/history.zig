@@ -13,6 +13,9 @@ pub usingnamespace @import("show_ref.zig");
 pub usingnamespace @import("rev_list.zig");
 pub usingnamespace @import("date.zig");
 
-test "history module loads" {
-    try std.testing.expect(true);
+test "history module re-exports navigation" {
+    _ = @import("iter.zig");
+    _ = @import("log.zig");
+    _ = @import("blame.zig");
+    _ = @import("rev_list.zig");
 }

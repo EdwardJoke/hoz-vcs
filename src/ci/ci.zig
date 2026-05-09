@@ -12,6 +12,8 @@ pub usingnamespace @import("release.zig");
 pub usingnamespace @import("platforms.zig");
 pub usingnamespace @import("signing.zig");
 
-test "ci module loads" {
-    try std.testing.expect(true);
+test "ci module re-exports infrastructure" {
+    _ = @import("github_actions.zig");
+    _ = @import("release.zig");
+    _ = @import("platforms.zig");
 }

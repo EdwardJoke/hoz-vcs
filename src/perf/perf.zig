@@ -21,6 +21,9 @@ pub usingnamespace @import("arena.zig");
 pub usingnamespace @import("pool.zig");
 pub usingnamespace @import("stream.zig");
 
-test "perf module loads" {
-    try std.testing.expect(true);
+test "perf module re-exports optimization types" {
+    _ = @import("cache.zig");
+    _ = @import("bitmap.zig");
+    _ = @import("bloom.zig");
+    _ = @import("midx.zig");
 }
