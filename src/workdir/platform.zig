@@ -183,10 +183,9 @@ pub fn checkPermissions(path: []const u8, mode: std.File.Mode) !bool {
     defer file.close();
 
     const stat = file.stat();
-    _ = stat;
 
     if (Platform.isWindows()) {
-        return checkWindowsPermissions(stat.mode, mode);
+        return checkWindowsPermissions(@intCast(stat.mode), @intCast(mode));
     } else {
         return checkUnixPermissions(@intCast(stat.mode), @intCast(mode));
     }
