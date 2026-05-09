@@ -62,8 +62,8 @@ pub const Blob = struct {
     }
 
     /// Parse blob from loose object data
-    pub fn parse(data: []const u8) !Blob {
-        const obj = try object_mod.parse(data);
+    pub fn parse(data: []const u8, allocator: std.mem.Allocator) !Blob {
+        const obj = try object_mod.parse(data, allocator);
         if (obj.obj_type != .blob) {
             return error.NotABlob;
         }
@@ -91,7 +91,7 @@ test "blob serialize and parse roundtrip" {
     defer std.testing.allocator.free(serialized);
 
     // Parse back
-    const parsed = try Blob.parse(serialized);
+    const parsed = try Blob.parse(serialized, std.testing.allocator);
 
     // Verify content matches
     try std.testing.expectEqualSlices(u8, content, parsed.data);
@@ -121,7 +121,7 @@ test "blob large content" {
 
 test "blob parse rejects non-blob" {
     const tree_data = "tree 0\x00";
-    try std.testing.expectError(error.NotABlob, Blob.parse(tree_data));
+    try std.testing.expectError(error.NotABlob, Blob.parse(tree_data, std.testing.allocator));
 }
 
 test "blob binary content" {

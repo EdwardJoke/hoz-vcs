@@ -179,17 +179,17 @@ test "object parse and serialize roundtrip" {
 
 test "object parse invalid type" {
     const invalid_data = "invalid 5\x00hello";
-    try std.testing.expectError(error.InvalidObjectType, parse(invalid_data));
+    try std.testing.expectError(error.InvalidObjectType, parse(invalid_data, std.testing.allocator));
 }
 
 test "object parse missing null" {
     const no_null = "blob 5hello";
-    try std.testing.expectError(error.InvalidObjectFormat, parse(no_null));
+    try std.testing.expectError(error.InvalidObjectFormat, parse(no_null, std.testing.allocator));
 }
 
 test "object parse size mismatch" {
     const wrong_size = "blob 100\x00hello";
-    try std.testing.expectError(error.InvalidObjectSize, parse(wrong_size));
+    try std.testing.expectError(error.InvalidObjectSize, parse(wrong_size, std.testing.allocator));
 }
 
 test "object compute header size" {

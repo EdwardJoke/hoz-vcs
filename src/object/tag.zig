@@ -126,8 +126,8 @@ pub const Tag = struct {
     }
 
     /// Parse tag from loose object data
-    pub fn parse(data: []const u8) !Tag {
-        const obj = try object_mod.parse(data);
+    pub fn parse(data: []const u8, allocator: std.mem.Allocator) !Tag {
+        const obj = try object_mod.parse(data, allocator);
         if (obj.obj_type != .tag) {
             return error.NotATag;
         }
