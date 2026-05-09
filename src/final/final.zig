@@ -7,13 +7,15 @@
 //! - Shell completion scripts
 const std = @import("std");
 
+const build_options = @import("build_options");
+
 const compat = @import("compat.zig");
 const benchmark_mod = @import("benchmark.zig");
 const errors_mod = @import("errors.zig");
 const complete = @import("complete.zig");
 const git_compare = @import("git_compare.zig");
 
-pub const VERSION = "0.4.1";
+pub const VERSION = build_options.version;
 
 pub const Benchmark = benchmark_mod.Benchmark;
 pub const BenchResult = benchmark_mod.BenchResult;
