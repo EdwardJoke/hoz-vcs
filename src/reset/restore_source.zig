@@ -80,7 +80,7 @@ pub const RestoreSource = struct {
         const commit_data = object_io.readObject(&self.git_dir, self.io, self.allocator, commit_oid) catch return "";
         defer self.allocator.free(commit_data);
 
-        const obj = object_mod.parse(commit_data) catch return "";
+        const obj = object_mod.parse(commit_data, self.allocator) catch return "";
         if (obj.obj_type != .commit) return "";
 
         var lines = std.mem.splitScalar(u8, obj.data, '\n');

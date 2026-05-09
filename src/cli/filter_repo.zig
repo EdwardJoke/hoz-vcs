@@ -673,7 +673,7 @@ fn hexLower(bytes: []const u8) [64]u8 {
 }
 
 fn parseTreeEntries(allocator: std.mem.Allocator, data: []const u8) !struct { entries: []TreeEntry } {
-    const obj = try object_mod.parse(data);
+    const obj = try object_mod.parse(data, allocator);
     if (obj.obj_type != .tree) return error.NotATree;
 
     var entries = std.ArrayList(TreeEntry).empty;

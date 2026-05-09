@@ -132,7 +132,7 @@ pub const Checkout = struct {
         };
         defer self.allocator.free(tree_data);
 
-        const obj = object_mod.parse(tree_data) catch {
+        const obj = object_mod.parse(tree_data, self.allocator) catch {
             try self.output.errorMessage("Failed to parse tree object", .{});
             return;
         };
@@ -174,7 +174,7 @@ pub const Checkout = struct {
                     Io.Dir.cwd().createDirPath(self.io, full_path) catch {};
                     const subtree_data = self.readObjectData(git_dir, entry_oid) catch continue;
                     defer self.allocator.free(subtree_data);
-                    const sub_obj = object_mod.parse(subtree_data) catch continue;
+                    const sub_obj = object_mod.parse(subtree_data, self.allocator) catch continue;
                     if (sub_obj.obj_type == .tree) {
                         try self.applyTreeEntries(sub_obj.data, full_path, git_dir);
                     }
@@ -182,7 +182,7 @@ pub const Checkout = struct {
                 0o100644, 0o100755 => {
                     const blob_data = self.readObjectData(git_dir, entry_oid) catch continue;
                     defer self.allocator.free(blob_data);
-                    const blob_obj = object_mod.parse(blob_data) catch continue;
+                    const blob_obj = object_mod.parse(blob_data, self.allocator) catch continue;
                     if (blob_obj.obj_type == .blob) {
                         const cwd = Io.Dir.cwd();
                         cwd.writeFile(self.io, .{ .sub_path = full_path, .data = blob_obj.data }) catch {};

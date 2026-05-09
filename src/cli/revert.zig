@@ -47,7 +47,7 @@ pub const Revert = struct {
             };
             defer self.allocator.free(commit_data);
 
-            const obj = object_mod.parse(commit_data) catch {
+            const obj = object_mod.parse(commit_data, self.allocator) catch {
                 try self.output.errorMessage("Invalid commit object {s}", .{commit_str});
                 return;
             };
@@ -65,7 +65,7 @@ pub const Revert = struct {
                 };
                 defer self.allocator.free(parent_data);
 
-                const parent_obj = object_mod.parse(parent_data) catch continue;
+                const parent_obj = object_mod.parse(parent_data, self.allocator) catch continue;
 
                 const parent_tree_hex = try self.extractTreeHex(parent_obj.data);
                 defer self.allocator.free(parent_tree_hex);
@@ -180,7 +180,7 @@ pub const Revert = struct {
         const tree_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, tree_oid) catch return;
         defer self.allocator.free(tree_data);
 
-        const parsed_obj = object_mod.parse(tree_data) catch return;
+        const parsed_obj = object_mod.parse(tree_data, self.allocator) catch return;
         if (parsed_obj.obj_type != .tree) return;
 
         try self.applyTreeEntries(parsed_obj.data, "");
@@ -221,14 +221,14 @@ pub const Revert = struct {
             cwd.createDirPath(self.io.*, path) catch {};
             const subtree_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid) catch return;
             defer self.allocator.free(subtree_data);
-            const sub_obj = object_mod.parse(subtree_data) catch return;
+            const sub_obj = object_mod.parse(subtree_data, self.allocator) catch return;
             if (sub_obj.obj_type == .tree) {
                 try self.applyTreeEntries(sub_obj.data, path);
             }
         } else if (mode == 0o100644 or mode == 0o100755) {
             const blob_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid) catch return;
             defer self.allocator.free(blob_data);
-            const blob_obj = object_mod.parse(blob_data) catch return;
+            const blob_obj = object_mod.parse(blob_data, self.allocator) catch return;
             if (blob_obj.obj_type == .blob) {
                 try cwd.writeFile(self.io.*, .{ .sub_path = path, .data = blob_obj.data });
             }

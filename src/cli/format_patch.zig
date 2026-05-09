@@ -96,7 +96,7 @@ pub const FormatPatch = struct {
         const commit_data = object_io.readObject(git_dir, self.io, self.allocator, parsed_oid) catch return error.ObjectNotFound;
         defer self.allocator.free(commit_data);
 
-        const obj = object_mod.parse(commit_data) catch {
+        const obj = object_mod.parse(commit_data, self.allocator) catch {
             return error.InvalidObject;
         };
 
@@ -193,14 +193,14 @@ pub const FormatPatch = struct {
         const head_obj = object_io.readObject(git_dir, self.io, self.allocator, hoid) catch return buf.toOwnedSlice(self.allocator);
         defer self.allocator.free(head_obj);
 
-        const head_parsed = object_mod.parse(head_obj) catch return buf.toOwnedSlice(self.allocator);
+        const head_parsed = object_mod.parse(head_obj, self.allocator) catch return buf.toOwnedSlice(self.allocator);
         if (head_parsed.obj_type != .commit) return buf.toOwnedSlice(self.allocator);
 
         const head_tree_hex = extractTreeLine(head_parsed.data) orelse return buf.toOwnedSlice(self.allocator);
 
         var parent_tree_hex: ?[]const u8 = null;
         if (parent_data) |pd| {
-            const pp = object_mod.parse(pd) catch null;
+            const pp = object_mod.parse(pd, self.allocator) catch null;
             if (pp != null and pp.?.obj_type == .commit) {
                 parent_tree_hex = extractTreeLine(pp.?.data);
             }

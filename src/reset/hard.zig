@@ -74,7 +74,7 @@ pub const HardReset = struct {
         };
         defer self.allocator.free(commit_data);
 
-        const obj = object_mod.parse(commit_data) catch {
+        const obj = object_mod.parse(commit_data, self.allocator) catch {
             return OID{ .bytes = .{0} ** 20 };
         };
 
@@ -104,7 +104,7 @@ pub const HardReset = struct {
         const tree_data = object_io.readObject(&self.git_dir, self.io, self.allocator, tree_oid) catch return;
         defer self.allocator.free(tree_data);
 
-        const obj = object_mod.parse(tree_data) catch return;
+        const obj = object_mod.parse(tree_data, self.allocator) catch return;
         if (obj.obj_type != .tree) return;
 
         try self.applyTreeEntries(obj.data, "");
@@ -145,14 +145,14 @@ pub const HardReset = struct {
             cwd.createDirPath(self.io, path) catch {};
             const tree_data = object_io.readObject(&self.git_dir, self.io, self.allocator, oid) catch return;
             defer self.allocator.free(tree_data);
-            const obj = object_mod.parse(tree_data) catch return;
+            const obj = object_mod.parse(tree_data, self.allocator) catch return;
             if (obj.obj_type == .tree) {
                 try self.applyTreeEntries(obj.data, path);
             }
         } else if (mode == 0o100644 or mode == 0o100755) {
             const blob_data = object_io.readObject(&self.git_dir, self.io, self.allocator, oid) catch return;
             defer self.allocator.free(blob_data);
-            const obj = object_mod.parse(blob_data) catch return;
+            const obj = object_mod.parse(blob_data, self.allocator) catch return;
             if (obj.obj_type == .blob) {
                 try cwd.writeFile(self.io, .{ .sub_path = path, .data = obj.data });
             }

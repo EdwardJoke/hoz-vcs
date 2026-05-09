@@ -395,7 +395,7 @@ pub const Branch = struct {
                 0o100644, 0o100755 => {
                     const blob_data = object_io.readObject(&git_dir, self.io, self.allocator, entry_oid) catch continue;
                     defer self.allocator.free(blob_data);
-                    const blob_obj = object_mod.parse(blob_data) catch continue;
+                    const blob_obj = object_mod.parse(blob_data, self.allocator) catch continue;
                     if (blob_obj.obj_type == .blob) {
                         const cwd = Io.Dir.cwd();
                         cwd.writeFile(self.io, .{ .sub_path = full_path, .data = blob_obj.data }) catch {};

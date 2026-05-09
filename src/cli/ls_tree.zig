@@ -117,7 +117,7 @@ pub const LsTree = struct {
         };
         defer self.allocator.free(obj_data);
 
-        const obj = object_mod.parse(obj_data) catch {
+        const obj = object_mod.parse(obj_data, self.allocator) catch {
             return error.ObjectNotFound;
         };
 
@@ -139,7 +139,7 @@ pub const LsTree = struct {
         };
         defer self.allocator.free(obj_data);
 
-        const obj = object_mod.parse(obj_data) catch {
+        const obj = object_mod.parse(obj_data, self.allocator) catch {
             try self.output.errorMessage("Failed to parse tree object", .{});
             return;
         };
