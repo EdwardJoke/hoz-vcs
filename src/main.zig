@@ -4,6 +4,8 @@
 //! All output follows standardized formats: human-readable, JSON, or porcelain.
 
 const std = @import("std");
+const build_options = @import("build_options");
+
 const Io = std.Io;
 
 const cli = @import("cli/cli.zig");
@@ -241,7 +243,7 @@ fn printHelp(writer: *Io.Writer, style: OutputStyle) !void {
 
 fn printVersion(writer: *Io.Writer, style: OutputStyle) !void {
     var out = Output.init(writer, style, std.heap.page_allocator);
-    try out.result(.{ .success = true, .code = 0, .message = "hoz version 0.4.1" });
+    try out.result(.{ .success = true, .code = 0, .message = "hoz version " ++ build_options.version });
 }
 
 fn printUnknown(writer: *Io.Writer, cmd: []const u8, style: OutputStyle) !void {

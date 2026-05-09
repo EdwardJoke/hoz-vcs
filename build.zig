@@ -1,11 +1,7 @@
 const std = @import("std");
 
-// Although this function looks imperative, it does not perform the build
-// directly and instead it mutates the build graph (`b`) that will be then
-// executed by an external runner. The functions in `std.Build` implement a DSL
-// for defining build steps and express dependencies between them, allowing the
-// build runner to parallelize the build automatically (and the cache system to
-// know when a step doesn't need to be re-run).
+const hoz_version = "0.4.2";
+
 pub fn build(b: *std.Build) void {
     // Standard target options allow the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
@@ -29,17 +25,12 @@ pub fn build(b: *std.Build) void {
     // multiple modules and consumers will need to be able to specify which
     // module they want to access.
     const mod = b.addModule("hoz", .{
-        // The root source file is the "entry point" of this module. Users of
-        // this module will only be able to access public declarations contained
-        // in this file, which means that if you have declarations that you
-        // intend to expose to consumers that were defined in other files part
-        // of this module, you will have to make sure to re-export them from
-        // the root file.
         .root_source_file = b.path("src/root.zig"),
-        // Later on we'll use this module as the root module of a test executable
-        // which requires us to specify a target.
         .target = target,
     });
+
+    const version_options = b.addOptions();
+    version_options.addOption([]const u8, "version", hoz_version);
 
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
@@ -69,6 +60,7 @@ pub fn build(b: *std.Build) void {
             .link_libc = need_libc,
             .imports = &.{
                 .{ .name = "hoz", .module = mod },
+                .{ .name = "build_options", .module = version_options.createModule() },
             },
         }),
     });
@@ -152,6 +144,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "hoz", .module = mod },
+                .{ .name = "build_options", .module = version_options.createModule() },
             },
         }),
     });
@@ -165,6 +158,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "hoz", .module = mod },
+                .{ .name = "build_options", .module = version_options.createModule() },
             },
         }),
     });
@@ -218,6 +212,7 @@ pub fn build(b: *std.Build) void {
                 .link_libc = cross_need_libc,
                 .imports = &.{
                     .{ .name = "hoz", .module = mod },
+                    .{ .name = "build_options", .module = version_options.createModule() },
                 },
             }),
         });
@@ -243,6 +238,7 @@ pub fn build(b: *std.Build) void {
                 .link_libc = rel_need_libc,
                 .imports = &.{
                     .{ .name = "hoz", .module = mod },
+                    .{ .name = "build_options", .module = version_options.createModule() },
                 },
             }),
         });
