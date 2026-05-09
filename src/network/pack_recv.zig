@@ -1,7 +1,9 @@
-//! Pack Consumption - Receive and process packfiles
+//! Pack Receive - Receive and store pack files from remote repositories
 const std = @import("std");
 const Io = std.Io;
 const sha1_mod = @import("../crypto/sha1.zig");
+const platform = @import("../workdir/platform.zig");
+const oid_mod = @import("../object/oid.zig");
 const compress = @import("std").compress;
 
 pub const ProgressPhase = enum {
