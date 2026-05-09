@@ -22,18 +22,49 @@ usage() {
     echo "Options:"
     echo "  --version TAG   Install a specific version (default: latest)"
     echo "  --prefix DIR    Install to custom directory (default: ~/.hoz/bin)"
+    echo "  --uninstall     Remove installed hoz binary"
     echo "  --help          Show this help message"
     echo ""
 }
 
 for arg in "$@"; do
     case "$arg" in
-        --version) shift; HOZ_VERSION="$1"; shift ;;
-        --prefix)  shift; PREFIX="$1"; shift ;;
-        --help|-h) usage; exit 0 ;;
+        --version)  shift; HOZ_VERSION="$1"; shift ;;
+        --prefix)   shift; PREFIX="$1"; shift ;;
+        --uninstall) UNINSTALL=1; shift ;;
+        --help|-h)   usage; exit 0 ;;
         *) echo "Unknown option: $arg"; usage; exit 1 ;;
     esac
 done
+
+if [ "${UNINSTALL:-0}" = "1" ]; then
+    if [ ! -f "${PREFIX}/hoz" ]; then
+        echo "hoz is not installed at ${PREFIX}/hoz"
+        echo "Nothing to remove."
+        exit 0
+    fi
+    EXISTING=$("${PREFIX}/hoz" --version 2>/dev/null || echo "unknown")
+    rm -f "${PREFIX}/hoz"
+    rmdir "${PREFIX}" 2>/dev/null || true
+    echo ""
+    echo "✓  hoz removed (${EXISTING})"
+    echo ""
+    case "$SHELL" in
+        */zsh)  SHELL_RC=".zshrc" ;;
+        */bash) SHELL_RC=".bashrc" ;;
+        */fish) SHELL_RC=".config/fish/config.fish" ;;
+        *)      SHELL_RC=".profile" ;;
+    esac
+    echo "To complete uninstallation, remove this line from ~/${SHELL_RC}:"
+    echo ""
+    if [ "$SHELL_RC" = ".config/fish/config.fish" ]; then
+        echo "  fish_add_path ${PREFIX}"
+    else
+        echo "  export PATH=\"${PREFIX}:\$PATH\""
+    fi
+    echo ""
+    exit 0
+fi
 
 detect_os() {
     case "$(uname -s)" in
