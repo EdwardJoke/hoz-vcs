@@ -141,12 +141,22 @@ pub const Grep = struct {
     }
 };
 
-test "Grep init" {
+test "Grep init and options" {
     const opts = GrepOptions{ .pattern = "test" };
-    _ = opts;
-    try std.testing.expect(true);
+    try std.testing.expectEqualStrings("test", opts.pattern);
+    try std.testing.expect(opts.case_insensitive == false);
+    try std.testing.expect(opts.recursive == true);
+    try std.testing.expect(opts.line_number == true);
 }
 
-test "Grep search method exists" {
-    try std.testing.expect(true);
+test "GrepMatch structure" {
+    const match = GrepMatch{
+        .file_path = "main.zig",
+        .line_number = 42,
+        .line_content = "const x = 1;",
+        .match_start = 6,
+        .match_end = 7,
+    };
+    try std.testing.expectEqual(@as(u32, 42), match.line_number);
+    try std.testing.expectEqualStrings("const x = 1;", match.line_content);
 }
