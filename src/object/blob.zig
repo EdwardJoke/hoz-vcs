@@ -64,6 +64,7 @@ pub const Blob = struct {
     /// Parse blob from loose object data
     pub fn parse(data: []const u8, allocator: std.mem.Allocator) !Blob {
         const obj = try object_mod.parse(data, allocator);
+        defer obj.deinit(allocator);
         if (obj.obj_type != .blob) {
             return error.NotABlob;
         }

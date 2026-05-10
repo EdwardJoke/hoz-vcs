@@ -49,6 +49,7 @@ pub const Show = struct {
             try self.output.errorMessage("Failed to parse object", .{});
             return;
         };
+        defer obj.deinit(self.allocator);
 
         try self.output.section("Show");
         try self.output.item("object", obj_ref);

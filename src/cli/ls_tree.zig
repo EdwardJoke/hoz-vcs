@@ -120,6 +120,7 @@ pub const LsTree = struct {
         const obj = object_mod.parse(obj_data, self.allocator) catch {
             return error.ObjectNotFound;
         };
+        defer obj.deinit(self.allocator);
 
         var line_iter = std.mem.splitScalar(u8, obj.data, '\n');
         while (line_iter.next()) |line| {
@@ -143,6 +144,7 @@ pub const LsTree = struct {
             try self.output.errorMessage("Failed to parse tree object", .{});
             return;
         };
+        defer obj.deinit(self.allocator);
 
         var offset: usize = 0;
         while (offset < obj.data.len) {

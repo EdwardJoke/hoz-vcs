@@ -123,6 +123,7 @@ pub const Tree = struct {
     /// Parse tree from loose object data
     pub fn parse(allocator: std.mem.Allocator, data: []const u8) !Tree {
         const obj = try object_mod.parse(data, allocator);
+        defer obj.deinit(allocator);
         if (obj.obj_type != .tree) {
             return error.NotATree;
         }

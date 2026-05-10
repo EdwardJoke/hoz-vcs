@@ -290,7 +290,9 @@ pub const FilterRepo = struct {
                     try self.output.infoMessage("Updated ref {s}: {s} -> {s}", .{ ref_name, rc.old_oid[0..@min(rc.old_oid.len, 12)], rc.new_oid[0..@min(rc.new_oid.len, 12)] });
                     const new_content = try std.fmt.allocPrint(self.allocator, "{s}\n", .{rc.new_oid});
                     defer self.allocator.free(new_content);
-                    refs_heads.writeFile(self.io, .{ .sub_path = entry.path, .data = new_content }) catch {};
+                    refs_heads.writeFile(self.io, .{ .sub_path = entry.path, .data = new_content }) catch {
+                        try self.output.warningMessage("Failed to write ref {s}", .{entry.path});
+                    };
                     break;
                 }
             }
@@ -443,6 +445,10 @@ pub const FilterBranch = struct {
             defer self.allocator.free(obj_data);
 
             const commit = CommitObj.parse(self.allocator, obj_data) catch continue;
+            defer {
+                self.allocator.free(commit.parents);
+                if (commit.message.len > 0) self.allocator.free(commit.message);
+            }
 
             for (commit.parents) |p| {
                 try visit_list.append(self.allocator, p);
@@ -458,6 +464,10 @@ pub const FilterBranch = struct {
             defer self.allocator.free(obj_data);
 
             const commit = CommitObj.parse(self.allocator, obj_data) catch continue;
+            defer {
+                self.allocator.free(commit.parents);
+                if (commit.message.len > 0) self.allocator.free(commit.message);
+            }
 
             const new_tree_oid = self.rewriteTree(&git_dir, &commit.tree, self.subdirectory.?, &tree_map) catch {
                 try self.output.infoMessage("Skipping commit {s}: tree rewrite failed", .{abbrevOid(oid)});
@@ -674,6 +684,7 @@ fn hexLower(bytes: []const u8) [64]u8 {
 
 fn parseTreeEntries(allocator: std.mem.Allocator, data: []const u8) !struct { entries: []TreeEntry } {
     const obj = try object_mod.parse(data, allocator);
+    defer obj.deinit(allocator);
     if (obj.obj_type != .tree) return error.NotATree;
 
     var entries = std.ArrayList(TreeEntry).empty;

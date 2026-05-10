@@ -64,6 +64,7 @@ pub const CatFile = struct {
             try self.output.errorMessage("Failed to parse object", .{});
             return;
         };
+        defer obj.deinit(self.allocator);
 
         switch (self.action) {
             .type => try self.printType(obj.obj_type),

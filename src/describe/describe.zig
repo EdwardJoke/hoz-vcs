@@ -262,6 +262,7 @@ pub const Describe = struct {
             defer self.allocator.free(obj_data);
 
             const obj = object_mod.parse(obj_data, self.allocator) catch return null;
+            defer obj.deinit(self.allocator);
             if (obj.obj_type == .tag) {
                 var it = std.mem.splitScalar(u8, obj.data, '\n');
                 while (it.next()) |line| {

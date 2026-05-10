@@ -349,6 +349,7 @@ pub const Branch = struct {
             try self.output.errorMessage("Failed to parse tree object", .{});
             return;
         };
+        defer obj.deinit(self.allocator);
         if (obj.obj_type != .tree) return;
 
         try self.applyTreeEntries(obj.data, ".", git_dir);
@@ -388,6 +389,7 @@ pub const Branch = struct {
                     const subtree_data = object_io.readObject(&git_dir, self.io, self.allocator, entry_oid) catch continue;
                     defer self.allocator.free(subtree_data);
                     const sub_obj = object_mod.parse(subtree_data, self.allocator) catch continue;
+                    defer sub_obj.deinit(self.allocator);
                     if (sub_obj.obj_type == .tree) {
                         try self.applyTreeEntries(sub_obj.data, full_path, git_dir);
                     }
@@ -396,9 +398,12 @@ pub const Branch = struct {
                     const blob_data = object_io.readObject(&git_dir, self.io, self.allocator, entry_oid) catch continue;
                     defer self.allocator.free(blob_data);
                     const blob_obj = object_mod.parse(blob_data, self.allocator) catch continue;
+                    defer blob_obj.deinit(self.allocator);
                     if (blob_obj.obj_type == .blob) {
                         const cwd = Io.Dir.cwd();
-                        cwd.writeFile(self.io, .{ .sub_path = full_path, .data = blob_obj.data }) catch {};
+                        cwd.writeFile(self.io, .{ .sub_path = full_path, .data = blob_obj.data }) catch {
+                            try self.output.warningMessage("Failed to write {s}", .{full_path});
+                        };
                     }
                 },
                 else => {},

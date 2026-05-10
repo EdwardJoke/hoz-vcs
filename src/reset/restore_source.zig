@@ -81,6 +81,7 @@ pub const RestoreSource = struct {
         defer self.allocator.free(commit_data);
 
         const obj = object_mod.parse(commit_data, self.allocator) catch return "";
+        defer obj.deinit(self.allocator);
         if (obj.obj_type != .commit) return "";
 
         var lines = std.mem.splitScalar(u8, obj.data, '\n');
