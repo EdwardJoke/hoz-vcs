@@ -283,7 +283,12 @@ fn hozCommit() void {
 
 fn hozLog() void {
     const io = benchIo();
-    const git_dir = Io.Dir.openDirAbsolute(io, ".git", .{}) catch return;
+    const cwd_path = std.process.currentPathAlloc(io, gpa) catch return;
+    defer gpa.free(cwd_path);
+    const git_dir_path = std.fmt.allocPrint(gpa, "{s}/.git", .{cwd_path}) catch return;
+    defer gpa.free(git_dir_path);
+
+    const git_dir = Io.Dir.openDirAbsolute(io, git_dir_path, .{}) catch return;
     defer git_dir.close(io);
 
     const head_content = git_dir.readFileAlloc(io, "HEAD", gpa, .limited(256)) catch return;
@@ -357,7 +362,12 @@ fn hozStatus() void {
 
 fn hozBranch() void {
     const io = benchIo();
-    const git_dir = Io.Dir.openDirAbsolute(io, ".git", .{}) catch return;
+    const cwd_path = std.process.currentPathAlloc(io, gpa) catch return;
+    defer gpa.free(cwd_path);
+    const git_dir_path = std.fmt.allocPrint(gpa, "{s}/.git", .{cwd_path}) catch return;
+    defer gpa.free(git_dir_path);
+
+    const git_dir = Io.Dir.openDirAbsolute(io, git_dir_path, .{}) catch return;
     defer git_dir.close(io);
 
     const heads_dir = git_dir.openDir(io, "refs/heads", .{ .iterate = true }) catch return;
@@ -372,7 +382,12 @@ fn hozBranch() void {
 
 fn hozCheckout() void {
     const io = benchIo();
-    const git_dir = Io.Dir.openDirAbsolute(io, ".git", .{}) catch return;
+    const cwd_path = std.process.currentPathAlloc(io, gpa) catch return;
+    defer gpa.free(cwd_path);
+    const git_dir_path = std.fmt.allocPrint(gpa, "{s}/.git", .{cwd_path}) catch return;
+    defer gpa.free(git_dir_path);
+
+    const git_dir = Io.Dir.openDirAbsolute(io, git_dir_path, .{}) catch return;
     defer git_dir.close(io);
 
     const head_content = git_dir.readFileAlloc(io, "HEAD", gpa, .limited(256)) catch return;

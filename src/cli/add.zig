@@ -65,7 +65,12 @@ pub const Add = struct {
             return;
         }
 
-        const git_dir = Io.Dir.openDirAbsolute(self.io, ".git", .{}) catch {
+        const cwd_path = try std.process.currentPathAlloc(self.io, self.allocator);
+        defer self.allocator.free(cwd_path);
+        const git_dir_path = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{cwd_path});
+        defer self.allocator.free(git_dir_path);
+
+        const git_dir = Io.Dir.openDirAbsolute(self.io, git_dir_path, .{}) catch {
             try self.output.errorMessage("Not a hoz repository", .{});
             return;
         };
