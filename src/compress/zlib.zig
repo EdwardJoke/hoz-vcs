@@ -1,17 +1,14 @@
 //! Zlib compression/decompression for Git objects
 //!
-//! Supports zlib format (RFC 1950) wrapping DEFLATE (RFC 1951).
-//! Compression uses fixed Huffman coding; decompression handles
-//! both stored blocks and fixed Huffman blocks.
+//! Compression uses custom fixed Huffman; decompression uses
+//! Zig's std.compress.flate.Decompress (supports all block types
+//! including dynamic Huffman used by real git objects).
 const std = @import("std");
 const deflate_mod = @import("deflate.zig");
 
 pub const ZlibError = error{
     InvalidHeader,
-    InvalidChecksum,
     TruncatedInput,
-    BadBlockType,
-    CorruptData,
 };
 
 pub const Zlib = struct {
@@ -39,52 +36,14 @@ pub const Zlib = struct {
 
         if ((@as(u32, data[0]) * 256 + data[1]) % 31 != 0) return ZlibError.InvalidHeader;
 
-        var decomp = deflate_mod.Decompressor.init(data[2..]);
+        var in: std.Io.Reader = .fixed(data);
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        errdefer aw.deinit();
 
-        var result = std.ArrayList(u8).initCapacity(allocator, data.len * 3) catch |err| return err;
-        errdefer result.deinit(allocator);
+        var decomp = std.compress.flate.Decompress.init(&in, .zlib, &.{});
+        _ = try decomp.reader.streamRemaining(&aw.writer);
 
-        var bfinal: bool = false;
-
-        while (!bfinal) {
-            if (decomp.offset >= data.len - 4) break;
-
-            const bfinal_btype = try decomp.readBitsLE(3);
-            bfinal = (bfinal_btype & 1) != 0;
-            const btype: u2 = @truncate((bfinal_btype >> 1) & 3);
-
-            switch (btype) {
-                0x00 => {
-                    decomp.alignToByte();
-                    if (decomp.offset + 4 > data.len - 4) return ZlibError.CorruptData;
-                    const len = std.mem.readInt(u16, data[decomp.offset..][0..2], .little);
-                    decomp.offset += 2;
-                    const nlen = std.mem.readInt(u16, data[decomp.offset..][0..2], .little);
-                    decomp.offset += 2;
-                    if (len != ~nlen) return ZlibError.CorruptData;
-                    if (decomp.offset + @as(usize, len) > data.len - 4) return ZlibError.TruncatedInput;
-                    try result.appendSlice(allocator, data[decomp.offset .. decomp.offset + len]);
-                    decomp.offset += len;
-                },
-                0x01 => {
-                    try decomp.inflateBlockFixed(&result, allocator);
-                },
-                0x02 => {
-                    return ZlibError.BadBlockType;
-                },
-                0x03 => {
-                    return ZlibError.BadBlockType;
-                },
-            }
-        }
-
-        if (decomp.offset + 4 > data.len) return ZlibError.TruncatedInput;
-
-        const stored_adler = std.mem.readInt(u32, data[decomp.offset..][0..4], .big);
-        const computed_adler = deflate_mod.adler32(result.items);
-        if (stored_adler != computed_adler) return ZlibError.InvalidChecksum;
-
-        return result.toOwnedSlice(allocator);
+        return aw.toOwnedSlice();
     }
 };
 
