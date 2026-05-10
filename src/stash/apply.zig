@@ -90,6 +90,7 @@ pub const StashApplier = struct {
                 .message = try std.fmt.allocPrint(self.allocator, "stash@{d} object is corrupt", .{index}),
             };
         };
+        defer obj.deinit(self.allocator);
 
         if (obj.obj_type != .commit) {
             return ApplyResult{
@@ -149,6 +150,7 @@ pub const StashApplier = struct {
         defer self.allocator.free(tree_data);
 
         const obj = try object_mod.parse(tree_data, self.allocator);
+        defer obj.deinit(self.allocator);
         if (obj.obj_type != .tree) {
             return error.NotATree;
         }
@@ -188,6 +190,7 @@ pub const StashApplier = struct {
             const subtree_data = object_io.readObject(&self.git_dir, self.io, self.allocator, oid) catch return;
             defer self.allocator.free(subtree_data);
             const obj = object_mod.parse(subtree_data, self.allocator) catch return;
+            defer obj.deinit(self.allocator);
             if (obj.obj_type == .tree) {
                 const old_cwd = cwd;
                 const subdir = cwd.openDir(self.io, name, .{}) catch return;
@@ -200,6 +203,7 @@ pub const StashApplier = struct {
             const blob_data = object_io.readObject(&self.git_dir, self.io, self.allocator, oid) catch return;
             defer self.allocator.free(blob_data);
             const obj = object_mod.parse(blob_data, self.allocator) catch return;
+            defer obj.deinit(self.allocator);
             if (obj.obj_type == .blob) {
                 try cwd.writeFile(self.io, .{ .sub_path = name, .data = obj.data });
             }

@@ -99,6 +99,7 @@ pub const FormatPatch = struct {
         const obj = object_mod.parse(commit_data, self.allocator) catch {
             return error.InvalidObject;
         };
+        defer obj.deinit(self.allocator);
 
         if (obj.obj_type != .commit) return error.NotACommit;
 
@@ -194,6 +195,7 @@ pub const FormatPatch = struct {
         defer self.allocator.free(head_obj);
 
         const head_parsed = object_mod.parse(head_obj, self.allocator) catch return buf.toOwnedSlice(self.allocator);
+        defer head_parsed.deinit(self.allocator);
         if (head_parsed.obj_type != .commit) return buf.toOwnedSlice(self.allocator);
 
         const head_tree_hex = extractTreeLine(head_parsed.data) orelse return buf.toOwnedSlice(self.allocator);
@@ -201,6 +203,7 @@ pub const FormatPatch = struct {
         var parent_tree_hex: ?[]const u8 = null;
         if (parent_data) |pd| {
             const pp = object_mod.parse(pd, self.allocator) catch null;
+            defer if (pp != null) pp.?.deinit(self.allocator);
             if (pp != null and pp.?.obj_type == .commit) {
                 parent_tree_hex = extractTreeLine(pp.?.data);
             }

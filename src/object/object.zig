@@ -93,6 +93,10 @@ pub const Object = struct {
     oid: oid.OID,
     obj_type: Type,
     data: []const u8,
+
+    pub fn deinit(self: *const Object, allocator: std.mem.Allocator) void {
+        allocator.free(self.data);
+    }
 };
 
 /// Parse object from loose object format (combined header+data)

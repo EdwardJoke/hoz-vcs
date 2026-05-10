@@ -52,6 +52,7 @@ pub const CherryPick = struct {
                 try self.output.errorMessage("Invalid commit object {s}", .{commit_str});
                 return;
             };
+            defer obj.deinit(self.allocator);
 
             if (obj.obj_type != .commit) {
                 try self.output.errorMessage("{s} is not a commit", .{commit_str});
@@ -67,6 +68,7 @@ pub const CherryPick = struct {
                 defer self.allocator.free(parent_data);
 
                 const parent_obj = object_mod.parse(parent_data, self.allocator) catch continue;
+                defer parent_obj.deinit(self.allocator);
 
                 const parent_tree = try self.extractTreeHex(parent_obj.data);
                 defer self.allocator.free(parent_tree);
@@ -221,7 +223,9 @@ pub const CherryPick = struct {
         var remove_iter = parent_map.iterator();
         while (remove_iter.next()) |entry| {
             const cwd = Io.Dir.cwd();
-            cwd.deleteFile(self.io.*, entry.key_ptr.*) catch {};
+            cwd.deleteFile(self.io.*, entry.key_ptr.*) catch {
+                try self.output.warningMessage("Failed to delete {s}", .{entry.key_ptr.*});
+            };
         }
     }
 
@@ -240,6 +244,7 @@ pub const CherryPick = struct {
         defer self.allocator.free(tree_data);
 
         const obj = object_mod.parse(tree_data, self.allocator) catch return result;
+        defer obj.deinit(self.allocator);
         if (obj.obj_type != .tree) return result;
 
         var pos: usize = 0;
@@ -275,6 +280,7 @@ pub const CherryPick = struct {
         defer self.allocator.free(tree_data);
 
         const obj = object_mod.parse(tree_data, self.allocator) catch return;
+        defer obj.deinit(self.allocator);
         if (obj.obj_type != .tree) return;
 
         try self.applyTreeEntries(obj.data, "");
@@ -312,10 +318,13 @@ pub const CherryPick = struct {
         const cwd = Io.Dir.cwd();
 
         if (mode == 0o040000) {
-            cwd.createDirPath(self.io.*, path) catch {};
+            cwd.createDirPath(self.io.*, path) catch {
+                try self.output.warningMessage("Failed to create directory {s}", .{path});
+            };
             const tree_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid) catch return;
             defer self.allocator.free(tree_data);
             const obj = object_mod.parse(tree_data, self.allocator) catch return;
+            defer obj.deinit(self.allocator);
             if (obj.obj_type == .tree) {
                 try self.applyTreeEntries(obj.data, path);
             }
@@ -323,6 +332,7 @@ pub const CherryPick = struct {
             const blob_data = object_io.readObject(&self.git_dir, self.io.*, self.allocator, oid) catch return;
             defer self.allocator.free(blob_data);
             const obj = object_mod.parse(blob_data, self.allocator) catch return;
+            defer obj.deinit(self.allocator);
             if (obj.obj_type == .blob) {
                 try cwd.writeFile(self.io.*, .{ .sub_path = path, .data = obj.data });
             }

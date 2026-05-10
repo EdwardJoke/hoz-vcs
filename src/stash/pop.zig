@@ -111,6 +111,7 @@ pub const StashPopper = struct {
                 .message = try std.fmt.allocPrint(self.allocator, "stash object parse failed", .{}),
             };
         };
+        defer obj.deinit(self.allocator);
 
         if (obj.obj_type != .commit) {
             return ApplyResult{
@@ -167,6 +168,7 @@ pub const StashPopper = struct {
         defer self.allocator.free(decompressed);
 
         const obj = object_mod.parse(decompressed, self.allocator) catch return;
+        defer obj.deinit(self.allocator);
         if (obj.obj_type != .tree) return;
 
         const cwd = Io.Dir.cwd();
@@ -222,6 +224,7 @@ pub const StashPopper = struct {
         defer self.allocator.free(decompressed);
 
         const obj = object_mod.parse(decompressed, self.allocator) catch return;
+        defer obj.deinit(self.allocator);
         if (obj.obj_type != .tree) return;
 
         const subdir = parent_cwd.openDir(self.io, sub_path, .{}) catch return;
@@ -241,6 +244,7 @@ pub const StashPopper = struct {
         defer self.allocator.free(decompressed);
 
         const obj = object_mod.parse(decompressed, self.allocator) catch return;
+        defer obj.deinit(self.allocator);
         if (obj.obj_type != .blob) return;
 
         const cwd = Io.Dir.cwd();

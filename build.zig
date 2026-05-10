@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const hoz_version = "0.5.1";
+const hoz_version = "0.5.2";
 
 pub fn build(b: *std.Build) void {
     // Standard target options allow the person running `zig build` to choose

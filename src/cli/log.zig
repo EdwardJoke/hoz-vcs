@@ -38,7 +38,12 @@ pub const Log = struct {
     }
 
     pub fn run(self: *Log, rev: ?[]const u8) !void {
-        const git_dir = Io.Dir.openDirAbsolute(self.io, ".git", .{}) catch {
+        const cwd_path = try std.process.currentPathAlloc(self.io, self.allocator);
+        defer self.allocator.free(cwd_path);
+        const git_dir_path = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{cwd_path});
+        defer self.allocator.free(git_dir_path);
+
+        const git_dir = Io.Dir.openDirAbsolute(self.io, git_dir_path, .{}) catch {
             try self.output.errorMessage("Not a hoz repository", .{});
             return;
         };
@@ -106,7 +111,9 @@ pub const Log = struct {
         const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
         defer self.allocator.free(author_str);
         try self.output.treeNode(.branch, 1, "Author: {s}", .{author_str});
-        try self.output.treeNode(.branch, 1, "Date:   {s}", .{self.formatDate(commit.author.timestamp)});
+        const date_str = self.formatDate(commit.author.timestamp);
+        defer self.allocator.free(date_str);
+        try self.output.treeNode(.branch, 1, "Date:   {s}", .{date_str});
         try self.output.sectionDivider();
         try self.output.hint("  {s}", .{self.firstLine(commit.message)});
     }
@@ -119,7 +126,9 @@ pub const Log = struct {
         const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
         defer self.allocator.free(author_str);
         try self.output.treeNode(.branch, 1, "Author: {s}", .{author_str});
-        try self.output.treeNode(.branch, 1, "Date:   {s}", .{self.formatDate(commit.author.timestamp)});
+        const date_str = self.formatDate(commit.author.timestamp);
+        defer self.allocator.free(date_str);
+        try self.output.treeNode(.branch, 1, "Date:   {s}", .{date_str});
         try self.output.sectionDivider();
 
         var lines = std.mem.splitScalar(u8, commit.message, '\n');
@@ -217,25 +226,32 @@ pub const Log = struct {
     }
 
     fn formatDate(self: *Log, timestamp: i64) []const u8 {
-        _ = self;
-
         const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(timestamp) };
-        const day = epoch.getEpochDay();
-        const year_day = day.calculateYearDay();
+        const epoch_day = epoch.getEpochDay();
+        const day_sec = epoch.getDaySeconds();
+        const year_day = epoch_day.calculateYearDay();
         const month_date = year_day.calculateMonthDay();
 
-        const months = [_][]const u8{
+        const weekday_names = [_][]const u8{ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+        const month_names = [_][]const u8{
             "Jan", "Feb", "Mar", "Apr", "May", "Jun",
             "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
         };
 
-        var buf: [32]u8 = undefined;
-        const result = std.fmt.bufPrint(buf[0..], "{s} {d}", .{
-            months[@intFromEnum(month_date.month)],
-            month_date.day_index + 1,
-        }) catch return "Unknown";
+        const wd_index: u3 = @intCast(@mod(epoch_day.day + 4, 7));
+        const hours = day_sec.getHoursIntoDay();
+        const mins = day_sec.getMinutesIntoHour();
+        const secs = day_sec.getSecondsIntoMinute();
 
-        return result;
+        return std.fmt.allocPrint(self.allocator, "{s} {s} {: >2} {:0>2}:{:0>2}:{:0>2} {} +0000", .{
+            weekday_names[wd_index],
+            month_names[@intFromEnum(month_date.month)],
+            month_date.day_index + 1,
+            hours,
+            mins,
+            secs,
+            @as(u32, @intCast(@mod(year_day.year, 10000))),
+        }) catch "Unknown";
     }
 
     fn firstLine(_: *Log, msg: []const u8) []const u8 {
