@@ -79,7 +79,7 @@ pub const Shortlog = struct {
 
         const head_trimmed = std.mem.trim(u8, head_content, " \t\r\n");
         const branch_name = if (std.mem.startsWith(u8, head_trimmed, "ref: refs/heads/"))
-            head_trimmed["ref: refs/heads/".len .. std.mem.indexOfScalar(u8, head_trimmed, '\n').?]
+            head_trimmed["ref: refs/heads/".len..std.mem.indexOfScalar(u8, head_trimmed, '\n').?]
         else
             "master";
 

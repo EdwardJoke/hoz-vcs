@@ -140,11 +140,11 @@ pub fn getSubmoduleStatus(
     defer work_walker.deinit();
 
     while (work_walker.next() catch return status) |entry| {
-            if (entry.kind == .file) {
-                status.has_untracked = true;
-                break;
-            }
+        if (entry.kind == .file) {
+            status.has_untracked = true;
+            break;
         }
+    }
 
     return status;
 }

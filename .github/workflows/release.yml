@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.16.0
+
+      - name: Build macOS aarch64
+        run: |
+          zig build -Dtarget=aarch64-macos -Doptimize=ReleaseSafe
+          mkdir -p asset
+          cp zig-out/bin/hoz asset/hoz-${{ github.ref_name }}-macos-aarch64
+
+      - name: Build macOS x86_64
+        run: |
+          zig build -Dtarget=x86_64-macos -Doptimize=ReleaseSafe
+          cp zig-out/bin/hoz asset/hoz-${{ github.ref_name }}-macos-x86_64
+
+      - name: Build Linux x86_64
+        run: |
+          zig build -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe
+          cp zig-out/bin/hoz asset/hoz-${{ github.ref_name }}-linux-x86_64
+
+      - name: Build Linux aarch64
+        run: |
+          zig build -Dtarget=aarch64-linux-gnu -Doptimize=ReleaseSafe
+          cp zig-out/bin/hoz asset/hoz-${{ github.ref_name }}-linux-aarch64
+
+      - name: Build Windows x86_64
+        run: |
+          zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseSafe
+          cp zig-out/bin/hoz.exe asset/hoz-${{ github.ref_name }}-windows-x86_64.exe
+
+      - name: Package assets
+        run: |
+          cd asset
+          tar czf hoz-${{ github.ref_name }}-macos-aarch64.tar.gz hoz-${{ github.ref_name }}-macos-aarch64
+          tar czf hoz-${{ github.ref_name }}-macos-x86_64.tar.gz hoz-${{ github.ref_name }}-macos-x86_64
+          tar czf hoz-${{ github.ref_name }}-linux-x86_64.tar.gz hoz-${{ github.ref_name }}-linux-x86_64
+          tar czf hoz-${{ github.ref_name }}-linux-aarch64.tar.gz hoz-${{ github.ref_name }}-linux-aarch64
+          zip hoz-${{ github.ref_name }}-windows-x86_64.zip hoz-${{ github.ref_name }}-windows-x86_64.exe
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: asset/*.tar.gz,asset/*.zip
+          generate_release_notes: true

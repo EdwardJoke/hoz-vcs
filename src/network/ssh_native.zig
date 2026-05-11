@@ -342,7 +342,8 @@ pub const NativeSshSession = struct {
                         responses[i] = prompts[i].response;
                     }
                     return 0;
-                }.kbdCallback,
+                }
+                .kbdCallback,
             },
         );
         return rc == 0;

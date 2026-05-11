@@ -98,7 +98,7 @@ test "RevLister list method exists" {
     var options = RevListOptions{};
     var lister = RevLister.init(std.testing.allocator, options);
 
-    const result = try lister.list(&.{ "HEAD" });
+    const result = try lister.list(&.{"HEAD"});
     try std.testing.expect(result.count >= 0);
 }
 

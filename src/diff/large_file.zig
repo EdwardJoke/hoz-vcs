@@ -368,13 +368,11 @@ pub const LargeFileDiffProcessor = struct {
 
         const old_start = if (edits[hunk_start].operation == .delete or edits[hunk_start].operation == .equal)
             if (edits[hunk_start].old_line > 0) edits[hunk_start].old_line - 1 else 1
-        else
-            if (hunk_start + 1 < edits.len) edits[hunk_start + 1].old_line else old_lines.len + 1;
+        else if (hunk_start + 1 < edits.len) edits[hunk_start + 1].old_line else old_lines.len + 1;
 
         const new_start = if (edits[hunk_start].operation == .insert or edits[hunk_start].operation == .equal)
             if (edits[hunk_start].new_line > 0) edits[hunk_start].new_line - 1 else 1
-        else
-            if (hunk_start + 1 < edits.len) edits[hunk_start + 1].new_line else new_lines.len + 1;
+        else if (hunk_start + 1 < edits.len) edits[hunk_start + 1].new_line else new_lines.len + 1;
 
         var lines = std.ArrayList(result.Line).init(self.allocator);
         errdefer lines.deinit();

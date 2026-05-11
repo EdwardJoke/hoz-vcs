@@ -354,7 +354,7 @@ test "AncestorResult structure" {
 }
 
 test "PathResult structure" {
-    const path = [_]oid_mod.OID{oid_mod.oidZero(), oid_mod.oidZero()};
+    const path = [_]oid_mod.OID{ oid_mod.oidZero(), oid_mod.oidZero() };
     const result = PathResult{ .path = &path, .distance = 2 };
     try std.testing.expect(result.distance == 2);
 }

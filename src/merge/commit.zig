@@ -44,10 +44,7 @@ pub const MergeCommitBuilder = struct {
         const tree_hex = tree_oid.toHex();
         const timestamp = std.time.timestamp();
 
-        const commit_content = try std.fmt.allocPrint(self.allocator,
-            "tree {s}\n{s}author Hoz User <hoz@example.com> {d} +0000\ncommitter Hoz User <hoz@example.com> {d} +0000\n\n{s}\n",
-            .{ &tree_hex, parent_oids.items, timestamp, timestamp, message }
-        );
+        const commit_content = try std.fmt.allocPrint(self.allocator, "tree {s}\n{s}author Hoz User <hoz@example.com> {d} +0000\ncommitter Hoz User <hoz@example.com> {d} +0000\n\n{s}\n", .{ &tree_hex, parent_oids.items, timestamp, timestamp, message });
         defer self.allocator.free(commit_content);
 
         const hash_bytes = sha1.sha1(commit_content);

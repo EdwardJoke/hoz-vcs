@@ -1,6 +1,6 @@
 default: ci
 
-version := "v0.5.2"
+version := "v0.5.3"
 
 # ── CI Pipeline (local equivalent of GitHub Actions) ──
 

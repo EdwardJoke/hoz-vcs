@@ -1,4 +1,4 @@
-# Project Purpose — v0.5.2
+# Project Purpose — v
 
 ## What
 Fix systemic bug patterns discovered through deep codebase analysis: incorrect `openDirAbsolute` usage with relative paths, memory leaks in `object_mod.parse()` callers, and dead code left over from the zlib refactor.

@@ -170,7 +170,7 @@ test "Cleaner clean method exists" {
     options.dry_run = true;
     const cleaner = Cleaner.init(std.testing.allocator, undefined, options);
 
-    const result = try cleaner.clean(&.{ "." });
+    const result = try cleaner.clean(&.{"."});
     try std.testing.expectEqual(@as(u32, 0), result.files_removed);
 }
 

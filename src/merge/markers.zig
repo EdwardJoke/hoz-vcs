@@ -188,7 +188,7 @@ pub const MarkerGenerator = struct {
             line_end = std.mem.indexOfScalar(u8, content[pos..], '\n') orelse content.len - pos;
             const region_end = pos + line_end + 1;
 
-            const ours_content = content[ours_start .. if (has_ancestor) ancestor_start - (sep_marker.len + 1) else theirs_start - (eq_marker.len + 1)];
+            const ours_content = content[ours_start..if (has_ancestor) ancestor_start - (sep_marker.len + 1) else theirs_start - (eq_marker.len + 1)];
             var trimmed_ours = ours_content;
             if (trimmed_ours.len > 0 and trimmed_ours[trimmed_ours.len - 1] == '\n') {
                 trimmed_ours = trimmed_ours[0 .. trimmed_ours.len - 1];
