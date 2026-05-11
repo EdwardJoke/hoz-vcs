@@ -149,7 +149,7 @@ fi
 chmod +x "${PREFIX}/hoz.tmp"
 mv -f "${PREFIX}/hoz.tmp" "${PREFIX}/hoz"
 
-INSTALLED=$(""${PREFIX}/hoz" --version 2>/dev/null || echo "(version unknown)"")
+INSTALLED=$("${PREFIX}/hoz" --version 2>/dev/null || echo "(version unknown)")
 
 echo ""
 echo "✓  hoz installed successfully!"
