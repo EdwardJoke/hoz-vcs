@@ -53,8 +53,9 @@ pub const Pull = struct {
     }
 
     fn findGitDir(self: *Pull) ![]const u8 {
-        // Simple approach: just check if .git exists and return .git path
-        const git_path = try std.fs.path.join(self.allocator, &.{ ".", ".git" });
+        const cwd_path = try std.process.currentPathAlloc(self.io, self.allocator);
+        defer self.allocator.free(cwd_path);
+        const git_path = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{cwd_path});
         std.Io.Dir.cwd().access(self.io, git_path, .{}) catch {
             self.allocator.free(git_path);
             return error.GitNotFound;

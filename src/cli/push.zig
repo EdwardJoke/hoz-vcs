@@ -31,19 +31,24 @@ pub const Push = struct {
     }
 
     pub fn run(self: *Push, remote: []const u8, refspec: ?[]const u8) !void {
+        const cwd_path = try std.process.currentPathAlloc(self.io, self.allocator);
+        defer self.allocator.free(cwd_path);
+        const git_dir_path = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{cwd_path});
+        defer self.allocator.free(git_dir_path);
+
         if (self.mirror) {
-            try self.runMirror(remote);
+            try self.runMirror(remote, git_dir_path);
         } else if (self.all) {
-            try self.runAll(remote);
+            try self.runAll(remote, git_dir_path);
         } else if (refspec) |rs| {
-            try self.runRefspec(remote, rs);
+            try self.runRefspec(remote, rs, git_dir_path);
         } else {
-            try self.runDefault(remote);
+            try self.runDefault(remote, git_dir_path);
         }
     }
 
-    fn runMirror(self: *Push, remote: []const u8) !void {
-        var pusher = push_mod.PushPusher.init(self.allocator, self.io, ".git", .{
+    fn runMirror(self: *Push, remote: []const u8, git_dir_path: []const u8) !void {
+        var pusher = push_mod.PushPusher.init(self.allocator, self.io, git_dir_path, .{
             .remote = remote,
             .force = self.force,
             .force_with_lease = self.force_with_lease,
@@ -59,8 +64,8 @@ pub const Push = struct {
         }
     }
 
-    fn runAll(self: *Push, remote: []const u8) !void {
-        var pusher = push_mod.PushPusher.init(self.allocator, self.io, ".git", .{
+    fn runAll(self: *Push, remote: []const u8, git_dir_path: []const u8) !void {
+        var pusher = push_mod.PushPusher.init(self.allocator, self.io, git_dir_path, .{
             .remote = remote,
             .force = self.force,
             .force_with_lease = self.force_with_lease,
@@ -76,11 +81,11 @@ pub const Push = struct {
         }
     }
 
-    fn runRefspec(self: *Push, remote: []const u8, refspec: []const u8) !void {
+    fn runRefspec(self: *Push, remote: []const u8, refspec: []const u8, git_dir_path: []const u8) !void {
         if (self.force) {
             try self.output.warningMessage("Force pushing to {s}", .{remote});
         }
-        var pusher = push_mod.PushPusher.init(self.allocator, self.io, ".git", .{
+        var pusher = push_mod.PushPusher.init(self.allocator, self.io, git_dir_path, .{
             .remote = remote,
             .refspecs = &.{refspec},
             .force = self.force,
@@ -97,8 +102,8 @@ pub const Push = struct {
         }
     }
 
-    fn runDefault(self: *Push, remote: []const u8) !void {
-        var pusher = push_mod.PushPusher.init(self.allocator, self.io, ".git", .{
+    fn runDefault(self: *Push, remote: []const u8, git_dir_path: []const u8) !void {
+        var pusher = push_mod.PushPusher.init(self.allocator, self.io, git_dir_path, .{
             .remote = remote,
             .force = self.force,
             .force_with_lease = self.force_with_lease,
