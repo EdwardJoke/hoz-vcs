@@ -10,6 +10,8 @@ const head_mod = @import("../commit/head.zig");
 const Output = @import("output.zig").Output;
 const OutputStyle = @import("output.zig").OutputStyle;
 const TreeKind = @import("output.zig").TreeKind;
+const RefStore = @import("../ref/store.zig").RefStore;
+const Ref = @import("../ref/ref.zig").Ref;
 
 pub const Log = struct {
     allocator: std.mem.Allocator,
@@ -64,14 +66,76 @@ pub const Log = struct {
             return;
         }
 
+        // Load branch info for decorations
+        var branch_map = try self.loadBranchMap(&git_dir);
+        defer {
+            var it = branch_map.iterator();
+            while (it.next()) |entry| {
+                self.allocator.free(entry.value_ptr.*);
+            }
+            branch_map.deinit();
+        }
+
+        // Get current branch name
+        const head_ref = head_mod.readHeadRef(&git_dir, self.io, self.allocator);
+        defer if (head_ref) |hr| self.allocator.free(hr);
+        const current_branch = if (head_ref) |hr|
+            if (std.mem.startsWith(u8, hr, "refs/heads/")) hr["refs/heads/".len..] else hr
+        else
+            null;
+
         var visited = std.StringHashMap(void).init(self.allocator);
         defer visited.deinit();
 
         try self.output.section("Commit History");
-        try self.walkCommits(&git_dir, oid, &visited, 0);
+        try self.walkCommits(&git_dir, oid, &visited, 0, &branch_map, current_branch);
     }
 
-    fn walkCommits(self: *Log, git_dir: *const Io.Dir, oid: OID, visited: *std.StringHashMap(void), depth: usize) !void {
+    /// Load a map from OID hex -> branch name for decorating commits
+    fn loadBranchMap(self: *Log, git_dir: *const Io.Dir) !std.StringHashMap([]const u8) {
+        var map = std.StringHashMap([]const u8).init(self.allocator);
+        errdefer map.deinit();
+
+        // Read all refs under refs/heads/
+        var refs_dir = git_dir.openDir(self.io, "refs/heads", .{}) catch return map;
+        defer refs_dir.close(self.io);
+
+        self.walkRefsDir(&refs_dir, "refs/heads", &map) catch {};
+
+        return map;
+    }
+
+    fn walkRefsDir(self: *Log, dir: *const Io.Dir, prefix: []const u8, map: *std.StringHashMap([]const u8)) !void {
+        var iter = dir.iterate();
+        while (iter.next(self.io) catch return) |entry| {
+            if (entry.kind == .directory) {
+                var sub_dir = dir.openDir(self.io, entry.name, .{}) catch continue;
+                defer sub_dir.close(self.io);
+                const new_prefix = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ prefix, entry.name });
+                defer self.allocator.free(new_prefix);
+                try self.walkRefsDir(&sub_dir, new_prefix, map);
+            } else if (entry.kind == .file) {
+                const ref_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ prefix, entry.name });
+                defer self.allocator.free(ref_path);
+
+                const content = dir.readFileAlloc(self.io, entry.name, self.allocator, .limited(256)) catch continue;
+                defer self.allocator.free(content);
+
+                const trimmed = std.mem.trim(u8, content, " \t\r\n");
+                if (trimmed.len >= 40) {
+                    const oid_hex = try self.allocator.dupe(u8, trimmed[0..40]);
+                    const branch_name = try self.allocator.dupe(u8, entry.name);
+                    // If already exists, skip (first branch wins)
+                    _ = map.put(oid_hex, branch_name) catch {
+                        self.allocator.free(oid_hex);
+                        self.allocator.free(branch_name);
+                    };
+                }
+            }
+        }
+    }
+
+    fn walkCommits(self: *Log, git_dir: *const Io.Dir, oid: OID, visited: *std.StringHashMap(void), depth: usize, branch_map: *const std.StringHashMap([]const u8), current_branch: ?[]const u8) !void {
         if (self.count) |c| {
             if (depth >= c) return;
         }
@@ -87,27 +151,47 @@ pub const Log = struct {
         };
         defer self.allocator.free(obj_data);
 
-        const commit = CommitObj.parse(self.allocator, obj_data) catch {
+        var commit = CommitObj.parse(self.allocator, obj_data) catch {
             return;
         };
+        defer commit.deinit(self.allocator);
+
+        // Build decorations string
+        const decorations = try self.buildDecorations(hex_str, branch_map, current_branch);
+        defer if (decorations) |d| self.allocator.free(d);
 
         switch (self.format) {
-            .short => try self.printShort(&commit),
-            .medium => try self.printMedium(&commit),
-            .full => try self.printFull(&commit),
-            .oneline => try self.printOneline(&commit),
+            .short => try self.printShort(&commit, hex_str, decorations),
+            .medium => try self.printMedium(&commit, hex_str, decorations),
+            .full => try self.printFull(&commit, hex_str, decorations),
+            .oneline => try self.printOneline(&commit, hex_str, decorations),
         }
 
         for (commit.parents) |parent| {
-            try self.walkCommits(git_dir, parent, visited, depth + 1);
+            try self.walkCommits(git_dir, parent, visited, depth + 1, branch_map, current_branch);
         }
     }
 
-    fn printShort(self: *Log, commit: *const CommitObj) !void {
-        const hex = commit.tree.toHex();
-        const commit_label = try std.fmt.allocPrint(self.allocator, "commit {s}", .{hex[0..7]});
-        defer self.allocator.free(commit_label);
-        try self.output.groupHeader(commit_label, null);
+    fn buildDecorations(self: *Log, oid_hex: []const u8, branch_map: *const std.StringHashMap([]const u8), current_branch: ?[]const u8) !?[]const u8 {
+        const branch_name = branch_map.get(oid_hex);
+        if (branch_name == null) return null;
+
+        const is_head = if (current_branch) |cb| std.mem.eql(u8, cb, branch_name.?) else false;
+
+        if (is_head) {
+            return try std.fmt.allocPrint(self.allocator, " (HEAD -> {s})", .{branch_name.?});
+        } else {
+            return try std.fmt.allocPrint(self.allocator, " ({s})", .{branch_name.?});
+        }
+    }
+
+    fn printShort(self: *Log, commit: *const CommitObj, oid_hex: []const u8, decorations: ?[]const u8) !void {
+        const label = if (decorations) |d|
+            try std.fmt.allocPrint(self.allocator, "commit {s}{s}", .{ oid_hex[0..7], d })
+        else
+            try std.fmt.allocPrint(self.allocator, "commit {s}", .{oid_hex[0..7]});
+        defer self.allocator.free(label);
+        try self.output.groupHeader(label, null);
         const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
         defer self.allocator.free(author_str);
         try self.output.treeNode(.branch, 1, "Author: {s}", .{author_str});
@@ -118,11 +202,13 @@ pub const Log = struct {
         try self.output.hint("  {s}", .{self.firstLine(commit.message)});
     }
 
-    fn printMedium(self: *Log, commit: *const CommitObj) !void {
-        const hex = commit.tree.toHex();
-        const commit_label = try std.fmt.allocPrint(self.allocator, "commit {s}", .{hex[0..7]});
-        defer self.allocator.free(commit_label);
-        try self.output.groupHeader(commit_label, null);
+    fn printMedium(self: *Log, commit: *const CommitObj, oid_hex: []const u8, decorations: ?[]const u8) !void {
+        const label = if (decorations) |d|
+            try std.fmt.allocPrint(self.allocator, "commit {s}{s}", .{ oid_hex[0..7], d })
+        else
+            try std.fmt.allocPrint(self.allocator, "commit {s}", .{oid_hex[0..7]});
+        defer self.allocator.free(label);
+        try self.output.groupHeader(label, null);
         const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
         defer self.allocator.free(author_str);
         try self.output.treeNode(.branch, 1, "Author: {s}", .{author_str});
@@ -142,11 +228,14 @@ pub const Log = struct {
         }
     }
 
-    fn printFull(self: *Log, commit: *const CommitObj) !void {
+    fn printFull(self: *Log, commit: *const CommitObj, oid_hex: []const u8, decorations: ?[]const u8) !void {
         const tree_hex = commit.tree.toHex();
-        const commit_label = try std.fmt.allocPrint(self.allocator, "commit {s}", .{tree_hex[0..]});
-        defer self.allocator.free(commit_label);
-        try self.output.groupHeader(commit_label, null);
+        const label = if (decorations) |d|
+            try std.fmt.allocPrint(self.allocator, "commit {s}{s}", .{ oid_hex, d })
+        else
+            try std.fmt.allocPrint(self.allocator, "commit {s}", .{oid_hex});
+        defer self.allocator.free(label);
+        try self.output.groupHeader(label, null);
         try self.output.treeNode(.branch, 1, "Tree: {s}", .{tree_hex[0..]});
 
         for (commit.parents) |p| {
@@ -175,10 +264,13 @@ pub const Log = struct {
         try self.output.hint("  {s}", .{commit.message});
     }
 
-    fn printOneline(self: *Log, commit: *const CommitObj) !void {
-        const hex = commit.tree.toHex();
+    fn printOneline(self: *Log, commit: *const CommitObj, oid_hex: []const u8, decorations: ?[]const u8) !void {
         const subject = self.firstLine(commit.message);
-        try self.output.hint("→ {s} {s}", .{ hex[0..7], subject });
+        if (decorations) |d| {
+            try self.output.hint("→ {s}{s} {s}", .{ oid_hex[0..7], d, subject });
+        } else {
+            try self.output.hint("→ {s} {s}", .{ oid_hex[0..7], subject });
+        }
     }
 
     fn resolveRef(self: *Log, git_dir: *const Io.Dir, refspec: []const u8) !?OID {

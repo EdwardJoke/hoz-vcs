@@ -44,9 +44,10 @@ pub const RestoreStaged = struct {
         };
         defer self.allocator.free(raw_data);
 
-        const commit = Commit.parse(self.allocator, raw_data) catch {
+        var commit = Commit.parse(self.allocator, raw_data) catch {
             return error.InvalidCommit;
         };
+        defer commit.deinit(self.allocator);
 
         return commit.tree;
     }

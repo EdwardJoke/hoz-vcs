@@ -50,11 +50,26 @@ pub const Compressor = struct {
         }
     }
 
+    fn reverseBits(value: u32, num_bits: u8) u32 {
+        var result: u32 = 0;
+        var v = value;
+        var i: u8 = 0;
+        while (i < num_bits) : (i += 1) {
+            result = (result << 1) | (v & 1);
+            v >>= 1;
+        }
+        return result;
+    }
+
+    fn writeHuffmanCode(self: *Compressor, code: u32, num_bits: u8) void {
+        self.writeBits(reverseBits(code, num_bits), num_bits);
+    }
+
     fn writeLiteral(self: *Compressor, byte: u8) void {
         if (byte <= 143) {
-            self.writeBits(0x30 + byte, 8);
+            self.writeHuffmanCode(0x30 + byte, 8);
         } else {
-            self.writeBits(@as(u32, 0x190) + byte - 144, 9);
+            self.writeHuffmanCode(@as(u32, 0x190) + byte - 144, 9);
         }
     }
 
@@ -78,9 +93,9 @@ pub const Compressor = struct {
         }
 
         if (code >= 257 and code <= 279) {
-            self.writeBits(code, 7);
+            self.writeHuffmanCode(code - 256, 7);
         } else if (code >= 280 and code <= 285) {
-            self.writeBits(@as(u32, code - 88), 8);
+            self.writeHuffmanCode(@as(u32, code - 88), 8);
         } else {
             unreachable;
         }
@@ -93,26 +108,21 @@ pub const Compressor = struct {
         const dist_codes_base = [_]u16{ 1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577 };
         const dist_codes_extra = [_]u5{ 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13 };
 
+        const capped_dist = @min(dist, 24577);
         var code: u5 = 0;
         var extra_bits: u5 = 0;
         var extra_value: u16 = 0;
 
         for (dist_codes_base, 0..) |base, i| {
-            if (dist == base or (i > 0 and dist > dist_codes_base[i - 1] and dist <= base)) {
+            if (capped_dist >= base and (i + 1 == dist_codes_base.len or capped_dist < dist_codes_base[i + 1])) {
                 code = @intCast(i);
                 extra_bits = dist_codes_extra[i];
-                extra_value = dist - base;
-                break;
-            }
-            if (i == dist_codes_base.len - 1) {
-                code = 29;
-                extra_bits = dist_codes_extra[29];
-                extra_value = dist - base;
+                extra_value = capped_dist - base;
                 break;
             }
         }
 
-        self.writeBits(code, 5);
+        self.writeHuffmanCode(code, 5);
         if (extra_bits > 0) {
             self.writeBits(extra_value, extra_bits);
         }
@@ -153,7 +163,7 @@ pub const Compressor = struct {
         self.buf.clearRetainingCapacity();
 
         self.writeBits(1, 1);
-        self.writeBits(1, 1);
+        self.writeBits(1, 2);
 
         var pos: usize = 0;
         while (pos < data.len) {
@@ -167,7 +177,7 @@ pub const Compressor = struct {
             }
         }
 
-        self.writeBits(256, 7);
+        self.writeHuffmanCode(0, 7);
         self.flushBits();
 
         const result = try self.allocator.dupe(u8, self.buf.items);
@@ -285,4 +295,43 @@ test "adler32 abc" {
     const result = adler32("abc");
     const expected: u32 = 0x024D0127;
     try std.testing.expectEqual(expected, result);
+}
+
+test "deflate fixed AAAA roundtrip" {
+    const allocator = std.testing.allocator;
+    const original = "AAAA";
+    const compressed = try compressFixed(original, allocator);
+    defer allocator.free(compressed);
+    const decompressed = try zlibDecompress(compressed, allocator);
+    defer allocator.free(decompressed);
+    try std.testing.expectEqualSlices(u8, original, decompressed);
+}
+
+test "deflate fixed git blob roundtrip" {
+    const allocator = std.testing.allocator;
+    const original = "blob 10\x00hello hoz\n";
+    const compressed = try compressFixed(original, allocator);
+    defer allocator.free(compressed);
+    const decompressed = try zlibDecompress(compressed, allocator);
+    defer allocator.free(decompressed);
+    try std.testing.expectEqualSlices(u8, original, decompressed);
+}
+
+test "deflate fixed repeat roundtrip" {
+    const allocator = std.testing.allocator;
+    const original = "ABCDEFGH" ** 100;
+    const compressed = try compressFixed(original, allocator);
+    defer allocator.free(compressed);
+    const decompressed = try zlibDecompress(compressed, allocator);
+    defer allocator.free(decompressed);
+    try std.testing.expectEqualSlices(u8, original, decompressed);
+}
+
+fn zlibDecompress(data: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    var in: std.Io.Reader = .fixed(data);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    errdefer aw.deinit();
+    var decomp = std.compress.flate.Decompress.init(&in, .raw, &.{});
+    _ = try decomp.reader.streamRemaining(&aw.writer);
+    return aw.toOwnedSlice();
 }

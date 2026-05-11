@@ -158,7 +158,8 @@ pub const RevList = struct {
             }
 
             const commit_data = self.object_store.get(&oid_str) orelse return error.ObjectNotFound;
-            const commit = try Commit.parse(self.allocator, commit_data);
+            var commit = try Commit.parse(self.allocator, commit_data);
+            defer commit.deinit(self.allocator);
 
             try commits.append(self.allocator, current_oid);
 
@@ -187,7 +188,8 @@ pub const RevList = struct {
         @memcpy(&oid_str, &oid);
 
         const commit_data = self.object_store.get(&oid_str) orelse return error.ObjectNotFound;
-        const commit = try Commit.parse(self.allocator, commit_data);
+        var commit = try Commit.parse(self.allocator, commit_data);
+        defer commit.deinit(self.allocator);
 
         // Print OID
         try self.writer.print("{s}", .{&oid_str});

@@ -48,6 +48,8 @@ pub const Identity = struct {
     }
 
     /// Parse identity from string (e.g., "John Doe <john@example.com> 1234567890 +0000")
+    /// Caller must ensure the returned Identity's name/email slices outlive the input str,
+    /// or use parseAlloc to copy the strings.
     pub fn parse(str: []const u8) !Identity {
         const email_start = std.mem.indexOf(u8, str, "<") orelse return error.InvalidIdentity;
         var name = str[0..email_start];
@@ -83,6 +85,20 @@ pub const Identity = struct {
             .timestamp = timestamp,
             .timezone = tz_parsed,
         };
+    }
+
+    /// Parse identity and copy name/email strings using the allocator
+    pub fn parseAlloc(str: []const u8, allocator: std.mem.Allocator) !Identity {
+        var id = try parse(str);
+        id.name = try allocator.dupe(u8, id.name);
+        id.email = try allocator.dupe(u8, id.email);
+        return id;
+    }
+
+    /// Free duplicated name/email strings
+    pub fn deinit(self: Identity, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
+        allocator.free(self.email);
     }
 
     /// Parse timezone string like "+0000" or "-0530"
@@ -240,10 +256,10 @@ pub const Commit = struct {
                 try parents.append(allocator, try oid_mod.OID.fromHex(hex));
             } else if (std.mem.startsWith(u8, line, "author ")) {
                 const identity_str = line[7..];
-                author_opt = try Identity.parse(identity_str);
+                author_opt = try Identity.parseAlloc(identity_str, allocator);
             } else if (std.mem.startsWith(u8, line, "committer ")) {
                 const identity_str = line[10..];
-                committer_opt = try Identity.parse(identity_str);
+                committer_opt = try Identity.parseAlloc(identity_str, allocator);
             } else if (std.mem.startsWith(u8, line, "gpgsig ")) {
                 gpg_sig_opt = line[7..];
             }
@@ -252,22 +268,17 @@ pub const Commit = struct {
         const tree = tree_opt orelse return error.MissingTree;
         const author = author_opt orelse return error.MissingAuthor;
         const committer = committer_opt orelse return error.MissingCommitter;
+        errdefer {
+            author.deinit(allocator);
+            committer.deinit(allocator);
+        }
 
         // Get message (everything after blank line)
         var message: []const u8 = "";
         if (message_start) |start| {
-            // Re-split to get remaining content
-            var msg_iter = std.mem.splitScalar(u8, obj.data, '\n');
-            var count: usize = 0;
-            while (msg_iter.next()) |l| {
-                if (count >= start) {
-                    if (message.len == 0) {
-                        message = l;
-                    } else {
-                        message = try std.mem.concat(allocator, u8, &[2][]const u8{ message, l });
-                    }
-                }
-                count += 1;
+            // start is the byte offset after the blank line
+            if (start < obj.data.len) {
+                message = try allocator.dupe(u8, obj.data[start..]);
             }
         }
 
@@ -279,6 +290,16 @@ pub const Commit = struct {
             .message = message,
             .gpg_signature = gpg_sig_opt,
         };
+    }
+
+    /// Free memory allocated during parsing
+    pub fn deinit(self: Commit, allocator: std.mem.Allocator) void {
+        allocator.free(self.parents);
+        self.author.deinit(allocator);
+        self.committer.deinit(allocator);
+        if (self.message.len > 0) {
+            allocator.free(self.message);
+        }
     }
 };
 

@@ -434,14 +434,14 @@ pub const Index = struct {
         const checksum_offset = list.items.len;
         try list.appendSlice(self.allocator, &[1]u8{0} ** 20);
 
-        // Calculate and write checksum
-        const hash_bytes = sha1.sha1(list.items[0..checksum_offset]);
-        @memcpy(list.items[checksum_offset..], &hash_bytes);
-
-        // Update entry count
+        // Update entry count BEFORE computing checksum
         var count_buffer: [4]u8 = undefined;
         std.mem.writeInt(u32, &count_buffer, @intCast(self.entries.items.len), .big);
         @memcpy(list.items[count_offset .. count_offset + 4], &count_buffer);
+
+        // Calculate and write checksum (must be after all fields are finalized)
+        const hash_bytes = sha1.sha1(list.items[0..checksum_offset]);
+        @memcpy(list.items[checksum_offset..], &hash_bytes);
 
         return list.toOwnedSlice(self.allocator);
     }

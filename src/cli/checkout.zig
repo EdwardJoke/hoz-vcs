@@ -58,14 +58,11 @@ pub const Checkout = struct {
         };
         defer self.allocator.free(commit_data);
 
-        const commit = Commit.parse(self.allocator, commit_data) catch |err| {
+        var commit = Commit.parse(self.allocator, commit_data) catch |err| {
             try self.output.errorMessage("Failed to parse commit: {}", .{err});
             return;
         };
-        defer {
-            self.allocator.free(commit.parents);
-            if (commit.message.len > 0) self.allocator.free(commit.message);
-        }
+        defer commit.deinit(self.allocator);
 
         if (isBranchName(target)) {
             head_mgr.setBranch(target) catch |err| {
