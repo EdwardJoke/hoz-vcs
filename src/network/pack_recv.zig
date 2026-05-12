@@ -508,12 +508,12 @@ pub fn storePackObject(allocator: std.mem.Allocator, io: Io, git_dir: []const u8
     defer allocator.free(obj_dir);
 
     const cwd = Io.Dir.cwd();
-    cwd.createDirPath(io, obj_dir) catch {};
+    try cwd.createDirPath(io, obj_dir);
 
     const obj_path = try std.mem.concat(allocator, u8, &.{ obj_dir, "/", rest });
     defer allocator.free(obj_path);
 
-    cwd.writeFile(io, .{ .sub_path = obj_path, .data = object_data }) catch {};
+    try cwd.writeFile(io, .{ .sub_path = obj_path, .data = object_data });
 }
 
 pub fn isPackObjectStored(allocator: std.mem.Allocator, io: Io, git_dir: []const u8, oid: []const u8) bool {
@@ -539,12 +539,12 @@ pub fn savePackFile(allocator: std.mem.Allocator, io: Io, git_dir: []const u8, p
     defer allocator.free(pack_dir);
 
     const cwd = Io.Dir.cwd();
-    cwd.createDirPath(io, pack_dir) catch {};
+    try cwd.createDirPath(io, pack_dir);
 
     const pack_path = try std.mem.concat(allocator, u8, &.{ pack_dir, "/pack-", pack_hash, ".pack" });
     defer allocator.free(pack_path);
 
-    cwd.writeFile(io, .{ .sub_path = pack_path, .data = pack_data }) catch {};
+    try cwd.writeFile(io, .{ .sub_path = pack_path, .data = pack_data });
 }
 
 pub fn generatePackIndex(allocator: std.mem.Allocator, io: Io, git_dir: []const u8, pack_hash: []const u8) !void {
@@ -588,7 +588,7 @@ pub fn generatePackIndex(allocator: std.mem.Allocator, io: Io, git_dir: []const 
     const idx_path = try std.mem.concat(allocator, u8, &.{ git_dir, "/objects/pack/pack-", pack_hash, ".idx" });
     defer allocator.free(idx_path);
 
-    cwd.writeFile(io, .{ .sub_path = idx_path, .data = index_data }) catch {};
+    try cwd.writeFile(io, .{ .sub_path = idx_path, .data = index_data });
 }
 
 pub fn registerPackInInfoPacks(allocator: std.mem.Allocator, io: Io, git_dir: []const u8, pack_hash: []const u8) !void {
@@ -596,7 +596,7 @@ pub fn registerPackInInfoPacks(allocator: std.mem.Allocator, io: Io, git_dir: []
     defer allocator.free(info_dir);
 
     const cwd = Io.Dir.cwd();
-    cwd.createDirPath(io, info_dir) catch {};
+    try cwd.createDirPath(io, info_dir);
 
     const packs_path = try std.mem.concat(allocator, u8, &.{ info_dir, "/packs" });
     defer allocator.free(packs_path);
@@ -604,7 +604,7 @@ pub fn registerPackInInfoPacks(allocator: std.mem.Allocator, io: Io, git_dir: []
     const entry = try std.fmt.allocPrint(allocator, "P {s}\n", .{pack_hash});
     defer allocator.free(entry);
 
-    cwd.writeFile(io, .{ .sub_path = packs_path, .data = entry }) catch {};
+    try cwd.writeFile(io, .{ .sub_path = packs_path, .data = entry });
 }
 
 test "PackRecvOptions default values" {

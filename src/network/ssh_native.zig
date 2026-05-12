@@ -219,6 +219,8 @@ pub const NativeSshSession = struct {
         if (self.authenticated) return;
 
         const username = self.opts.username orelse try self.getDefaultUsername();
+        const username_owned = self.opts.username == null;
+        defer if (username_owned) self.allocator.free(username);
 
         const auth_methods = c.libssh2_userauth_list(self.session.?, username.ptr, @as(c.uint, @intCast(username.len)));
         if (auth_methods == null) {
@@ -397,7 +399,7 @@ pub const NativeSshSession = struct {
             if (n == c.LIBSSH2_ERROR_EAGAIN) continue;
             if (n < 0) return NativeSshError.ReadFailed;
             if (n == 0) break;
-            output.appendSlice(self.allocator, buf[0..@as(usize, @intCast(n))]) catch {};
+            output.appendSlice(self.allocator, buf[0..@as(usize, @intCast(n))]) catch |err| return err;
         }
 
         while (true) {
@@ -449,7 +451,7 @@ pub const NativeSshSession = struct {
             if (n == c.LIBSSH2_ERROR_EAGAIN) continue;
             if (n < 0) return NativeSshError.ReadFailed;
             if (n == 0) break;
-            output.appendSlice(self.allocator, buf[0..@as(usize, @intCast(n))]) catch {};
+            output.appendSlice(self.allocator, buf[0..@as(usize, @intCast(n))]) catch |err| return err;
         }
 
         while (true) {

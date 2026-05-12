@@ -135,7 +135,10 @@ pub const Add = struct {
         const obj_path = try std.fmt.allocPrint(self.allocator, "objects/{s}/{s}", .{ hex[0..2], hex[2..] });
         defer self.allocator.free(obj_path);
 
-        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch return error.WriteObjectFailed;
+        git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch |err| {
+            std.log.err("failed to write object {s}: {s}", .{ hex, @errorName(err) });
+            return error.WriteObjectFailed;
+        };
 
         const oid_hex = try self.allocator.dupe(u8, &hex);
         return oid_hex;
@@ -198,7 +201,7 @@ pub const Add = struct {
             };
             defer self.allocator.free(serialized);
 
-            git_dir.writeFile(self.io, .{ .sub_path = "index", .data = serialized }) catch {};
+            try git_dir.writeFile(self.io, .{ .sub_path = "index", .data = serialized });
         } else {
             var fresh_idx = Index.init(self.allocator);
             const owned_name = try self.allocator.dupe(u8, path);
@@ -207,12 +210,12 @@ pub const Add = struct {
 
             const serialized = fresh_idx.serialize() catch {
                 fresh_idx.deinit();
-                return;
+                return error.IndexSerializeFailed;
             };
             defer self.allocator.free(serialized);
             fresh_idx.deinit();
 
-            git_dir.writeFile(self.io, .{ .sub_path = "index", .data = serialized }) catch {};
+            try git_dir.writeFile(self.io, .{ .sub_path = "index", .data = serialized });
         }
     }
 };

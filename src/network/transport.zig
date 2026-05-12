@@ -292,15 +292,27 @@ pub const Transport = struct {
 
         const ref_dirs = [_][]const u8{ "refs/heads", "refs/tags", "refs/remotes" };
         for (ref_dirs) |ref_dir| {
-            var dir = git_dir.openDir(self.io, ref_dir, .{ .iterate = true }) catch continue;
+            var dir = git_dir.openDir(self.io, ref_dir, .{ .iterate = true }) catch |err| {
+                std.log.warn("failed to open ref dir {s}: {s}", .{ ref_dir, @errorName(err) });
+                continue;
+            };
             defer dir.close(self.io);
-            var walker = dir.walk(self.allocator) catch continue;
+            var walker = dir.walk(self.allocator) catch |err| {
+                std.log.warn("failed to walk ref dir {s}: {s}", .{ ref_dir, @errorName(err) });
+                continue;
+            };
             defer walker.deinit();
-            while (walker.next(self.io) catch null) |entry| {
+            while (walker.next(self.io) catch |err| {
+                std.log.warn("failed to iterate ref dir {s}: {s}", .{ ref_dir, @errorName(err) });
+                break;
+            }) |entry| {
                 if (entry.kind != .file) continue;
                 const full_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ ref_dir, entry.path });
                 defer self.allocator.free(full_path);
-                const content = git_dir.readFileAlloc(self.io, full_path, self.allocator, .limited(256)) catch continue;
+                const content = git_dir.readFileAlloc(self.io, full_path, self.allocator, .limited(256)) catch |err| {
+                    std.log.warn("failed to read ref {s}: {s}", .{ full_path, @errorName(err) });
+                    continue;
+                };
                 defer self.allocator.free(content);
                 const oid_str = std.mem.trim(u8, content, " \t\r\n");
                 if (oid_str.len >= 40 and !std.mem.startsWith(u8, oid_str, "ref:")) {
@@ -311,7 +323,10 @@ pub const Transport = struct {
             }
         }
 
-        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch "";
+        const head_content = git_dir.readFileAlloc(self.io, "HEAD", self.allocator, .limited(256)) catch |err| blk: {
+            std.log.warn("failed to read HEAD: {s}", .{@errorName(err)});
+            break :blk "";
+        };
         defer if (head_content.len > 0) self.allocator.free(head_content);
         const head_trimmed = std.mem.trim(u8, head_content, " \t\r\n");
         if (head_trimmed.len >= 40 and !std.mem.startsWith(u8, head_trimmed, "ref:")) {
@@ -320,7 +335,10 @@ pub const Transport = struct {
             try result_list.append(self.allocator, .{ .name = owned_name, .oid = owned_oid });
         }
 
-        const packed_content = git_dir.readFileAlloc(self.io, "packed-refs", self.allocator, .limited(1024 * 1024)) catch "";
+        const packed_content = git_dir.readFileAlloc(self.io, "packed-refs", self.allocator, .limited(1024 * 1024)) catch |err| blk: {
+            std.log.warn("failed to read packed-refs: {s}", .{@errorName(err)});
+            break :blk "";
+        };
         defer if (packed_content.len > 0) self.allocator.free(packed_content);
         if (packed_content.len > 0) {
             var line_iter = std.mem.splitSequence(u8, packed_content, "\n");

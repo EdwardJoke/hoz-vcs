@@ -129,7 +129,7 @@ test "object reader streaming" {
     const file = try tmp.dir.createFile("test.obj", .{});
     defer file.close();
 
-    _ = file.writeAll("blob 6\x00Hello\n") catch {};
+    try file.writeAll("blob 6\x00Hello\n");
 
     var reader = try ObjectReader.fromFile(allocator, file, .{});
     defer reader.deinit();

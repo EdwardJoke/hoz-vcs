@@ -170,18 +170,30 @@ pub const Checkout = struct {
             switch (mode_val) {
                 0o040000 => {
                     Io.Dir.cwd().createDirPath(self.io, full_path) catch {};
-                    const subtree_data = self.readObjectData(git_dir, entry_oid) catch continue;
+                    const subtree_data = self.readObjectData(git_dir, entry_oid) catch |err| {
+                        std.log.warn("checkout: failed to read subtree object {}: {s}", .{ entry_oid, @errorName(err) });
+                        continue;
+                    };
                     defer self.allocator.free(subtree_data);
-                    const sub_obj = object_mod.parse(subtree_data, self.allocator) catch continue;
+                    const sub_obj = object_mod.parse(subtree_data, self.allocator) catch |err| {
+                        std.log.warn("checkout: failed to parse subtree object {}: {s}", .{ entry_oid, @errorName(err) });
+                        continue;
+                    };
                     defer sub_obj.deinit(self.allocator);
                     if (sub_obj.obj_type == .tree) {
                         try self.applyTreeEntries(sub_obj.data, full_path, git_dir);
                     }
                 },
                 0o100644, 0o100755 => {
-                    const blob_data = self.readObjectData(git_dir, entry_oid) catch continue;
+                    const blob_data = self.readObjectData(git_dir, entry_oid) catch |err| {
+                        std.log.warn("checkout: failed to read blob object {}: {s}", .{ entry_oid, @errorName(err) });
+                        continue;
+                    };
                     defer self.allocator.free(blob_data);
-                    const blob_obj = object_mod.parse(blob_data, self.allocator) catch continue;
+                    const blob_obj = object_mod.parse(blob_data, self.allocator) catch |err| {
+                        std.log.warn("checkout: failed to parse blob object {}: {s}", .{ entry_oid, @errorName(err) });
+                        continue;
+                    };
                     defer blob_obj.deinit(self.allocator);
                     if (blob_obj.obj_type == .blob) {
                         const cwd = Io.Dir.cwd();

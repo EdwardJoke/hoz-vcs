@@ -9,8 +9,15 @@ pub const WorktreeRemover = struct {
         return .{ .allocator = allocator, .repo_path = repo_path };
     }
 
+    fn resolveRepoPath(self: *WorktreeRemover) ![]const u8 {
+        if (std.fs.path.isAbsolute(self.repo_path)) return self.repo_path;
+        return std.fs.realpathAlloc(self.allocator, self.repo_path);
+    }
+
     pub fn remove(self: *WorktreeRemover, name: []const u8, force: bool) !void {
-        const git_dir = try std.fs.openDirAbsolute(self.repo_path, .{});
+        const abs_path = try self.resolveRepoPath();
+        defer if (!std.fs.path.isAbsolute(self.repo_path)) self.allocator.free(abs_path);
+        const git_dir = try std.fs.openDirAbsolute(abs_path, .{});
         defer git_dir.close();
 
         const wt_dir = try git_dir.openDir("worktrees", .{});
@@ -28,7 +35,9 @@ pub const WorktreeRemover = struct {
     }
 
     pub fn cleanupRefs(self: *WorktreeRemover, name: []const u8) !void {
-        const git_dir = try std.fs.openDirAbsolute(self.repo_path, .{});
+        const abs_path = try self.resolveRepoPath();
+        defer if (!std.fs.path.isAbsolute(self.repo_path)) self.allocator.free(abs_path);
+        const git_dir = try std.fs.openDirAbsolute(abs_path, .{});
         defer git_dir.close();
 
         const head = try std.fmt.allocPrint(self.allocator, "refs/remotes/origin/{s}", .{name});

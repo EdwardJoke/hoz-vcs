@@ -9,11 +9,18 @@ pub const WorktreePruner = struct {
         return .{ .allocator = allocator, .repo_path = repo_path };
     }
 
+    fn resolveRepoPath(self: *WorktreePruner) ![]const u8 {
+        if (std.fs.path.isAbsolute(self.repo_path)) return self.repo_path;
+        return std.fs.realpathAlloc(self.allocator, self.repo_path);
+    }
+
     pub fn prune(self: *WorktreePruner) !void {
-        const git_dir = try std.fs.openDirAbsolute(self.repo_path, .{});
+        const abs_path = try self.resolveRepoPath();
+        defer if (!std.fs.path.isAbsolute(self.repo_path)) self.allocator.free(abs_path);
+        const git_dir = try std.fs.openDirAbsolute(abs_path, .{});
         defer git_dir.close();
 
-        const worktrees_dir = git_dir.openDir("worktrees", .{} catch |_| return);
+        const worktrees_dir = git_dir.openDir("worktrees", .{}) catch return;
         defer worktrees_dir.close();
 
         var iter = worktrees_dir.iterate();
@@ -25,7 +32,6 @@ pub const WorktreePruner = struct {
     }
 
     fn pruneWorktree(self: *WorktreePruner, name: []const u8, dir: *std.fs.Dir) !void {
-        _ = self;
         const wt_dir = dir.openDir(name, .{});
         if (wt_dir) |d| {
             defer d.close();
@@ -44,7 +50,9 @@ pub const WorktreePruner = struct {
     }
 
     pub fn isPrunable(self: *WorktreePruner, name: []const u8) !bool {
-        const git_dir = try std.fs.openDirAbsolute(self.repo_path, .{});
+        const abs_path = try self.resolveRepoPath();
+        defer if (!std.fs.path.isAbsolute(self.repo_path)) self.allocator.free(abs_path);
+        const git_dir = try std.fs.openDirAbsolute(abs_path, .{});
         defer git_dir.close();
 
         const wt_dir = try git_dir.openDir("worktrees", .{});

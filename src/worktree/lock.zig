@@ -9,8 +9,15 @@ pub const WorktreeLocker = struct {
         return .{ .allocator = allocator, .repo_path = repo_path };
     }
 
+    fn resolveRepoPath(self: *WorktreeLocker) ![]const u8 {
+        if (std.fs.path.isAbsolute(self.repo_path)) return self.repo_path;
+        return std.fs.realpathAlloc(self.allocator, self.repo_path);
+    }
+
     pub fn lock(self: *WorktreeLocker, name: []const u8, reason: ?[]const u8) !void {
-        const git_dir = try std.fs.openDirAbsolute(self.repo_path, .{});
+        const abs_path = try self.resolveRepoPath();
+        defer if (!std.fs.path.isAbsolute(self.repo_path)) self.allocator.free(abs_path);
+        const git_dir = try std.fs.openDirAbsolute(abs_path, .{});
         defer git_dir.close();
 
         const wt_dir = try git_dir.openDir("worktrees", .{});
@@ -27,7 +34,9 @@ pub const WorktreeLocker = struct {
     }
 
     pub fn unlock(self: *WorktreeLocker, name: []const u8) !void {
-        const git_dir = try std.fs.openDirAbsolute(self.repo_path, .{});
+        const abs_path = try self.resolveRepoPath();
+        defer if (!std.fs.path.isAbsolute(self.repo_path)) self.allocator.free(abs_path);
+        const git_dir = try std.fs.openDirAbsolute(abs_path, .{});
         defer git_dir.close();
 
         const wt_dir = try git_dir.openDir("worktrees", .{});
@@ -40,7 +49,9 @@ pub const WorktreeLocker = struct {
     }
 
     pub fn isLocked(self: *WorktreeLocker, name: []const u8) bool {
-        const git_dir = std.fs.openDirAbsolute(self.repo_path, .{}) catch return false;
+        const abs_path = self.resolveRepoPath() catch return false;
+        defer if (!std.fs.path.isAbsolute(self.repo_path)) self.allocator.free(abs_path);
+        const git_dir = std.fs.openDirAbsolute(abs_path, .{}) catch return false;
         defer git_dir.close();
 
         const wt_dir = git_dir.openDir("worktrees", .{}) catch return false;

@@ -9,11 +9,20 @@ pub const WorktreeBareLinker = struct {
         return .{ .allocator = allocator, .repo_path = repo_path };
     }
 
+    fn resolvePath(self: *WorktreeBareLinker, path: []const u8) ![]const u8 {
+        if (std.fs.path.isAbsolute(path)) return path;
+        return std.fs.realpathAlloc(self.allocator, path);
+    }
+
     pub fn link(self: *WorktreeBareLinker, worktree_path: []const u8) !void {
-        const git_dir = try std.fs.openDirAbsolute(self.repo_path, .{});
+        const abs_repo = try self.resolvePath(self.repo_path);
+        defer if (!std.fs.path.isAbsolute(self.repo_path)) self.allocator.free(abs_repo);
+        const git_dir = try std.fs.openDirAbsolute(abs_repo, .{});
         defer git_dir.close();
 
-        const wt_dir = try std.fs.openDirAbsolute(worktree_path, .{});
+        const abs_wt = try self.resolvePath(worktree_path);
+        defer if (!std.fs.path.isAbsolute(worktree_path)) self.allocator.free(abs_wt);
+        const wt_dir = try std.fs.openDirAbsolute(abs_wt, .{});
         defer wt_dir.close();
 
         try self.createObjectLink(&wt_dir);
@@ -21,21 +30,21 @@ pub const WorktreeBareLinker = struct {
     }
 
     fn createObjectLink(self: *WorktreeBareLinker, wt_dir: *std.fs.Dir) !void {
-        _ = self;
         const objects_path = try std.fmt.allocPrint(self.allocator, "{s}/objects", .{self.repo_path});
         defer self.allocator.free(objects_path);
         try wt_dir.writeFile(".git/objects", objects_path);
     }
 
     fn createRefLink(self: *WorktreeBareLinker, wt_dir: *std.fs.Dir) !void {
-        _ = self;
         const refs_path = try std.fmt.allocPrint(self.allocator, "{s}/refs", .{self.repo_path});
         defer self.allocator.free(refs_path);
         try wt_dir.writeFile(".git/refs", refs_path);
     }
 
     pub fn isLinked(self: *WorktreeBareLinker, worktree_path: []const u8) bool {
-        const wt_dir = std.fs.openDirAbsolute(worktree_path, .{}) catch return false;
+        const abs_wt = self.resolvePath(worktree_path) catch return false;
+        defer if (!std.fs.path.isAbsolute(worktree_path)) self.allocator.free(abs_wt);
+        const wt_dir = std.fs.openDirAbsolute(abs_wt, .{}) catch return false;
         defer wt_dir.close();
 
         wt_dir.access(".git", .{}) catch return false;

@@ -688,11 +688,11 @@ pub const Index = struct {
         self.extensions.others.deinit(self.allocator);
     }
 
-    pub fn getUnmergedEntries(self: *Index) []IndexEntry {
+    pub fn getUnmergedEntries(self: *Index) ![]IndexEntry {
         var result = std.ArrayList(IndexEntry).initCapacity(self.allocator, self.entries.items.len);
         for (self.entries.items) |entry| {
             if (entry.isStage1to3()) {
-                result.append(self.allocator, entry) catch {};
+                try result.append(self.allocator, entry);
             }
         }
         return result.toOwnedSlice(self.allocator);

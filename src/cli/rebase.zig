@@ -362,17 +362,29 @@ pub const Rebase = struct {
                 Io.Dir.cwd().createDirPath(self.io, full) catch {};
                 var entry_oid: OID = undefined;
                 @memcpy(&entry_oid.bytes, oid_bytes);
-                const sub = self.readObjectRaw(git_dir, entry_oid) catch continue;
+                const sub = self.readObjectRaw(git_dir, entry_oid) catch |err| {
+                    std.log.warn("rebase: failed to read subtree object {}: {s}", .{ entry_oid, @errorName(err) });
+                    continue;
+                };
                 defer self.allocator.free(sub);
-                const sobj = object_mod.parse(sub, self.allocator) catch continue;
+                const sobj = object_mod.parse(sub, self.allocator) catch |err| {
+                    std.log.warn("rebase: failed to parse subtree object {}: {s}", .{ entry_oid, @errorName(err) });
+                    continue;
+                };
                 defer sobj.deinit(self.allocator);
                 if (sobj.obj_type == .tree) try self.applyTreeEntriesNative(sobj.data, full, git_dir);
             } else if (mode == 0o100644 or mode == 0o100755) {
                 var entry_oid: OID = undefined;
                 @memcpy(&entry_oid.bytes, oid_bytes);
-                const blob = self.readObjectRaw(git_dir, entry_oid) catch continue;
+                const blob = self.readObjectRaw(git_dir, entry_oid) catch |err| {
+                    std.log.warn("rebase: failed to read blob object {}: {s}", .{ entry_oid, @errorName(err) });
+                    continue;
+                };
                 defer self.allocator.free(blob);
-                const bobj = object_mod.parse(blob, self.allocator) catch continue;
+                const bobj = object_mod.parse(blob, self.allocator) catch |err| {
+                    std.log.warn("rebase: failed to parse blob object {}: {s}", .{ entry_oid, @errorName(err) });
+                    continue;
+                };
                 defer bobj.deinit(self.allocator);
                 if (bobj.obj_type == .blob) Io.Dir.cwd().writeFile(self.io, .{ .sub_path = full, .data = bobj.data }) catch {};
             }

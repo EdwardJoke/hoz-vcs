@@ -117,7 +117,7 @@ pub const LooseObjectIterator = struct {
     current_dir: ?std.fs.Dir,
     
     pub fn init(allocator: std.mem.Allocator, objects_dir: []const u8) !LooseObjectIterator {
-        // Open the objects directory
+        std.debug.assert(std.fs.path.isAbsolute(objects_dir));
         const dir = try std.fs.openDirAbsolute(objects_dir, .{});
         
         var iter = dir.iterate();

@@ -264,7 +264,9 @@ pub const ResumableDownloader = struct {
         if (std.fs.path.dirname(self.output_path)) |_| {
             std.fs.renameAbsolute(self.temp_path, self.output_path) catch {
                 try std.fs.copyFileAbsolute(self.temp_path, self.output_path, .{});
-                std.fs.deleteFileAbsolute(self.temp_path) catch {};
+                std.fs.deleteFileAbsolute(self.temp_path) catch |err| {
+                    std.log.warn("failed to delete temp file {s}: {s}", .{ self.temp_path, @errorName(err) });
+                };
             };
         }
     }

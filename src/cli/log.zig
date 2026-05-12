@@ -97,19 +97,30 @@ pub const Log = struct {
         errdefer map.deinit();
 
         // Read all refs under refs/heads/
-        var refs_dir = git_dir.openDir(self.io, "refs/heads", .{}) catch return map;
+        var refs_dir = git_dir.openDir(self.io, "refs/heads", .{}) catch |err| {
+            std.log.warn("failed to open refs/heads: {s}", .{@errorName(err)});
+            return map;
+        };
         defer refs_dir.close(self.io);
 
-        self.walkRefsDir(&refs_dir, "refs/heads", &map) catch {};
+        self.walkRefsDir(&refs_dir, "refs/heads", &map) catch |err| {
+            std.log.warn("failed to walk refs/heads: {s}", .{@errorName(err)});
+        };
 
         return map;
     }
 
     fn walkRefsDir(self: *Log, dir: *const Io.Dir, prefix: []const u8, map: *std.StringHashMap([]const u8)) !void {
         var iter = dir.iterate();
-        while (iter.next(self.io) catch return) |entry| {
+        while (iter.next(self.io) catch |err| {
+            std.log.warn("failed to iterate refs in {s}: {s}", .{ prefix, @errorName(err) });
+            return;
+        }) |entry| {
             if (entry.kind == .directory) {
-                var sub_dir = dir.openDir(self.io, entry.name, .{}) catch continue;
+                var sub_dir = dir.openDir(self.io, entry.name, .{}) catch |err| {
+                    std.log.warn("failed to open ref subdir {s}/{s}: {s}", .{ prefix, entry.name, @errorName(err) });
+                    continue;
+                };
                 defer sub_dir.close(self.io);
                 const new_prefix = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ prefix, entry.name });
                 defer self.allocator.free(new_prefix);
@@ -118,7 +129,10 @@ pub const Log = struct {
                 const ref_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ prefix, entry.name });
                 defer self.allocator.free(ref_path);
 
-                const content = dir.readFileAlloc(self.io, entry.name, self.allocator, .limited(256)) catch continue;
+                const content = dir.readFileAlloc(self.io, entry.name, self.allocator, .limited(256)) catch |err| {
+                    std.log.warn("failed to read ref {s}/{s}: {s}", .{ prefix, entry.name, @errorName(err) });
+                    continue;
+                };
                 defer self.allocator.free(content);
 
                 const trimmed = std.mem.trim(u8, content, " \t\r\n");

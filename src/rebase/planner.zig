@@ -121,6 +121,7 @@ pub const RebasePlanner = struct {
             const commit = Commit.parse(self.allocator, commit_data) catch {
                 continue;
             };
+            defer commit.deinit(self.allocator);
 
             try commits.append(self.allocator, current_oid);
 

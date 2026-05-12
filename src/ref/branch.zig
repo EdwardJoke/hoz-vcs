@@ -172,7 +172,7 @@ pub const BranchManager = struct {
             try new_lines.append('\n');
         }
 
-        self.git_dir.writeFile(self.io, .{ .sub_path = config_path, .data = new_lines.items }) catch {};
+        try self.git_dir.writeFile(self.io, .{ .sub_path = config_path, .data = new_lines.items });
     }
 
     pub fn getUpstream(self: BranchManager, branch_name: []const u8) BranchError!?[]const u8 {
