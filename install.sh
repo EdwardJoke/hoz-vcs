@@ -138,9 +138,11 @@ mkdir -p "${PREFIX}"
 echo "Downloading ${BINARY_NAME}..."
 
 if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "${DOWNLOAD_URL}" -o "${PREFIX}/hoz.tmp"
+    curl -fL --progress-bar "${DOWNLOAD_URL}" -o "${PREFIX}/hoz.tmp"
+    echo ""
 elif command -v wget >/dev/null 2>&1; then
-    wget -q "${DOWNLOAD_URL}" -O "${PREFIX}/hoz.tmp"
+    wget --progress=bar:force:noscroll "${DOWNLOAD_URL}" -O "${PREFIX}/hoz.tmp"
+    echo ""
 else
     echo "Error: Neither curl nor wget found. Please install one and try again."
     exit 1
