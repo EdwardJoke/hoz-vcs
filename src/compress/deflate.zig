@@ -4,15 +4,6 @@
 //! Dynamic Huffman (btype=2) is decompressed via the canonical Huffman path.
 const std = @import("std");
 
-const DeflateError = error{
-    InputTooLarge,
-    InvalidBlockType,
-    InvalidLengthCode,
-    InvalidDistanceCode,
-    InvalidLiteral,
-    Overread,
-};
-
 pub const Compressor = struct {
     buf: std.ArrayList(u8),
     allocator: std.mem.Allocator,
