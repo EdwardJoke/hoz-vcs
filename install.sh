@@ -183,8 +183,22 @@ else
     fi
 fi
 
-chmod +x "${PREFIX}/hoz.tmp"
-mv -f "${PREFIX}/hoz.tmp" "${PREFIX}/hoz"
+tar -xzf "${PREFIX}/hoz.tmp" -C "${PREFIX}" hoz 2>/dev/null || {
+    _tmpdir=$(mktemp -d)
+    tar -xzf "${PREFIX}/hoz.tmp" -C "$_tmpdir" 2>/dev/null || {
+        echo "Error: Failed to extract ${BINARY_NAME}.tar.gz"
+        rm -rf "$_tmpdir"
+        exit 1
+    }
+    mv -f "$_tmpdir"/hoz "${PREFIX}/hoz" 2>/dev/null || mv -f "$_tmpdir"/hoz-* "${PREFIX}/hoz" 2>/dev/null || {
+        echo "Error: Could not find hoz binary in archive."
+        ls -la "$_tmpdir"/
+        rm -rf "$_tmpdir"
+        exit 1
+    }
+    rm -rf "$_tmpdir"
+}
+rm -f "${PREFIX}/hoz.tmp"
 
 INSTALLED=$("${PREFIX}/hoz" --version 2>/dev/null || echo "(version unknown)")
 
