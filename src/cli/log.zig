@@ -195,7 +195,7 @@ pub const Log = struct {
         const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
         defer self.allocator.free(author_str);
         try self.output.treeNode(.branch, 1, "Author: {s}", .{author_str});
-        const date_str = self.formatDate(commit.author.timestamp);
+        const date_str = self.formatDate(commit.author.timestamp, commit.author.timezone);
         defer self.allocator.free(date_str);
         try self.output.treeNode(.branch, 1, "Date:   {s}", .{date_str});
         try self.output.sectionDivider();
@@ -212,7 +212,7 @@ pub const Log = struct {
         const author_str = try std.fmt.allocPrint(self.allocator, "{s} <{s}>", .{ commit.author.name, commit.author.email });
         defer self.allocator.free(author_str);
         try self.output.treeNode(.branch, 1, "Author: {s}", .{author_str});
-        const date_str = self.formatDate(commit.author.timestamp);
+        const date_str = self.formatDate(commit.author.timestamp, commit.author.timezone);
         defer self.allocator.free(date_str);
         try self.output.treeNode(.branch, 1, "Date:   {s}", .{date_str});
         try self.output.sectionDivider();
@@ -317,7 +317,7 @@ pub const Log = struct {
         return OID{ .bytes = .{0} ** 20 };
     }
 
-    fn formatDate(self: *Log, timestamp: i64) []const u8 {
+    fn formatDate(self: *Log, timestamp: i64, timezone: i32) []const u8 {
         const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(timestamp) };
         const epoch_day = epoch.getEpochDay();
         const day_sec = epoch.getDaySeconds();
@@ -335,7 +335,12 @@ pub const Log = struct {
         const mins = day_sec.getMinutesIntoHour();
         const secs = day_sec.getSecondsIntoMinute();
 
-        return std.fmt.allocPrint(self.allocator, "{s} {s} {: >2} {:0>2}:{:0>2}:{:0>2} {} +0000", .{
+        const tz_sign: u8 = if (timezone >= 0) '+' else '-';
+        const tz_abs: u32 = if (timezone < 0) @intCast(-timezone) else @intCast(timezone);
+        const tz_hours = tz_abs / 60;
+        const tz_mins = tz_abs % 60;
+
+        return std.fmt.allocPrint(self.allocator, "{s} {s} {: >2} {:0>2}:{:0>2}:{:0>2} {} {c}{:0>2}{:0>2}", .{
             weekday_names[wd_index],
             month_names[@intFromEnum(month_date.month)],
             month_date.day_index + 1,
@@ -343,6 +348,9 @@ pub const Log = struct {
             mins,
             secs,
             @as(u32, @intCast(@mod(year_day.year, 10000))),
+            tz_sign,
+            tz_hours,
+            tz_mins,
         }) catch "Unknown";
     }
 
