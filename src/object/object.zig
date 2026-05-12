@@ -161,7 +161,6 @@ pub fn parseFromParts(allocator: std.mem.Allocator, header: []const u8, data: []
     allocator.free(full_content);
 
     const owned_data = try allocator.alloc(u8, data.len);
-    errdefer allocator.free(owned_data);
     @memcpy(owned_data, data);
 
     return Object{
