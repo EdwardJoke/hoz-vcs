@@ -87,6 +87,7 @@ pub const RebasePlanner = struct {
             const commit = Commit.parse(self.allocator, commit_data) catch {
                 continue;
             };
+            defer commit.deinit(self.allocator);
 
             try commits.append(self.allocator, current_oid);
 
@@ -147,6 +148,7 @@ pub const RebasePlanner = struct {
                 try filtered.append(self.allocator, oid);
                 continue;
             };
+            defer commit.deinit(self.allocator);
 
             if (commit.message.len > 0) {
                 try filtered.append(self.allocator, oid);
@@ -173,6 +175,7 @@ pub const RebasePlanner = struct {
                 i += 1;
                 continue;
             };
+            defer commit.deinit(self.allocator);
 
             const first_line = self.firstLine(commit.message);
             var target_idx: ?usize = null;
@@ -188,6 +191,7 @@ pub const RebasePlanner = struct {
                         defer self.allocator.free(candidate_data);
 
                         const candidate = Commit.parse(self.allocator, candidate_data) catch continue;
+                        defer candidate.deinit(self.allocator);
                         const candidate_subject = self.firstLine(candidate.message);
 
                         if (self.subjectsMatch(target_subject, candidate_subject)) {

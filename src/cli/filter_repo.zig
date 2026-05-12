@@ -445,10 +445,7 @@ pub const FilterBranch = struct {
             defer self.allocator.free(obj_data);
 
             const commit = CommitObj.parse(self.allocator, obj_data) catch continue;
-            defer {
-                self.allocator.free(commit.parents);
-                if (commit.message.len > 0) self.allocator.free(commit.message);
-            }
+            defer commit.deinit(self.allocator);
 
             for (commit.parents) |p| {
                 try visit_list.append(self.allocator, p);
@@ -464,10 +461,7 @@ pub const FilterBranch = struct {
             defer self.allocator.free(obj_data);
 
             const commit = CommitObj.parse(self.allocator, obj_data) catch continue;
-            defer {
-                self.allocator.free(commit.parents);
-                if (commit.message.len > 0) self.allocator.free(commit.message);
-            }
+            defer commit.deinit(self.allocator);
 
             const new_tree_oid = self.rewriteTree(&git_dir, &commit.tree, self.subdirectory.?, &tree_map) catch {
                 try self.output.infoMessage("Skipping commit {s}: tree rewrite failed", .{abbrevOid(oid)});

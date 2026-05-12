@@ -260,6 +260,7 @@ pub const BranchManager = struct {
             const commit_data = self.readCommitData(oid) catch {
                 continue;
             };
+            defer commit_data.deinit(self.allocator);
 
             for (commit_data.parents) |parent_oid| {
                 if (parent_oid.eql(upstream_oid)) {
@@ -283,6 +284,7 @@ pub const BranchManager = struct {
             const commit_data = self.readCommitData(oid) catch {
                 continue;
             };
+            defer commit_data.deinit(self.allocator);
 
             for (commit_data.parents) |parent_oid| {
                 if (parent_oid.eql(local_oid)) {

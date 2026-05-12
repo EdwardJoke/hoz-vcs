@@ -47,13 +47,7 @@ pub const Amender = struct {
         const old_object = self.odb.read(&oid_hex) catch return AmendError.ReadError;
 
         const old_commit = Commit.parse(self.allocator, old_object.data) catch return AmendError.NotACommit;
-        defer {
-            self.allocator.free(old_commit.parents);
-            self.allocator.free(old_commit.message);
-            if (old_commit.gpg_signature) |sig| {
-                self.allocator.free(sig);
-            }
-        }
+        defer old_commit.deinit(self.allocator);
 
         const new_tree = options.tree orelse old_commit.tree;
         const new_author = options.author orelse old_commit.author;
