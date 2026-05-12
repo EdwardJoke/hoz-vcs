@@ -104,6 +104,11 @@ hoz pull          # Fetch and merge remote changes
 
 ---
 
+## Daily News
+
+- `05/11`
+  1. Hoz `v0.5.3` is now available. It is the first usable release of Hoz, it has tested from init -> stage -> commit -> log output.
+  2. Hoz now has a mirror on Codeberg. If you don't like GitHub or Github is not available for you, then you can find it at [here](https://codeberg.org/EdwardJoke/hoz-vcs) in Codeberg.<br/>
 ## Project Status
 
 Hoz is in active development. Core Git functionality is implemented including:
