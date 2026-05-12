@@ -17,11 +17,12 @@ usage() {
     echo ""
     echo "Usage: ./install.sh [OPTIONS]"
     echo ""
-    echo "Install hoz from GitHub Releases."
+    echo "Install hoz from GitHub Releases (with Codeberg fallback)."
     echo ""
     echo "Options:"
     echo "  --version TAG   Install a specific version (default: latest)"
     echo "  --prefix DIR    Install to custom directory (default: ~/.hoz/bin)"
+    echo "  --codeberg      Download from Codeberg instead of GitHub"
     echo "  --uninstall     Remove installed hoz binary"
     echo "  --help          Show this help message"
     echo ""
@@ -32,6 +33,7 @@ for arg in "$@"; do
         --version)  shift; HOZ_VERSION="$1"; shift ;;
         --prefix)   shift; PREFIX="$1"; shift ;;
         --uninstall) UNINSTALL=1; shift ;;
+        --codeberg)  CODEBERG=1; shift ;;
         --help|-h)   usage; exit 0 ;;
         *) echo "Unknown option: $arg"; usage; exit 1 ;;
     esac
@@ -112,13 +114,21 @@ fi
 
 BINARY_NAME="hoz-${RELEASE_TAG}-${OS}-${ARCH}"
 
-# e.g. https://github.com/EdwardJoke/hoz-vcs/releases/download/v0.5.0/hoz-v0.5.0-linux-aarch64.tar.gz
-DOWNLOAD_URL="https://github.com/${HOZ_REPO}/releases/download/${RELEASE_TAG}/${BINARY_NAME}.tar.gz"
+GITHUB_URL="https://github.com/${HOZ_REPO}/releases/download/${RELEASE_TAG}/${BINARY_NAME}.tar.gz"
+CODEBERG_URL="https://codeberg.org/${HOZ_REPO}/releases/download/${RELEASE_TAG}/${BINARY_NAME}.tar.gz"
+
+if [ "${CODEBERG:-0}" = "1" ]; then
+    DOWNLOAD_URL="$CODEBERG_URL"
+    SOURCE="Codeberg"
+else
+    DOWNLOAD_URL="$GITHUB_URL"
+    SOURCE="GitHub"
+fi
 
 echo ""
 echo "  Version : ${RELEASE_TAG}"
 echo "  Target  : ${OS}-${ARCH}"
-echo "  URL     : ${DOWNLOAD_URL}"
+echo "  Source  : ${SOURCE}"
 echo "  Install : ${PREFIX}/hoz"
 echo ""
 
@@ -135,17 +145,42 @@ fi
 
 mkdir -p "${PREFIX}"
 
-echo "Downloading ${BINARY_NAME}..."
+download_file() {
+    _url="$1"
+    _dest="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fL --progress-bar "$_url" -o "$_dest"
+        return $?
+    elif command -v wget >/dev/null 2>&1; then
+        wget --progress=bar:force:noscroll "$_url" -O "$_dest"
+        return $?
+    else
+        echo "Error: Neither curl nor wget found. Please install one and try again."
+        exit 1
+    fi
+}
 
-if command -v curl >/dev/null 2>&1; then
-    curl -fL --progress-bar "${DOWNLOAD_URL}" -o "${PREFIX}/hoz.tmp"
-    echo ""
-elif command -v wget >/dev/null 2>&1; then
-    wget --progress=bar:force:noscroll "${DOWNLOAD_URL}" -O "${PREFIX}/hoz.tmp"
+echo "Downloading ${BINARY_NAME} from ${SOURCE}..."
+
+if download_file "${DOWNLOAD_URL}" "${PREFIX}/hoz.tmp"; then
     echo ""
 else
-    echo "Error: Neither curl nor wget found. Please install one and try again."
-    exit 1
+    if [ "${CODEBERG:-0}" = "1" ]; then
+        echo ""
+        echo "Error: Download from Codeberg failed."
+        exit 1
+    fi
+    echo ""
+    echo "GitHub download failed. Retrying from Codeberg..."
+    SOURCE="Codeberg"
+    echo "Downloading ${BINARY_NAME} from ${SOURCE}..."
+    if download_file "${CODEBERG_URL}" "${PREFIX}/hoz.tmp"; then
+        echo ""
+    else
+        echo ""
+        echo "Error: Download from both GitHub and Codeberg failed."
+        exit 1
+    fi
 fi
 
 chmod +x "${PREFIX}/hoz.tmp"
