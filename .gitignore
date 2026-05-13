@@ -3,8 +3,6 @@
 zig-out/
 
 # Develop Remains
-test
-tests/
 .idea/
 
 # Mac

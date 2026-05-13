@@ -19,7 +19,6 @@ pub const Log = struct {
     format: LogFormat,
     count: ?usize,
     follow: bool,
-    paginate: bool,
     output: Output,
 
     pub const LogFormat = enum {
@@ -36,7 +35,6 @@ pub const Log = struct {
             .format = .short,
             .count = null,
             .follow = false,
-            .paginate = false,
             .output = Output.init(writer, style, allocator),
         };
     }
@@ -190,10 +188,6 @@ pub const Log = struct {
             .medium => try self.printMedium(&commit, hex_str, decorations),
             .full => try self.printFull(&commit, hex_str, decorations),
             .oneline => try self.printOneline(&commit, hex_str, decorations),
-        }
-
-        if (self.paginate and self.format != .oneline) {
-            try self.waitForNextPage(depth);
         }
 
         for (commit.parents) |parent| {
@@ -388,13 +382,6 @@ pub const Log = struct {
         const end = std.mem.indexOf(u8, msg, "\n") orelse msg.len;
         if (end == 0) return "(empty)";
         return msg[0..end];
-    }
-
-    fn waitForNextPage(self: *Log, depth: usize) !void {
-        var stdin_buf: [1]u8 = undefined;
-        var stdin_reader = Io.File.stdin().reader(self.io, &stdin_buf);
-        try self.output.hint("(END) Press Enter for next commit [{d}]...", .{depth});
-        _ = stdin_reader.interface.takeDelimiter('\n') catch return;
     }
 };
 
