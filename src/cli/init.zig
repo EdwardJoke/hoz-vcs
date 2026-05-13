@@ -25,6 +25,23 @@ pub const Init = struct {
         const repo_path = path orelse ".";
         const cwd = Io.Dir.cwd();
 
+        const git_dir_path = try std.fs.path.join(self.allocator, &.{ repo_path, ".git" });
+        defer self.allocator.free(git_dir_path);
+
+        var dir = cwd.openDir(self.io, repo_path, .{}) catch {
+            try self.output.errorMessage("could not access path: {s}", .{repo_path});
+            return;
+        };
+        defer dir.close(self.io);
+
+        if (dir.openDir(self.io, ".git", .{})) |git_dir| {
+            git_dir.close(self.io);
+            try self.output.errorMessage("already a Hoz repository in {s}", .{repo_path});
+            return;
+        } else |err| {
+            if (err != error.FileNotFound) return err;
+        }
+
         if (self.bare) {
             try self.initBare(repo_path, cwd);
         } else {

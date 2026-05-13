@@ -358,17 +358,20 @@ pub const Rebase = struct {
             const full = if (base.len > 0) try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ base, name }) else try self.allocator.dupe(u8, name);
             defer self.allocator.free(full);
             const mode = parseModeU32Rebase(mode_str) catch continue;
+            const verbose = self.output.style.verbose;
             if (mode == 0o040000) {
                 Io.Dir.cwd().createDirPath(self.io, full) catch {};
                 var entry_oid: OID = undefined;
                 @memcpy(&entry_oid.bytes, oid_bytes);
                 const sub = self.readObjectRaw(git_dir, entry_oid) catch |err| {
                     std.log.warn("rebase: failed to read subtree object {}: {s}", .{ entry_oid, @errorName(err) });
+                    if (verbose) self.output.warningMessage("rebase: failed to read subtree object {}: {s}", .{ entry_oid, @errorName(err) }) catch {};
                     continue;
                 };
                 defer self.allocator.free(sub);
                 const sobj = object_mod.parse(sub, self.allocator) catch |err| {
                     std.log.warn("rebase: failed to parse subtree object {}: {s}", .{ entry_oid, @errorName(err) });
+                    if (verbose) self.output.warningMessage("rebase: failed to parse subtree object {}: {s}", .{ entry_oid, @errorName(err) }) catch {};
                     continue;
                 };
                 defer sobj.deinit(self.allocator);
@@ -378,11 +381,13 @@ pub const Rebase = struct {
                 @memcpy(&entry_oid.bytes, oid_bytes);
                 const blob = self.readObjectRaw(git_dir, entry_oid) catch |err| {
                     std.log.warn("rebase: failed to read blob object {}: {s}", .{ entry_oid, @errorName(err) });
+                    if (verbose) self.output.warningMessage("rebase: failed to read blob object {}: {s}", .{ entry_oid, @errorName(err) }) catch {};
                     continue;
                 };
                 defer self.allocator.free(blob);
                 const bobj = object_mod.parse(blob, self.allocator) catch |err| {
                     std.log.warn("rebase: failed to parse blob object {}: {s}", .{ entry_oid, @errorName(err) });
+                    if (verbose) self.output.warningMessage("rebase: failed to parse blob object {}: {s}", .{ entry_oid, @errorName(err) }) catch {};
                     continue;
                 };
                 defer bobj.deinit(self.allocator);

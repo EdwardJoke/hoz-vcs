@@ -136,7 +136,7 @@ pub const Add = struct {
         defer self.allocator.free(obj_path);
 
         git_dir.writeFile(self.io, .{ .sub_path = obj_path, .data = compressed }) catch |err| {
-            std.log.err("failed to write object {s}: {s}", .{ hex, @errorName(err) });
+            self.output.errorMessage("failed to write object {s}: {s}", .{ hex, @errorName(err) }) catch {};
             return error.WriteObjectFailed;
         };
 

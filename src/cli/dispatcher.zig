@@ -83,6 +83,11 @@ pub const CommandDispatcher = struct {
     }
 
     pub fn dispatch(self: *CommandDispatcher, cmd: []const u8, args: []const []const u8) !void {
+        if (isHelpFlag(args)) {
+            try self.showCommandHelp(cmd);
+            return;
+        }
+
         if (std.mem.eql(u8, cmd, "init")) {
             try self.runInit(args);
         } else if (std.mem.eql(u8, cmd, "clone")) {
@@ -878,6 +883,79 @@ pub const CommandDispatcher = struct {
     fn runRequestPull(self: *CommandDispatcher, args: []const []const u8) !void {
         var request_pull = RequestPull.init(self.allocator, self.io, self.writer, self.style);
         try request_pull.run(args);
+    }
+
+    fn isHelpFlag(args: []const []const u8) bool {
+        for (args) |arg| {
+            if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn showCommandHelp(self: *CommandDispatcher, cmd: []const u8) !void {
+        const usage = getCommandUsage(cmd) orelse {
+            try self.writer.print("error: '{s}' is not a hoz command.\n\n  → Run 'hoz' for available commands.\n", .{cmd});
+            return;
+        };
+        try self.writer.print("Usage: {s}\n", .{usage});
+    }
+
+    fn getCommandUsage(cmd: []const u8) ?[]const u8 {
+        const usages = .{
+            .{ "init", "hoz init [directory]" },
+            .{ "add", "hoz add <file> [files...]" },
+            .{ "commit", "hoz commit -m <message> [--amend]" },
+            .{ "status", "hoz status" },
+            .{ "log", "hoz log [--oneline] [-n <count>] [<ref>]" },
+            .{ "diff", "hoz diff [--staged] [file]" },
+            .{ "branch", "hoz branch (list|create|delete|out|switch) [name]" },
+            .{ "checkout", "hoz checkout <branch>" },
+            .{ "clone", "hoz clone <url> [directory]" },
+            .{ "fetch", "hoz fetch <remote> [refspec]" },
+            .{ "push", "hoz push <remote> [refspec]" },
+            .{ "pull", "hoz pull <remote> [branch]" },
+            .{ "remote", "hoz remote (add|remove|list|rename) [args...]" },
+            .{ "stash", "hoz stash (save|pop|list|drop|show)" },
+            .{ "tag", "hoz tag (create|list|delete) [name] [object]" },
+            .{ "rebase", "hoz rebase <upstream> [--continue|--abort]" },
+            .{ "merge", "hoz merge <branch>" },
+            .{ "reset", "hoz reset (--soft|--mixed|--hard) <ref>" },
+            .{ "clean", "hoz clean [-d|-f]" },
+            .{ "show", "hoz show <object>" },
+            .{ "cat-file", "hoz cat-file (-t|-s|-p) <object>" },
+            .{ "hash-object", "hoz hash-object [-w] <file>" },
+            .{ "ls-tree", "hoz ls-tree <tree-ish>" },
+            .{ "blame", "hoz blame <file>" },
+            .{ "grep", "hoz grep <pattern> [files...]" },
+            .{ "config", "hoz config (get|set|list) [key] [value]" },
+            .{ "mv", "hoz mv <source> <dest>" },
+            .{ "rm", "hoz rm <file> [files...]" },
+            .{ "cherry-pick", "hoz cherry-pick <commit>" },
+            .{ "revert", "hoz revert <commit>" },
+            .{ "describe", "hoz describe [commit-ish]" },
+            .{ "fsck", "hoz fsck" },
+            .{ "rev-parse", "hoz rev-parse <revision>" },
+            .{ "archive", "hoz archive <tree-ish> [-o file]" },
+            .{ "bisect", "hoz bisect (start|good|bad|reset)" },
+            .{ "notes", "hoz notes (add|show|remove)" },
+            .{ "reflog", "hoz reflog (show|expire)" },
+            .{ "format-patch", "hoz format-patch [range]" },
+            .{ "write-tree", "hoz write-tree" },
+            .{ "verify-tag", "hoz verify-tag <tag>" },
+            .{ "switch", "hoz switch <branch>" },
+            .{ "worktree", "hoz worktree (add|list|remove)" },
+            .{ "restore", "hoz restore [--staged] <file>" },
+            .{ "shortlog", "hoz shortlog [-n] [commits...]" },
+            .{ "bundle", "hoz bundle (create|verify)" },
+            .{ "am", "hoz am <patch-file>" },
+            .{ "ls-remote", "hoz ls-remote [url]" },
+        };
+        inline for (usages) |entry| {
+            if (std.mem.eql(u8, cmd, entry[0])) return entry[1];
+        }
+        return null;
     }
 };
 
