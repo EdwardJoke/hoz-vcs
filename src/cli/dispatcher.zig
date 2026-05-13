@@ -454,9 +454,16 @@ pub const CommandDispatcher = struct {
     }
 
     fn runLog(self: *CommandDispatcher, args: []const []const u8) !void {
-        _ = args;
         var log_cmd = Log.init(self.allocator, self.io, self.writer, self.style);
-        try log_cmd.run(null);
+        var rev: ?[]const u8 = null;
+        for (args) |arg| {
+            if (std.mem.eql(u8, arg, "-p") or std.mem.eql(u8, arg, "--paginate")) {
+                log_cmd.paginate = true;
+            } else if (!std.mem.startsWith(u8, arg, "-")) {
+                rev = arg;
+            }
+        }
+        try log_cmd.run(rev);
     }
 
     fn runDiff(self: *CommandDispatcher, args: []const []const u8) !void {
@@ -908,7 +915,7 @@ pub const CommandDispatcher = struct {
             .{ "add", "hoz add <file> [files...]" },
             .{ "commit", "hoz commit -m <message> [--amend]" },
             .{ "status", "hoz status" },
-            .{ "log", "hoz log [--oneline] [-n <count>] [<ref>]" },
+            .{ "log", "hoz log [--oneline] [-p|--paginate] [-n <count>] [<ref>]" },
             .{ "diff", "hoz diff [--staged] [file]" },
             .{ "branch", "hoz branch (list|create|delete|out|switch) [name]" },
             .{ "checkout", "hoz checkout <branch>" },
