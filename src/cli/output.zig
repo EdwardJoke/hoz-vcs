@@ -679,3 +679,66 @@ test "Status item with staging info" {
     const output = w.buffer[0..w.end];
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "~"));
 }
+
+test "Output errorMessage format" {
+    var buf: [256]u8 = undefined;
+    var writer: Io.Writer = .fixed(&buf);
+    const w = &writer;
+
+    var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
+    try out.errorMessage("something went wrong: {s}", .{"ENOENT"});
+
+    const output = w.buffer[0..w.end];
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "error:"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "ENOENT"));
+}
+
+test "Output fatalMessage format (human)" {
+    var buf: [512]u8 = undefined;
+    var writer: Io.Writer = .fixed(&buf);
+    const w = &writer;
+
+    var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
+    try out.fatalMessage("could not clone {s}: {s}", .{"repo", "connection refused"});
+
+    const output = w.buffer[0..w.end];
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "fatal:"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "repo"));
+}
+
+test "Output fatalMessage format (JSON)" {
+    var buf: [512]u8 = undefined;
+    var writer: Io.Writer = .fixed(&buf);
+    const w = &writer;
+
+    var out = Output.init(w, .{ .format = .json }, std.testing.allocator);
+    try out.fatalMessage("critical failure: {s}", .{"OOM"});
+
+    const output = w.buffer[0..w.end];
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"success\":false"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "\"code\":128"));
+}
+
+test "Output warningMessage format" {
+    var buf: [256]u8 = undefined;
+    var writer: Io.Writer = .fixed(&buf);
+    const w = &writer;
+
+    var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
+    try out.warningMessage("deprecated flag used: {s}", .{"--old-flag"});
+
+    const output = w.buffer[0..w.end];
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "warning:"));
+}
+
+test "Output error prefix is lowercase" {
+    var buf: [128]u8 = undefined;
+    var writer: Io.Writer = .fixed(&buf);
+
+    var out = Output.init(&writer, .{ .format = .human, .use_color = false }, std.testing.allocator);
+    try out.errorMessage("test error", .{});
+
+    const output = writer.buffer[0..writer.end];
+    try std.testing.expect(!std.mem.containsAtLeast(u8, output, 1, "ERROR:"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "error:"));
+}
