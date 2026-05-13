@@ -335,7 +335,8 @@ pub fn main(init: std.process.Init) !void {
     const cmd = findCommand(cmd_str);
 
     if (cmd) |c| {
-        try runCommand(c, remaining[arg_offset..], io, stdout_writer, style, arena);
+        const sub_args = if (arg_offset + 1 < remaining.len) remaining[arg_offset + 1 ..] else &.{};
+        try runCommand(c, sub_args, io, stdout_writer, style, arena);
         try stdout_writer.flush();
     } else {
         try printUnknown(stdout_writer, cmd_str, style);
