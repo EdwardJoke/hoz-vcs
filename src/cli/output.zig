@@ -380,7 +380,22 @@ pub const Output = struct {
         }
 
         try self.writeSymbol(self.writer, .cross);
-        try self.writer.writeAll(" ERROR: ");
+        try self.writer.writeAll(" error: ");
+        try self.writer.print(fmt_str, args);
+        try self.writer.writeAll("\n");
+    }
+
+    pub fn fatalMessage(self: Self, comptime fmt_str: []const u8, args: anytype) !void {
+        if (self.style.format == .json) {
+            try self.result(.{
+                .success = false,
+                .code = 128,
+                .message = try std.fmt.allocPrint(self.allocator, "fatal: " ++ fmt_str, args),
+            });
+            return;
+        }
+
+        try self.writer.writeAll("fatal: ");
         try self.writer.print(fmt_str, args);
         try self.writer.writeAll("\n");
     }

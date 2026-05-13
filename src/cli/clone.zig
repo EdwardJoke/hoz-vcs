@@ -65,7 +65,7 @@ pub const Clone = struct {
     fn cloneBare(self: *Clone, url: []const u8, path: []const u8, options: CloneOptions) !void {
         var cloner = BareCloner.init(self.allocator, self.io);
         cloner.cloneWithOptions(url, path, options) catch |err| {
-            try self.output.errorMessage("Clone failed: {}", .{err});
+            try self.output.fatalMessage("could not clone {s}: {s}", .{ url, @errorName(err) });
             return;
         };
         try self.output.successMessage("Cloned {s} as bare repository to {s}", .{ url, path });
@@ -74,7 +74,7 @@ pub const Clone = struct {
     fn cloneWorkingDir(self: *Clone, url: []const u8, path: []const u8, options: CloneOptions) !void {
         var cloner = WorkingDirCloner.init(self.allocator, self.io);
         cloner.cloneWithOptions(url, path, options) catch |err| {
-            try self.output.errorMessage("Clone failed: {}", .{err});
+            try self.output.fatalMessage("could not clone {s}: {s}", .{ url, @errorName(err) });
             return;
         };
         try self.setupRemote(url);
@@ -88,7 +88,7 @@ pub const Clone = struct {
     fn setupRemote(self: *Clone, url: []const u8) !void {
         var remote_setup = RemoteSetup.init(self.allocator, self.io);
         remote_setup.setupOrigin(url) catch |err| {
-            try self.output.errorMessage("Failed to set up remote: {}", .{err});
+            try self.output.errorMessage("could not set up remote '{s}': {s}", .{ url, @errorName(err) });
             return;
         };
     }

@@ -96,29 +96,37 @@ pub const Log = struct {
         var map = std.StringHashMap([]const u8).init(self.allocator);
         errdefer map.deinit();
 
-        // Read all refs under refs/heads/
         var refs_dir = git_dir.openDir(self.io, "refs/heads", .{}) catch |err| {
             std.log.warn("failed to open refs/heads: {s}", .{@errorName(err)});
+            if (self.output.style.verbose) {
+                self.output.warningMessage("could not open refs/heads: {s}", .{@errorName(err)}) catch {};
+            }
             return map;
         };
         defer refs_dir.close(self.io);
 
         self.walkRefsDir(&refs_dir, "refs/heads", &map) catch |err| {
             std.log.warn("failed to walk refs/heads: {s}", .{@errorName(err)});
+            if (self.output.style.verbose) {
+                self.output.warningMessage("could not walk refs/heads: {s}", .{@errorName(err)}) catch {};
+            }
         };
 
         return map;
     }
 
     fn walkRefsDir(self: *Log, dir: *const Io.Dir, prefix: []const u8, map: *std.StringHashMap([]const u8)) !void {
+        const verbose = self.output.style.verbose;
         var iter = dir.iterate();
         while (iter.next(self.io) catch |err| {
             std.log.warn("failed to iterate refs in {s}: {s}", .{ prefix, @errorName(err) });
+            if (verbose) self.output.warningMessage("could not iterate refs in {s}: {s}", .{ prefix, @errorName(err) }) catch {};
             return;
         }) |entry| {
             if (entry.kind == .directory) {
                 var sub_dir = dir.openDir(self.io, entry.name, .{}) catch |err| {
                     std.log.warn("failed to open ref subdir {s}/{s}: {s}", .{ prefix, entry.name, @errorName(err) });
+                    if (verbose) self.output.warningMessage("could not open ref subdir {s}/{s}: {s}", .{ prefix, entry.name, @errorName(err) }) catch {};
                     continue;
                 };
                 defer sub_dir.close(self.io);
@@ -131,6 +139,7 @@ pub const Log = struct {
 
                 const content = dir.readFileAlloc(self.io, entry.name, self.allocator, .limited(256)) catch |err| {
                     std.log.warn("failed to read ref {s}/{s}: {s}", .{ prefix, entry.name, @errorName(err) });
+                    if (verbose) self.output.warningMessage("could not read ref {s}/{s}: {s}", .{ prefix, entry.name, @errorName(err) }) catch {};
                     continue;
                 };
                 defer self.allocator.free(content);
@@ -332,7 +341,8 @@ pub const Log = struct {
     }
 
     fn formatDate(self: *Log, timestamp: i64, timezone: i32) []const u8 {
-        const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(timestamp) };
+        const local_timestamp = timestamp + @as(i64, timezone) * 60;
+        const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(local_timestamp) };
         const epoch_day = epoch.getEpochDay();
         const day_sec = epoch.getDaySeconds();
         const year_day = epoch_day.calculateYearDay();
@@ -356,7 +366,7 @@ pub const Log = struct {
 
         return std.fmt.allocPrint(self.allocator, "{s} {s} {: >2} {:0>2}:{:0>2}:{:0>2} {} {c}{:0>2}{:0>2}", .{
             weekday_names[wd_index],
-            month_names[@intFromEnum(month_date.month)],
+            month_names[@intFromEnum(month_date.month) - 1],
             month_date.day_index + 1,
             hours,
             mins,
