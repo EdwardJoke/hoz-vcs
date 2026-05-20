@@ -904,13 +904,13 @@ pub const CommandDispatcher = struct {
 
     fn getCommandUsage(cmd: []const u8) ?[]const u8 {
         const usages = .{
-            .{ "init", "hoz init [directory]" },
-            .{ "add", "hoz add <file> [files...]" },
-            .{ "commit", "hoz commit -m <message> [--amend]" },
-            .{ "status", "hoz status" },
-            .{ "log", "hoz log [--oneline] [-n <count>] [<ref>]" },
-            .{ "diff", "hoz diff [--staged] [file]" },
-            .{ "branch", "hoz branch (list|create|delete|out|switch) [name]" },
+            .{ "init", "hoz init [dir]             — create empty repository" },
+            .{ "add", "hoz add <file> [...]        — stage files for commit" },
+            .{ "commit", "hoz commit -m <msg>        — record staged changes" },
+            .{ "status", "hoz status [--toon]         — show working tree" },
+            .{ "log", "hoz log [-n N] [ref] [--toon] — show commit history" },
+            .{ "diff", "hoz diff [--staged] [file]    — show changes" },
+            .{ "branch", "hoz branch [list|new|del|out] [name] — manage branches" },
             .{ "checkout", "hoz checkout <branch>" },
             .{ "clone", "hoz clone <url> [directory]" },
             .{ "fetch", "hoz fetch <remote> [refspec]" },
