@@ -6,3 +6,13 @@ next_version = "v0.6.0"
 [repo.branches]
 dev = "dev"
 main = "dev"
+
+[gate]
+enabled = true
+checks = ["audit", "secrets", "test_rate", "memory_patterns", "deprecated_api", "no_use"]
+fail_on = ["secrets", "deprecated_api"]
+
+[gate.thresholds]
+test_pass_rate = 90
+max_cves_critical = 0
+max_cves_high = 0
