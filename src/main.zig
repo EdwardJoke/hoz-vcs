@@ -313,6 +313,8 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, arg, "--porcelain")) {
             style.format = .porcelain;
             style.use_color = false;
+        } else if (std.mem.eql(u8, arg, "--toon")) {
+            style.format = .toon;
         } else if (std.mem.eql(u8, arg, "--quiet") or std.mem.eql(u8, arg, "-q")) {
             style.quiet = true;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
