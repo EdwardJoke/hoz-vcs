@@ -40,6 +40,11 @@ pub const Log = struct {
     }
 
     pub fn run(self: *Log, rev: ?[]const u8) !void {
+        if (self.output.style.format == .toon) {
+            try self.runToon(rev);
+            return;
+        }
+
         const cwd_path = try std.process.currentPathAlloc(self.io, self.allocator);
         defer self.allocator.free(cwd_path);
         const git_dir_path = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{cwd_path});
@@ -89,6 +94,124 @@ pub const Log = struct {
 
         try self.output.section("Commit History");
         try self.walkCommits(&git_dir, oid, &visited, 0, &branch_map, current_branch);
+    }
+
+    fn runToon(self: *Log, rev: ?[]const u8) !void {
+        const cwd_path = try std.process.currentPathAlloc(self.io, self.allocator);
+        defer self.allocator.free(cwd_path);
+        const git_dir_path = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{cwd_path});
+        defer self.allocator.free(git_dir_path);
+
+        const git_dir = Io.Dir.openDirAbsolute(self.io, git_dir_path, .{}) catch {
+            try self.output.writer.writeAll("error: not a hoz repository\n");
+            return;
+        };
+        defer git_dir.close(self.io);
+
+        const start_oid = if (rev) |r|
+            self.resolveRef(&git_dir, r) catch null
+        else
+            head_mod.resolveHeadOid(&git_dir, self.io, self.allocator);
+
+        const oid = start_oid orelse {
+            try self.output.writer.writeAll("info: no commits found\n");
+            return;
+        };
+
+        if (oid.isZero()) {
+            try self.output.writer.writeAll("info: no commits yet\n");
+            return;
+        }
+
+        // Load branch info
+        var branch_map = try self.loadBranchMap(&git_dir);
+        defer {
+            var it = branch_map.iterator();
+            while (it.next()) |entry| {
+                self.allocator.free(entry.value_ptr.*);
+            }
+            branch_map.deinit();
+        }
+
+        const head_ref = head_mod.readHeadRef(&git_dir, self.io, self.allocator);
+        defer if (head_ref) |hr| self.allocator.free(hr);
+        const current_branch = if (head_ref) |hr|
+            if (std.mem.startsWith(u8, hr, "refs/heads/")) hr["refs/heads/".len..] else hr
+        else
+            null;
+
+        var visited = std.StringHashMap(void).init(self.allocator);
+        defer visited.deinit();
+
+        try self.output.beginDocument();
+        // Collect commits into array
+        try self.collectCommits(&git_dir, oid, &visited, 0, &branch_map, current_branch);
+
+        try self.output.flush();
+        self.output.deinit();
+    }
+
+    fn collectCommits(
+        self: *Log,
+        git_dir: *const Io.Dir,
+        oid: OID,
+        visited: *std.StringHashMap(void),
+        depth: usize,
+        branch_map: *const std.StringHashMap([]const u8),
+        current_branch: ?[]const u8,
+    ) !void {
+        if (self.count) |c| {
+            if (depth >= c) return;
+        }
+
+        const hex = oid.toHex();
+        const hex_str = (&hex)[0..];
+
+        if (visited.contains(hex_str)) return;
+        try visited.put(hex_str, {});
+
+        const obj_data = object_io.readObject(git_dir, self.io, self.allocator, oid) catch return;
+        defer self.allocator.free(obj_data);
+
+        var commit = CommitObj.parse(self.allocator, obj_data) catch return;
+        defer commit.deinit(self.allocator);
+
+        const author_str = try std.fmt.allocPrint(self.allocator, "{s}", .{commit.author.name});
+        defer self.allocator.free(author_str);
+
+        const date_str = self.formatDate(commit.author.timestamp, commit.author.timezone);
+        defer self.allocator.free(date_str);
+
+        const subject = self.firstLine(commit.message);
+
+        // Build decorations
+        const decorations = if (branch_map.get(hex_str)) |bn|
+            if (current_branch != null and std.mem.eql(u8, bn, current_branch.?))
+                try std.fmt.allocPrint(self.allocator, "HEAD -> {s}", .{bn})
+            else
+                try std.fmt.allocPrint(self.allocator, "{s}", .{bn})
+        else
+            null;
+        defer if (decorations) |d| self.allocator.free(d);
+
+        const ref_str = if (decorations) |d| d else hex_str[0..7];
+
+        // Push to current array (created in beginDocument if first commit)
+        if (depth == 0) {
+            try self.output.beginArray("commits");
+        }
+
+        const keys = [_][]const u8{ "hash", "ref", "author", "date", "message" };
+        const vals = [_][]const u8{ hex_str[0..7], ref_str, author_str, date_str, subject };
+        try self.output.addArrayObject(&keys, &vals);
+
+        for (commit.parents) |parent| {
+            try self.collectCommits(git_dir, parent, visited, depth + 1, branch_map, current_branch);
+        }
+
+        if (depth == 0) {
+            try self.output.endArray();
+        }
     }
 
     /// Load a map from OID hex -> branch name for decorating commits
