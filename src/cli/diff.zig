@@ -42,6 +42,11 @@ pub const Diff = struct {
             }
         }
 
+        if (self.output.style.format == .toon) {
+            try self.runToon();
+            return;
+        }
+
         try self.output.section("Diff");
 
         const cwd = Io.Dir.cwd();
@@ -58,6 +63,61 @@ pub const Diff = struct {
         } else {
             try self.printWorkingDiff(&ref_store);
         }
+    }
+
+    fn runToon(self: *Diff) !void {
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch {
+            try self.output.writer.writeAll("error: not in a git repository\n");
+            return;
+        };
+        defer git_dir.close(self.io);
+
+        var ref_store = RefStore.init(git_dir, self.allocator, self.io);
+
+        try self.output.beginDocument();
+
+        // Get HEAD tree
+        const head_tree_oid = self.readHeadTreeOid(&ref_store) catch null;
+        if (head_tree_oid) |ht_oid| {
+            var differ = TreeDiff.init(self.allocator);
+            defer differ.deinit();
+
+            const head_tree = self.readTreeObject(git_dir, ht_oid) catch null;
+            differ.compute(head_tree, null) catch {};
+
+            const changes = differ.getChanges();
+            if (changes.len > 0) {
+                try self.output.beginArray("files");
+                const keys = [_][]const u8{ "change", "path" };
+                for (changes) |change| {
+                    const path = change.new_path orelse change.old_path orelse "?";
+                    const ch = changeTypeStr(change.change_type);
+                    const vals = [_][]const u8{ ch, path };
+                    try self.output.addArrayObject(&keys, &vals);
+                }
+                try self.output.endArray();
+            }
+        }
+
+        if (self.staged or self.cached) {
+            try self.output.addKeyValue("mode", "staged");
+        }
+
+        try self.output.flush();
+        self.output.deinit();
+    }
+
+    fn changeTypeStr(ct: ChangeType) []const u8 {
+        return switch (ct) {
+            .added => "A",
+            .deleted => "D",
+            .modified => "M",
+            .renamed => "R",
+            .copied => "C",
+            .type_changed => "T",
+            .unmerged => "U",
+        };
     }
 
     fn readHeadTreeOid(self: *Diff, ref_store: *RefStore) !?OID {

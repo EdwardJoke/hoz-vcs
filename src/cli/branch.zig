@@ -69,6 +69,11 @@ pub const Branch = struct {
     }
 
     pub fn run(self: *Branch) !void {
+        if (self.output.style.format == .toon) {
+            try self.runToon();
+            return;
+        }
+
         const cwd = Io.Dir.cwd();
         const git_dir = cwd.openDir(self.io, ".git", .{}) catch {
             try self.output.errorMessage("Not in a git repository", .{});
@@ -86,6 +91,34 @@ pub const Branch = struct {
             .checkout => try self.runCheckout(git_dir),
             .switch_branch => try self.runSwitchBranch(git_dir),
         }
+    }
+
+    fn runToon(self: *Branch) !void {
+        const cwd = Io.Dir.cwd();
+        const git_dir = cwd.openDir(self.io, ".git", .{}) catch {
+            try self.output.writer.writeAll("error: not in a git repository\n");
+            return;
+        };
+        defer git_dir.close(self.io);
+
+        try self.output.beginDocument();
+
+        var ref_store = RefStore.init(git_dir, self.allocator, self.io);
+        var lister = BranchLister.init(self.allocator, self.io, &ref_store, self.options);
+        const branches = lister.list() catch &.{};
+        defer self.allocator.free(branches);
+
+        try self.output.beginArray("branches");
+        const keys = [_][]const u8{ "name", "current" };
+        for (branches) |branch| {
+            const current_str = if (branch.is_current) "*" else " ";
+            const vals = [_][]const u8{ branch.name, current_str };
+            try self.output.addArrayObject(&keys, &vals);
+        }
+        try self.output.endArray();
+
+        try self.output.flush();
+        self.output.deinit();
     }
 
     fn runList(self: *Branch, git_dir: Io.Dir) !void {
