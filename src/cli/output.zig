@@ -16,6 +16,7 @@ pub const OutputFormat = enum {
     human,
     json,
     porcelain,
+    toon,
 };
 
 pub const OutputStyle = struct {
@@ -122,6 +123,26 @@ pub const Output = struct {
     style: OutputStyle,
     allocator: std.mem.Allocator,
 
+    /// Staged fields for building a Value tree (toon/json output)
+    staged_fields: std.ArrayList(ValueField),
+    /// Current array being built (for beginArray/addArrayObject/endArray)
+    current_array: ?std.ArrayList(ValueBuilder),
+    current_array_key: ?[]const u8,
+
+    const ValueField = struct {
+        key: []const u8,
+        value: ValueBuilder,
+    };
+
+    const ValueBuilder = union(enum) {
+        string: []const u8,
+        number: f64,
+        boolean: bool,
+        null_value: void,
+        array: std.ArrayList(ValueBuilder),
+        object: std.ArrayList(ValueField),
+    };
+
     const Self = @This();
 
     pub fn init(writer: *Io.Writer, style: OutputStyle, allocator: std.mem.Allocator) Self {
@@ -129,7 +150,42 @@ pub const Output = struct {
             .writer = writer,
             .style = style,
             .allocator = allocator,
+            .staged_fields = std.ArrayList(ValueField).empty,
+            .current_array = null,
+            .current_array_key = null,
         };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.freeValueBuilder(.{ .object = self.staged_fields });
+        self.staged_fields.deinit(self.allocator);
+        if (self.current_array) |*arr| {
+            for (arr.items) |elem| {
+                self.freeValueBuilder(elem);
+            }
+            arr.deinit(self.allocator);
+        }
+    }
+
+    fn freeValueBuilder(self: *Self, vb: ValueBuilder) void {
+        switch (vb) {
+            .string, .number, .boolean, .null_value => {},
+            .array => |arr| {
+                var mutable = arr;
+                for (mutable.items) |elem| {
+                    self.freeValueBuilder(elem);
+                }
+                mutable.deinit(self.allocator);
+            },
+            .object => |obj| {
+                var mutable = obj;
+                for (mutable.items) |f| {
+                    self.allocator.free(f.key);
+                    self.freeValueBuilder(f.value);
+                }
+                mutable.deinit(self.allocator);
+            },
+        }
     }
 
     pub fn result(self: Self, res: Result) !void {
@@ -137,6 +193,7 @@ pub const Output = struct {
             .human => try self.resultHuman(res),
             .json => try self.resultJson(res),
             .porcelain => try self.resultPorcelain(res),
+            .toon => try self.resultJson(res),
         }
     }
 
@@ -211,7 +268,7 @@ pub const Output = struct {
                     value_text,
                 });
             },
-            .json => {
+            .json, .toon => {
                 try self.writer.print("  \"{s}\": \"{s}\",\n", .{ label_text, value_text });
             },
             .porcelain => {
@@ -309,7 +366,7 @@ pub const Output = struct {
                     path,
                 });
             },
-            .json => {
+            .json, .toon => {
                 try self.writer.print("  {{\"status\":\"{c}\",\"staged\":{s},\"path\":\"{s}\"}},\n", .{
                     @intFromEnum(icon),
                     if (staged) "true" else "false",
@@ -439,6 +496,300 @@ pub const Output = struct {
         try self.writer.writeAll(" ");
         try self.writer.print(fmt_str, args);
         try self.writer.writeAll("\n");
+    }
+
+    // ── Value-tree building (for toon/json output modes) ─────────────────
+
+    /// Begin building a structured document (root object)
+    pub fn beginDocument(self: *Self) !void {
+        _ = self;
+    }
+
+    /// Add a string key-value pair to the current context (root object)
+    pub fn addKeyValue(self: *Self, key: []const u8, value: []const u8) !void {
+        const owned_key = try self.allocator.dupe(u8, key);
+        const owned_value = try self.allocator.dupe(u8, value);
+        try self.staged_fields.append(self.allocator, .{
+            .key = owned_key,
+            .value = .{ .string = owned_value },
+        });
+    }
+
+    /// Begin a named array in the current context
+    pub fn beginArray(self: *Self, key: []const u8) !void {
+        const owned_key = try self.allocator.dupe(u8, key);
+        self.current_array = std.ArrayList(ValueBuilder).empty;
+        self.current_array_key = owned_key;
+    }
+
+    /// End the current array and add it as a field to the parent
+    pub fn endArray(self: *Self) !void {
+        if (self.current_array) |arr| {
+            const key = self.current_array_key orelse "items";
+            const owned_key = try self.allocator.dupe(u8, key);
+            try self.staged_fields.append(self.allocator, .{
+                .key = owned_key,
+                .value = .{ .array = arr },
+            });
+            self.current_array = null;
+            self.current_array_key = null;
+        }
+    }
+
+    /// Add an object row to the current array with keys and values
+    pub fn addArrayObject(self: *Self, keys: []const []const u8, values: []const []const u8) !void {
+        if (self.current_array) |*arr| {
+            var obj_fields = std.ArrayList(ValueField).empty;
+            for (keys, 0..) |k, i| {
+                const owned_k = try self.allocator.dupe(u8, k);
+                const owned_v = try self.allocator.dupe(u8, values[i]);
+                try obj_fields.append(self.allocator, .{
+                    .key = owned_k,
+                    .value = .{ .string = owned_v },
+                });
+            }
+            try arr.append(self.allocator, .{ .object = obj_fields });
+        }
+    }
+
+    /// Finalize and render the document to the target format
+    pub fn flush(self: *Self) !void {
+        const root = ValueBuilder{ .object = self.staged_fields };
+
+        switch (self.style.format) {
+            .toon => {
+                var toon_buf = std.ArrayList(u8).empty;
+                defer toon_buf.deinit(self.allocator);
+                try self.renderToonValue(&toon_buf, root, 0);
+                try self.writer.writeAll(toon_buf.items);
+            },
+            .json, .human, .porcelain => {
+                var json_buf = std.ArrayList(u8).empty;
+                defer json_buf.deinit(self.allocator);
+                try self.writeJsonValue(&json_buf, root);
+                try self.writer.writeAll(json_buf.items);
+            },
+        }
+    }
+
+    /// Get ANSI color for a row value based on its key
+    fn rowColorForKey(key: []const u8, val: []const u8) []const u8 {
+        if (std.mem.eql(u8, key, "hash")) return Color.yellow;
+        if (std.mem.eql(u8, key, "ref")) return Color.cyan;
+        if (std.mem.eql(u8, key, "status") or std.mem.eql(u8, key, "change")) return colorizeStatus(val);
+        if (std.mem.eql(u8, key, "author")) return Color.dim;
+        return "";
+    }
+
+    /// Get ANSI color code for a key name
+    fn colorForKey(key: []const u8) []const u8 {
+        if (std.mem.eql(u8, key, "branch")) return Color.green;
+        if (std.mem.eql(u8, key, "hash")) return Color.yellow;
+        if (std.mem.eql(u8, key, "author")) return Color.cyan;
+        if (std.mem.eql(u8, key, "date")) return Color.dim;
+        if (std.mem.eql(u8, key, "message")) return Color.bold;
+        if (std.mem.eql(u8, key, "ref")) return Color.cyan;
+        return "";
+    }
+
+    /// Apply terminal color to a status code string
+    fn colorizeStatus(s: []const u8) []const u8 {
+        if (s.len == 0) return "";
+        return switch (s[0]) {
+            'M', '~' => Color.yellow,
+            'A', '+' => Color.green,
+            'D', '-' => Color.red,
+            'R' => Color.cyan,
+            'C' => Color.magenta,
+            '?', '!' => Color.dim,
+            'U' => Color.red,
+            ' ' => Color.dim,
+            else => |c| if (c >= 0x80) Color.cyan else "",
+        };
+    }
+
+    /// Check if a string needs quoting in toon format
+    fn needsToonQuoting(s: []const u8) bool {
+        if (s.len == 0) return true;
+        for (s) |c| {
+            switch (c) {
+                ' ', ',', ':', '"', '\n', '\r', '\t', '#', '[', ']', '{', '}' => return true,
+                else => {},
+            }
+        }
+        // Check if it looks like a number, bool, or null
+        if (std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "false") or std.mem.eql(u8, s, "null")) return true;
+        // Only quote if purely numeric (hashes like a1b2c3d should not quote)
+        if (s.len > 0 and s[0] >= '0' and s[0] <= '9') {
+            for (s) |c| {
+                if (!(c >= '0' and c <= '9') and !(c >= 'a' and c <= 'f') and !(c >= 'A' and c <= 'F')) return true;
+            }
+            return false; // pure hex → don't quote
+        }
+        if (s.len > 0 and s[0] == '-' and s.len > 1 and s[1] >= '0' and s[1] <= '9') return true;
+        return false;
+    }
+
+    /// Write a string value for toon format (quoted if needed)
+    fn writeToonString(self: *Self, buf: *std.ArrayList(u8), s: []const u8) !void {
+        if (needsToonQuoting(s)) {
+            try buf.append(self.allocator, '"');
+            for (s) |c| {
+                switch (c) {
+                    '"' => try buf.appendSlice(self.allocator, "\\\""),
+                    '\\' => try buf.appendSlice(self.allocator, "\\\\"),
+                    '\n' => try buf.appendSlice(self.allocator, "\\n"),
+                    '\t' => try buf.appendSlice(self.allocator, "\\t"),
+                    '\r' => try buf.appendSlice(self.allocator, "\\r"),
+                    else => try buf.append(self.allocator, c),
+                }
+            }
+            try buf.append(self.allocator, '"');
+        } else {
+            try buf.appendSlice(self.allocator, s);
+        }
+    }
+
+    /// Render a ValueBuilder as toon format
+    fn renderToonValue(self: *Self, buf: *std.ArrayList(u8), value: ValueBuilder, depth: usize) !void {
+        switch (value) {
+            .null_value => try buf.appendSlice(self.allocator, "null"),
+            .boolean => |b| try buf.appendSlice(self.allocator, if (b) "true" else "false"),
+            .number => |n| {
+                var num_buf: [64]u8 = undefined;
+                const formatted = try std.fmt.bufPrint(&num_buf, "{d}", .{n});
+                try buf.appendSlice(self.allocator, formatted);
+            },
+            .string => |s| try self.writeToonString(buf, s),
+            .array => |arr| {
+                // Inline array for nested contexts: [a,b,c]
+                try buf.append(self.allocator, '[');
+                for (arr.items, 0..) |elem, i| {
+                    if (i > 0) try buf.appendSlice(self.allocator, ", ");
+                    try self.renderToonValue(buf, elem, depth);
+                }
+                try buf.append(self.allocator, ']');
+            },
+            .object => |obj| {
+                for (obj.items) |f| {
+                    try self.writeToonIndent(buf, depth);
+                    try buf.appendSlice(self.allocator, f.key);
+                    switch (f.value) {
+                        .array => |arr| {
+                            // toon array header: key[N]{cols}:
+                            try buf.append(self.allocator, '[');
+                            var len_buf: [16]u8 = undefined;
+                            const len_str = try std.fmt.bufPrint(&len_buf, "{d}", .{arr.items.len});
+                            try buf.appendSlice(self.allocator, len_str);
+                            try buf.append(self.allocator, ']');
+                            // Get column keys from first object element
+                            if (arr.items.len > 0) {
+                                if (arr.items[0] == .object) {
+                                    try buf.append(self.allocator, '{');
+                                    var first = true;
+                                    for (arr.items[0].object.items) |col| {
+                                        if (!first) try buf.append(self.allocator, ',');
+                                        first = false;
+                                        try buf.appendSlice(self.allocator, col.key);
+                                    }
+                                    try buf.append(self.allocator, '}');
+                                }
+                            }
+                            try buf.appendSlice(self.allocator, ":\n");
+                            // Rows
+                            for (arr.items) |elem| {
+                                try self.writeToonIndent(buf, depth + 1);
+                                switch (elem) {
+                                    .object => |row_obj| {
+                                        var first = true;
+                                        for (row_obj.items) |rf| {
+                                            if (!first) try buf.append(self.allocator, ',');
+                                            first = false;
+                                            const sc = if (self.style.use_color) rowColorForKey(rf.key, valueBuilderToString(rf.value)) else "";
+                                            if (sc.len > 0) try buf.appendSlice(self.allocator, sc);
+                                            try self.writeToonString(buf, valueBuilderToString(rf.value));
+                                            if (sc.len > 0) try buf.appendSlice(self.allocator, Color.reset);
+                                        }
+                                    },
+                                    else => try self.renderToonValue(buf, elem, depth + 1),
+                                }
+                                try buf.append(self.allocator, '\n');
+                            }
+                        },
+                        else => {
+                            try buf.appendSlice(self.allocator, ": ");
+                            const ccode = if (self.style.use_color) colorForKey(f.key) else "";
+                            if (ccode.len > 0) try buf.appendSlice(self.allocator, ccode);
+                            try self.renderToonValue(buf, f.value, depth + 1);
+                            if (ccode.len > 0) try buf.appendSlice(self.allocator, Color.reset);
+                            try buf.append(self.allocator, '\n');
+                        },
+                    }
+                }
+            },
+        }
+    }
+
+    fn valueBuilderToString(vb: ValueBuilder) []const u8 {
+        return switch (vb) {
+            .string => |s| s,
+            .number => "?",
+            .boolean => |b| if (b) "true" else "false",
+            .null_value => "null",
+            else => "?",
+        };
+    }
+
+    fn writeToonIndent(self: *Self, buf: *std.ArrayList(u8), depth: usize) !void {
+        var i: usize = 0;
+        while (i < depth) : (i += 1) {
+            try buf.appendSlice(self.allocator, "  ");
+        }
+    }
+
+    fn writeJsonValue(self: *Self, buf: *std.ArrayList(u8), value: ValueBuilder) !void {
+        switch (value) {
+            .null_value => try buf.appendSlice(self.allocator, "null"),
+            .boolean => |b| try buf.appendSlice(self.allocator, if (b) "true" else "false"),
+            .number => |n| {
+                var num_buf: [64]u8 = undefined;
+                const formatted = try std.fmt.bufPrint(&num_buf, "{d}", .{n});
+                try buf.appendSlice(self.allocator, formatted);
+            },
+            .string => |s| {
+                try buf.append(self.allocator, '"');
+                for (s) |c| {
+                    switch (c) {
+                        '"' => try buf.appendSlice(self.allocator, "\\\""),
+                        '\\' => try buf.appendSlice(self.allocator, "\\\\"),
+                        '\n' => try buf.appendSlice(self.allocator, "\\n"),
+                        '\r' => try buf.appendSlice(self.allocator, "\\r"),
+                        '\t' => try buf.appendSlice(self.allocator, "\\t"),
+                        else => try buf.append(self.allocator, c),
+                    }
+                }
+                try buf.append(self.allocator, '"');
+            },
+            .array => |arr| {
+                try buf.append(self.allocator, '[');
+                for (arr.items, 0..) |elem, i| {
+                    if (i > 0) try buf.append(self.allocator, ',');
+                    try self.writeJsonValue(buf, elem);
+                }
+                try buf.append(self.allocator, ']');
+            },
+            .object => |obj| {
+                try buf.append(self.allocator, '{');
+                for (obj.items, 0..) |f, i| {
+                    if (i > 0) try buf.append(self.allocator, ',');
+                    try buf.append(self.allocator, '"');
+                    try buf.appendSlice(self.allocator, f.key);
+                    try buf.appendSlice(self.allocator, "\":");
+                    try self.writeJsonValue(buf, f.value);
+                }
+                try buf.append(self.allocator, '}');
+            },
+        }
     }
 
     fn writeSymbol(self: Self, writer: *Io.Writer, s: Symbol) !void {
@@ -571,6 +922,7 @@ test "Output human format" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
+    defer out.deinit();
     try out.result(.{ .success = true, .code = 0, .message = "Done" });
 
     const output = w.buffer[0..w.end];
@@ -583,6 +935,7 @@ test "Output JSON format" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .json }, std.testing.allocator);
+    defer out.deinit();
     try out.result(.{ .success = true, .code = 0, .message = "Done" });
 
     const output = w.buffer[0..w.end];
@@ -595,6 +948,7 @@ test "Output porcelain format" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .porcelain }, std.testing.allocator);
+    defer out.deinit();
     try out.result(.{ .success = true, .code = 0, .message = "Done" });
 
     const output = w.buffer[0..w.end];
@@ -607,6 +961,7 @@ test "Output quiet mode suppresses output" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .quiet = true }, std.testing.allocator);
+    defer out.deinit();
     try out.result(.{ .success = true, .code = 0, .message = "Done" });
 
     const output = w.buffer[0..w.end];
@@ -624,6 +979,7 @@ test "Tree node rendering with unicode" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
+    defer out.deinit();
     try out.treeNode(.branch, 0, "{s}", .{"src/main.zig"});
     try out.treeNode(.last, 0, "{s}", .{"src/root.zig"});
 
@@ -638,6 +994,7 @@ test "Tree node rendering with ASCII fallback" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false, .use_unicode = false }, std.testing.allocator);
+    defer out.deinit();
     try out.treeNode(.branch, 0, "{s}", .{"src/main.zig"});
     try out.treeNode(.last, 0, "{s}", .{"src/root.zig"});
 
@@ -661,6 +1018,7 @@ test "Section divider renders" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
+    defer out.deinit();
     try out.sectionDivider();
 
     const output = w.buffer[0..w.end];
@@ -673,6 +1031,7 @@ test "Status item with staging info" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
+    defer out.deinit();
     try out.statusItem(.modified, true, "src/main.zig");
     try out.statusItem(.added, false, "README.md");
 
@@ -686,6 +1045,7 @@ test "Output errorMessage format" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
+    defer out.deinit();
     try out.errorMessage("something went wrong: {s}", .{"ENOENT"});
 
     const output = w.buffer[0..w.end];
@@ -699,7 +1059,8 @@ test "Output fatalMessage format (human)" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
-    try out.fatalMessage("could not clone {s}: {s}", .{"repo", "connection refused"});
+    defer out.deinit();
+    try out.fatalMessage("could not clone {s}: {s}", .{ "repo", "connection refused" });
 
     const output = w.buffer[0..w.end];
     try std.testing.expect(std.mem.containsAtLeast(u8, output, 1, "fatal:"));
@@ -712,6 +1073,7 @@ test "Output fatalMessage format (JSON)" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .json }, std.testing.allocator);
+    defer out.deinit();
     try out.fatalMessage("critical failure: {s}", .{"OOM"});
 
     const output = w.buffer[0..w.end];
@@ -725,6 +1087,7 @@ test "Output warningMessage format" {
     const w = &writer;
 
     var out = Output.init(w, .{ .format = .human, .use_color = false }, std.testing.allocator);
+    defer out.deinit();
     try out.warningMessage("deprecated flag used: {s}", .{"--old-flag"});
 
     const output = w.buffer[0..w.end];
@@ -736,6 +1099,7 @@ test "Output error prefix is lowercase" {
     var writer: Io.Writer = .fixed(&buf);
 
     var out = Output.init(&writer, .{ .format = .human, .use_color = false }, std.testing.allocator);
+    defer out.deinit();
     try out.errorMessage("test error", .{});
 
     const output = writer.buffer[0..writer.end];
