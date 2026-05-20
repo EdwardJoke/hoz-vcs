@@ -6,6 +6,7 @@ const OutputStyle = @import("output.zig").OutputStyle;
 const StatusIcon = @import("output.zig").StatusIcon;
 const StatusScanner = @import("../workdir/scanner.zig").StatusScanner;
 const status_mod = @import("../workdir/status.zig");
+const head_mod = @import("../commit/head.zig");
 
 pub const Status = struct {
     allocator: std.mem.Allocator,
@@ -37,7 +38,9 @@ pub const Status = struct {
         scanner.loadIndex();
         const result = try scanner.scan();
 
-        if (self.porcelain) {
+        if (self.output.style.format == .toon) {
+            try self.runToon(result);
+        } else if (self.porcelain) {
             try self.runPorcelain(result);
         } else if (self.short_format) {
             try self.runShort(result);
@@ -49,6 +52,108 @@ pub const Status = struct {
             self.allocator.free(entry.path);
         }
         self.allocator.free(result.entries);
+    }
+
+    fn runToon(self: *Status, result: status_mod.StatusResult) !void {
+        try self.output.beginDocument();
+
+        // Get current branch name
+        const cwd_path = try std.process.currentPathAlloc(self.io, self.allocator);
+        defer self.allocator.free(cwd_path);
+        const git_dir_path = try std.fmt.allocPrint(self.allocator, "{s}/.git", .{cwd_path});
+        defer self.allocator.free(git_dir_path);
+
+        const git_dir = Io.Dir.openDirAbsolute(self.io, git_dir_path, .{}) catch null;
+        if (git_dir) |gd| {
+            defer gd.close(self.io);
+            const head_ref = head_mod.readHeadRef(&gd, self.io, self.allocator);
+            defer if (head_ref) |hr| self.allocator.free(hr);
+            if (head_ref) |hr| {
+                const branch = if (std.mem.startsWith(u8, hr, "refs/heads/")) hr["refs/heads/".len..] else hr;
+                try self.output.addKeyValue("branch", branch);
+            }
+        }
+
+        // Categorize entries
+        var staged_count: usize = 0;
+        var unstaged_count: usize = 0;
+        var untracked_count: usize = 0;
+
+        for (result.entries) |entry| {
+            switch (entry.status) {
+                .unmodified, .ignored, .conflicted => staged_count += 1,
+                .added, .modified, .deleted, .renamed, .copied => unstaged_count += 1,
+                .untracked => untracked_count += 1,
+            }
+        }
+
+        // Write staged array (unmodified/ignored/conflicted → includes staged changes)
+        if (staged_count > 0) {
+            try self.output.beginArray("staged");
+            const keys = [_][]const u8{ "status", "path" };
+            for (result.entries) |entry| {
+                switch (entry.status) {
+                    .unmodified, .ignored, .conflicted => {
+                        const icon = statusToIcon(entry.status);
+                        const vals = [_][]const u8{ icon.symbol(self.output.style.use_unicode), entry.path };
+                        try self.output.addArrayObject(&keys, &vals);
+                    },
+                    else => {},
+                }
+            }
+            try self.output.endArray();
+        }
+
+        // Write unstaged array
+        if (unstaged_count > 0) {
+            try self.output.beginArray("unstaged");
+            const keys = [_][]const u8{ "status", "path" };
+            for (result.entries) |entry| {
+                switch (entry.status) {
+                    .added, .modified, .deleted, .renamed, .copied => {
+                        const icon = statusToIcon(entry.status);
+                        const vals = [_][]const u8{ icon.symbol(self.output.style.use_unicode), entry.path };
+                        try self.output.addArrayObject(&keys, &vals);
+                    },
+                    else => {},
+                }
+            }
+            try self.output.endArray();
+        }
+
+        // Write untracked array
+        if (untracked_count > 0) {
+            try self.output.beginArray("untracked");
+            const keys = [_][]const u8{ "path" };
+            for (result.entries) |entry| {
+                if (entry.status == .untracked) {
+                    const vals = [_][]const u8{entry.path};
+                    try self.output.addArrayObject(&keys, &vals);
+                }
+            }
+            try self.output.endArray();
+        }
+
+        if (staged_count == 0 and unstaged_count == 0 and untracked_count == 0) {
+            try self.output.addKeyValue("status", "clean");
+        }
+
+        try self.output.flush();
+        self.output.deinit();
+    }
+
+    fn statusToIcon(status: status_mod.FileStatus) StatusIcon {
+        return switch (status) {
+            .unmodified => .unmodified,
+            .modified => .modified,
+            .added => .added,
+            .deleted => .deleted,
+            .renamed => .renamed,
+            .copied => .copied,
+            .untracked => .untracked,
+            .ignored => .ignored,
+            .conflicted => .conflicted,
+        };
     }
 
     fn runPorcelain(self: *Status, result: status_mod.StatusResult) !void {
